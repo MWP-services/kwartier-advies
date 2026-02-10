@@ -11,7 +11,6 @@ import { Upload } from '@/components/Upload';
 import {
   buildDataQualityReport,
   computeSizing,
-  getMaxObservation,
   groupPeakEvents,
   processIntervals,
   type Method
@@ -50,9 +49,6 @@ export default function HomePage() {
       efficiency
     });
     const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded);
-    const maxObservation = getMaxObservation(intervals);
-    const quality = buildDataQualityReport(mappedRows);
-    return { intervals, events, sizing, scenarios, maxObservation, quality };
     const maxObservedKw = Math.max(...intervals.map((item) => item.consumptionKw));
     const quality = buildDataQualityReport(mappedRows);
     return { intervals, events, sizing, scenarios, maxObservedKw, quality };
@@ -89,8 +85,6 @@ export default function HomePage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contractedPowerKw,
-        maxObservedKw: processed.maxObservation.maxObservedKw,
-        maxObservedAt: processed.maxObservation.maxObservedAt,
         maxObservedKw: processed.maxObservedKw,
         exceedanceCount: processed.events.length,
         compliance,
