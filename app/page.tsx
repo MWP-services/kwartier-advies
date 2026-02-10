@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Charts } from '@/components/Charts';
 import { ColumnMapper } from '@/components/ColumnMapper';
 import { ComplianceSlider } from '@/components/ComplianceSlider';
+import { DataQualityPanel } from '@/components/DataQualityPanel';
 import { KpiCards } from '@/components/KpiCards';
 import { ScenarioCharts } from '@/components/ScenarioCharts';
 import { ScenarioTable } from '@/components/ScenarioTable';
@@ -18,7 +19,10 @@ import {
   type Method
 } from '@/lib/calculations';
 import { autoDetectColumns, mapRows, parseCsv, parseXlsx, type ColumnMapping } from '@/lib/parsing';
+import { normalizeConsumptionSeries, type InterpretationMode } from '@/lib/normalization';
 import { findHighestPeakDay, simulateAllScenarios } from '@/lib/simulation';
+
+const OUTLIER_KW_THRESHOLD = 5000;
 
 export default function HomePage() {
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
@@ -31,6 +35,7 @@ export default function HomePage() {
   const [compliance, setCompliance] = useState(0.95);
   const [analyzed, setAnalyzed] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState(64);
+  const [interpretationMode, setInterpretationMode] = useState<InterpretationMode>('AUTO');
   const [error, setError] = useState<string | null>(null);
 
   const mappedRows = useMemo(() => {
@@ -38,9 +43,25 @@ export default function HomePage() {
     return mapRows(rawRows, mapping);
   }, [mapping, rawRows]);
 
+  const normalized = useMemo(() => {
+    if (mappedRows.length === 0) return null;
+    return normalizeConsumptionSeries(mappedRows, {
+      intervalMinutes: 15,
+      interpretationMode,
+      outlierKwThreshold: OUTLIER_KW_THRESHOLD,
+      allowNegativeDeltas: false
+    });
+  }, [interpretationMode, mappedRows]);
+
+  const canAnalyze =
+    !!mapping.timestamp &&
+    !!mapping.consumptionKwh &&
+    !!normalized &&
+    normalized.normalizedRows.length > 0;
+
   const processed = useMemo(() => {
-    if (!analyzed || mappedRows.length === 0) return null;
-    const intervals = processIntervals(mappedRows, contractedPowerKw);
+    if (!analyzed || !normalized || normalized.normalizedRows.length === 0) return null;
+    const intervals = processIntervals(normalized.normalizedRows, contractedPowerKw);
     const events = groupPeakEvents(intervals);
     const sizing = computeSizing({
       intervals,
@@ -56,7 +77,7 @@ export default function HomePage() {
     const topExceededIntervals = highestPeakDay
       ? selectTopExceededIntervals(intervals, highestPeakDay, 20)
       : [];
-    const quality = buildDataQualityReport(mappedRows);
+    const quality = buildDataQualityReport(normalized.normalizedRows);
     return {
       intervals,
       events,
@@ -66,9 +87,10 @@ export default function HomePage() {
       maxObservedKw,
       maxObservedTimestamp,
       topExceededIntervals,
+      normalizationDiagnostics: normalized.diagnostics,
       quality
     };
-  }, [analyzed, compliance, contractedPowerKw, efficiency, mappedRows, method, safetyFactor]);
+  }, [analyzed, compliance, contractedPowerKw, efficiency, method, normalized, safetyFactor]);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -157,6 +179,19 @@ export default function HomePage() {
           </select>
         </label>
 
+        <label className="text-sm">
+          Interpretation
+          <select
+            className="mt-1 w-full rounded border p-2"
+            value={interpretationMode}
+            onChange={(event) => setInterpretationMode(event.target.value as InterpretationMode)}
+          >
+            <option value="AUTO">Auto</option>
+            <option value="INTERVAL">Interval values</option>
+            <option value="CUMULATIVE_DELTA">Cumulative meter readings (delta)</option>
+          </select>
+        </label>
+
         <div className="grid grid-cols-2 gap-2">
           <label className="text-sm">
             Safety factor
@@ -187,7 +222,7 @@ export default function HomePage() {
         <button
           className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
           onClick={() => setAnalyzed(true)}
-          disabled={!mapping.timestamp || !mapping.consumptionKwh || mappedRows.length === 0}
+          disabled={!canAnalyze}
         >
           Analyze
         </button>
@@ -195,11 +230,22 @@ export default function HomePage() {
 
       {processed && (
         <>
+          {processed.maxObservedKw > OUTLIER_KW_THRESHOLD * 2 && (
+            <p className="rounded border border-amber-300 bg-amber-50 p-3 text-amber-800">
+              Onrealistisch vermogen gedetecteerd - controleer kolomkeuze
+            </p>
+          )}
+
           <KpiCards
             maxObservedKw={processed.maxObservedKw}
             maxObservedTimestamp={processed.maxObservedTimestamp}
             exceedanceIntervals={processed.events.length}
             sizing={processed.sizing}
+          />
+
+          <DataQualityPanel
+            diagnostics={processed.normalizationDiagnostics}
+            quality={processed.quality}
           />
 
           <Charts
