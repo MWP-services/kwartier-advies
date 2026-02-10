@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  computeSizing,
-  getMaxObservation,
-  getTopExceededIntervalsForDay,
-  groupPeakEvents,
-  processIntervals
-} from '@/lib/calculations';
+import { computeSizing, groupPeakEvents, processIntervals } from '@/lib/calculations';
 
 const rows = Array.from({ length: 12 }, (_, idx) => ({
   timestamp: new Date(Date.UTC(2024, 0, 1, 0, idx * 15)).toISOString(),
@@ -19,16 +13,6 @@ describe('calculations', () => {
     expect(events).toHaveLength(2);
     expect(events[0].durationIntervals).toBe(3);
     expect(events[1].durationIntervals).toBe(3);
-  });
-
-  it('derives peakTimestamp per event with earliest tie-break', () => {
-    const tieRows = [
-      { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 150 },
-      { timestamp: '2024-01-01T00:15:00.000Z', consumptionKwh: 150 },
-      { timestamp: '2024-01-01T00:30:00.000Z', consumptionKwh: 100 }
-    ];
-    const events = groupPeakEvents(processIntervals(tieRows, 500));
-    expect(events[0].peakTimestamp).toBe('2024-01-01T00:00:00.000Z');
   });
 
   it('P95 falls back to MAX_PEAK when fewer than 20 events', () => {
@@ -77,34 +61,5 @@ describe('calculations', () => {
 
     expect(partial.kWhNeededRaw).toBeCloseTo(full.kWhNeededRaw * 0.8, 5);
     expect(partial.kWNeededRaw).toBeCloseTo(full.kWNeededRaw * 0.8, 5);
-  });
-
-  it('selects max observed timestamp with earliest tie', () => {
-    const tieRows = [
-      { timestamp: '2024-01-01T00:15:00.000Z', consumptionKwh: 200 },
-      { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 200 },
-      { timestamp: '2024-01-01T00:30:00.000Z', consumptionKwh: 100 }
-    ];
-
-    const result = getMaxObservation(processIntervals(tieRows, 500));
-    expect(result.maxObservedKw).toBe(800);
-    expect(result.maxObservedAt).toBe('2024-01-01T00:00:00.000Z');
-  });
-
-  it('selects top exceeded intervals with deterministic sorting', () => {
-    const selectionRows = [
-      { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 160 },
-      { timestamp: '2024-01-01T00:15:00.000Z', consumptionKwh: 170 },
-      { timestamp: '2024-01-01T00:30:00.000Z', consumptionKwh: 170 },
-      { timestamp: '2024-01-01T00:45:00.000Z', consumptionKwh: 150 },
-      { timestamp: '2024-01-02T00:00:00.000Z', consumptionKwh: 220 }
-    ];
-
-    const intervals = processIntervals(selectionRows, 500);
-    const top = getTopExceededIntervalsForDay(intervals, '2024-01-01', 3);
-    expect(top).toHaveLength(3);
-    expect(top[0].timestamp).toBe('2024-01-01T00:15:00.000Z');
-    expect(top[1].timestamp).toBe('2024-01-01T00:30:00.000Z');
-    expect(top[2].timestamp).toBe('2024-01-01T00:00:00.000Z');
   });
 });

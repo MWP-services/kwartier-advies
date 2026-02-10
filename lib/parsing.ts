@@ -1,7 +1,6 @@
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import type { IntervalRecord } from './calculations';
-import { parseTimestamp } from './datetime';
 
 export interface ColumnMapping {
   timestamp: string;
@@ -67,7 +66,7 @@ export function mapRows(rows: Record<string, unknown>[], mapping: ColumnMapping)
       const exportRaw = mapping.exportKwh ? row[mapping.exportKwh] : undefined;
       const pvRaw = mapping.pvKwh ? row[mapping.pvKwh] : undefined;
 
-      const timestamp = parseTimestamp(timestampRaw);
+      const timestamp = new Date(String(timestampRaw));
       const consumptionKwh = Number(consumptionRaw);
 
       if (Number.isNaN(timestamp.getTime()) || Number.isNaN(consumptionKwh)) {

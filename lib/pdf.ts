@@ -1,12 +1,10 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { DataQualityReport, PeakEvent, SizingResult } from './calculations';
 import type { ScenarioResult } from './simulation';
-import { formatTimestamp } from './datetime';
 
 export interface PdfPayload {
   contractedPowerKw: number;
   maxObservedKw: number;
-  maxObservedAt?: string | null;
   exceedanceCount: number;
   compliance: number;
   method: string;
@@ -29,7 +27,7 @@ export async function generateReportPdf(payload: PdfPayload): Promise<Uint8Array
     'Peak Shaving Report (MVP)',
     '',
     `Contracted power: ${payload.contractedPowerKw.toFixed(2)} kW`,
-    `Max observed power: ${payload.maxObservedKw.toFixed(2)} kW${payload.maxObservedAt ? ` (op ${formatTimestamp(payload.maxObservedAt)})` : ''}`,
+    `Max observed power: ${payload.maxObservedKw.toFixed(2)} kW`,
     `Exceedance intervals: ${payload.exceedanceCount}`,
     `Compliance target: ${(payload.compliance * 100).toFixed(0)}%`,
     `Recommended product: ${payload.sizing.recommendedProduct.label}`,
@@ -42,10 +40,12 @@ export async function generateReportPdf(payload: PdfPayload): Promise<Uint8Array
     `Duplicates: ${payload.quality.duplicateCount}`,
     `Non-15-min transitions: ${payload.quality.non15MinIntervals}`,
     '',
-    'Top 10 events (peak timestamp / duration / max excess / total excess)',
+    'Top 10 events (start / end / duration / max excess / total excess)',
     ...payload.topEvents.slice(0, 10).map(
       (event) =>
-        `${formatTimestamp(event.peakTimestamp)}, ${event.durationIntervals}x15m, ${event.maxExcessKw.toFixed(2)} kW, ${event.totalExcessKwh.toFixed(2)} kWh`
+        `${event.start} -> ${event.end}, ${event.durationIntervals}x15m, ${event.maxExcessKw.toFixed(
+          2
+        )} kW, ${event.totalExcessKwh.toFixed(2)} kWh`
     )
   ];
 

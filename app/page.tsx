@@ -53,6 +53,9 @@ export default function HomePage() {
     const maxObservation = getMaxObservation(intervals);
     const quality = buildDataQualityReport(mappedRows);
     return { intervals, events, sizing, scenarios, maxObservation, quality };
+    const maxObservedKw = Math.max(...intervals.map((item) => item.consumptionKw));
+    const quality = buildDataQualityReport(mappedRows);
+    return { intervals, events, sizing, scenarios, maxObservedKw, quality };
   }, [analyzed, compliance, contractedPowerKw, efficiency, mappedRows, method, safetyFactor]);
 
   const handleFile = async (file: File) => {
@@ -88,6 +91,7 @@ export default function HomePage() {
         contractedPowerKw,
         maxObservedKw: processed.maxObservation.maxObservedKw,
         maxObservedAt: processed.maxObservation.maxObservedAt,
+        maxObservedKw: processed.maxObservedKw,
         exceedanceCount: processed.events.length,
         compliance,
         method,
@@ -181,8 +185,7 @@ export default function HomePage() {
       {processed && (
         <>
           <KpiCards
-            maxObservedKw={processed.maxObservation.maxObservedKw}
-            maxObservedAt={processed.maxObservation.maxObservedAt}
+            maxObservedKw={processed.maxObservedKw}
             exceedanceIntervals={processed.events.length}
             sizing={processed.sizing}
           />

@@ -16,22 +16,10 @@ export interface ProcessedInterval extends IntervalRecord {
 export interface PeakEvent {
   start: string;
   end: string;
-  peakTimestamp: string;
   durationIntervals: number;
   maxExcessKw: number;
   totalExcessKwh: number;
   intervalIndexes: number[];
-}
-
-export interface ExceededInterval {
-  timestamp: string;
-  consumptionKw: number;
-  excessKw: number;
-}
-
-export interface MaxObservation {
-  maxObservedKw: number;
-  maxObservedAt: string | null;
 }
 
 export interface DataQualityReport {
@@ -92,7 +80,6 @@ export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
         current = {
           start: interval.timestamp,
           end: interval.timestamp,
-          peakTimestamp: interval.timestamp,
           durationIntervals: 0,
           maxExcessKw: 0,
           totalExcessKwh: 0,
@@ -101,12 +88,7 @@ export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
       }
       current.end = interval.timestamp;
       current.durationIntervals += 1;
-      if (interval.excessKw > current.maxExcessKw) {
-        current.maxExcessKw = interval.excessKw;
-        current.peakTimestamp = interval.timestamp;
-      } else if (interval.excessKw === current.maxExcessKw && interval.timestamp < current.peakTimestamp) {
-        current.peakTimestamp = interval.timestamp;
-      }
+      current.maxExcessKw = Math.max(current.maxExcessKw, interval.excessKw);
       current.totalExcessKwh += interval.excessKwh;
       current.intervalIndexes.push(index);
     } else if (current) {
@@ -220,44 +202,6 @@ export function computeSizing(params: {
   };
 }
 
-
-export function getMaxObservation(intervals: ProcessedInterval[]): MaxObservation {
-  if (intervals.length === 0) {
-    return { maxObservedKw: 0, maxObservedAt: null };
-  }
-
-  let max = intervals[0];
-  for (const interval of intervals) {
-    if (interval.consumptionKw > max.consumptionKw) {
-      max = interval;
-    } else if (interval.consumptionKw === max.consumptionKw && interval.timestamp < max.timestamp) {
-      max = interval;
-    }
-  }
-
-  return { maxObservedKw: max.consumptionKw, maxObservedAt: max.timestamp };
-}
-
-export function getTopExceededIntervalsForDay(
-  intervals: ProcessedInterval[],
-  day: string | null,
-  limit = 20
-): ExceededInterval[] {
-  if (!day) return [];
-
-  return intervals
-    .filter((interval) => interval.timestamp.slice(0, 10) === day && interval.excessKw > 0)
-    .sort((a, b) => {
-      if (b.excessKw !== a.excessKw) return b.excessKw - a.excessKw;
-      return a.timestamp.localeCompare(b.timestamp);
-    })
-    .slice(0, limit)
-    .map((interval) => ({
-      timestamp: interval.timestamp,
-      consumptionKw: interval.consumptionKw,
-      excessKw: interval.excessKw
-    }));
-}
 export function buildDataQualityReport(intervals: IntervalRecord[]): DataQualityReport {
   if (intervals.length === 0) {
     return {
