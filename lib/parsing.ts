@@ -1,6 +1,7 @@
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import type { IntervalRecord } from './calculations';
+import { parseTimestamp } from './datetime';
 
 export interface ColumnMapping {
   timestamp: string;
@@ -59,27 +60,28 @@ export function autoDetectColumns(headers: string[]): ColumnMapping | null {
 }
 
 export function mapRows(rows: Record<string, unknown>[], mapping: ColumnMapping): IntervalRecord[] {
-  return rows
-    .map((row) => {
-      const timestampRaw = row[mapping.timestamp];
-      const consumptionRaw = row[mapping.consumptionKwh];
-      const exportRaw = mapping.exportKwh ? row[mapping.exportKwh] : undefined;
-      const pvRaw = mapping.pvKwh ? row[mapping.pvKwh] : undefined;
+  const mapped: IntervalRecord[] = [];
 
-      const timestamp = new Date(String(timestampRaw));
-      const consumptionKwh = Number(consumptionRaw);
+  rows.forEach((row) => {
+    const timestampRaw = row[mapping.timestamp];
+    const consumptionRaw = row[mapping.consumptionKwh];
+    const exportRaw = mapping.exportKwh ? row[mapping.exportKwh] : undefined;
+    const pvRaw = mapping.pvKwh ? row[mapping.pvKwh] : undefined;
 
-      if (Number.isNaN(timestamp.getTime()) || Number.isNaN(consumptionKwh)) {
-        return null;
-      }
+    const timestamp = parseTimestamp(timestampRaw);
+    const consumptionKwh = Number(consumptionRaw);
 
-      return {
-        timestamp: timestamp.toISOString(),
-        consumptionKwh,
-        exportKwh: exportRaw == null ? undefined : Number(exportRaw),
-        pvKwh: pvRaw == null ? undefined : Number(pvRaw)
-      } satisfies IntervalRecord;
-    })
-    .filter((row): row is IntervalRecord => row !== null)
-    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    if (Number.isNaN(timestamp.getTime()) || Number.isNaN(consumptionKwh)) {
+      return;
+    }
+
+    mapped.push({
+      timestamp: timestamp.toISOString(),
+      consumptionKwh,
+      exportKwh: exportRaw == null ? undefined : Number(exportRaw),
+      pvKwh: pvRaw == null ? undefined : Number(pvRaw)
+    });
+  });
+
+  return mapped.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 }

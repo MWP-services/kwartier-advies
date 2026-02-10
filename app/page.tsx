@@ -11,12 +11,14 @@ import { Upload } from '@/components/Upload';
 import {
   buildDataQualityReport,
   computeSizing,
+  findMaxObserved,
   groupPeakEvents,
   processIntervals,
+  selectTopExceededIntervals,
   type Method
 } from '@/lib/calculations';
 import { autoDetectColumns, mapRows, parseCsv, parseXlsx, type ColumnMapping } from '@/lib/parsing';
-import { simulateAllScenarios } from '@/lib/simulation';
+import { findHighestPeakDay, simulateAllScenarios } from '@/lib/simulation';
 
 export default function HomePage() {
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
@@ -49,9 +51,23 @@ export default function HomePage() {
       efficiency
     });
     const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded);
-    const maxObservedKw = Math.max(...intervals.map((item) => item.consumptionKw));
+    const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
+    const highestPeakDay = findHighestPeakDay(intervals);
+    const topExceededIntervals = highestPeakDay
+      ? selectTopExceededIntervals(intervals, highestPeakDay, 20)
+      : [];
     const quality = buildDataQualityReport(mappedRows);
-    return { intervals, events, sizing, scenarios, maxObservedKw, quality };
+    return {
+      intervals,
+      events,
+      sizing,
+      scenarios,
+      highestPeakDay,
+      maxObservedKw,
+      maxObservedTimestamp,
+      topExceededIntervals,
+      quality
+    };
   }, [analyzed, compliance, contractedPowerKw, efficiency, mappedRows, method, safetyFactor]);
 
   const handleFile = async (file: File) => {
@@ -86,6 +102,7 @@ export default function HomePage() {
       body: JSON.stringify({
         contractedPowerKw,
         maxObservedKw: processed.maxObservedKw,
+        maxObservedTimestamp: processed.maxObservedTimestamp,
         exceedanceCount: processed.events.length,
         compliance,
         method,
@@ -180,11 +197,18 @@ export default function HomePage() {
         <>
           <KpiCards
             maxObservedKw={processed.maxObservedKw}
+            maxObservedTimestamp={processed.maxObservedTimestamp}
             exceedanceIntervals={processed.events.length}
             sizing={processed.sizing}
           />
 
-          <Charts intervals={processed.intervals} contractKw={contractedPowerKw} topEvents={processed.events} />
+          <Charts
+            intervals={processed.intervals}
+            contractKw={contractedPowerKw}
+            topEvents={processed.events}
+            highestPeakDay={processed.highestPeakDay}
+            topExceededIntervals={processed.topExceededIntervals}
+          />
 
           <ScenarioTable
             scenarios={processed.scenarios}

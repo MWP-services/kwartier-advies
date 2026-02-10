@@ -1,10 +1,12 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { DataQualityReport, PeakEvent, SizingResult } from './calculations';
+import { formatTimestamp } from './datetime';
 import type { ScenarioResult } from './simulation';
 
 export interface PdfPayload {
   contractedPowerKw: number;
   maxObservedKw: number;
+  maxObservedTimestamp?: string | null;
   exceedanceCount: number;
   compliance: number;
   method: string;
@@ -28,6 +30,9 @@ export async function generateReportPdf(payload: PdfPayload): Promise<Uint8Array
     '',
     `Contracted power: ${payload.contractedPowerKw.toFixed(2)} kW`,
     `Max observed power: ${payload.maxObservedKw.toFixed(2)} kW`,
+    `Max observed timestamp: ${
+      payload.maxObservedTimestamp ? formatTimestamp(payload.maxObservedTimestamp) : '-'
+    }`,
     `Exceedance intervals: ${payload.exceedanceCount}`,
     `Compliance target: ${(payload.compliance * 100).toFixed(0)}%`,
     `Recommended product: ${payload.sizing.recommendedProduct.label}`,
@@ -40,10 +45,10 @@ export async function generateReportPdf(payload: PdfPayload): Promise<Uint8Array
     `Duplicates: ${payload.quality.duplicateCount}`,
     `Non-15-min transitions: ${payload.quality.non15MinIntervals}`,
     '',
-    'Top 10 events (start / end / duration / max excess / total excess)',
+    'Top 10 events (peak timestamp / duration / max excess / total excess)',
     ...payload.topEvents.slice(0, 10).map(
       (event) =>
-        `${event.start} -> ${event.end}, ${event.durationIntervals}x15m, ${event.maxExcessKw.toFixed(
+        `${formatTimestamp(event.peakTimestamp)}, ${event.durationIntervals}x15m, ${event.maxExcessKw.toFixed(
           2
         )} kW, ${event.totalExcessKwh.toFixed(2)} kWh`
     )
@@ -84,7 +89,9 @@ export async function generateReportPdf(payload: PdfPayload): Promise<Uint8Array
     page2.drawText(
       `${scenario.capacityKwh} kWh | ${scenario.exceedanceEnergyKwhBefore.toFixed(
         2
-      )} | ${scenario.exceedanceEnergyKwhAfter.toFixed(2)} | ${(scenario.achievedCompliance * 100).toFixed(1)}%`,
+      )} | ${scenario.exceedanceEnergyKwhAfter.toFixed(2)} | ${(
+        scenario.achievedComplianceDataset * 100
+      ).toFixed(1)}%`,
       { x: 40, y: y2, font, size: 10 }
     );
     y2 -= 14;

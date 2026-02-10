@@ -1,3 +1,5 @@
+import { parseTimestamp } from './datetime';
+
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 
 export interface IntervalRecord {
@@ -14,8 +16,7 @@ export interface ProcessedInterval extends IntervalRecord {
 }
 
 export interface PeakEvent {
-  start: string;
-  end: string;
+  peakTimestamp: string;
   durationIntervals: number;
   maxExcessKw: number;
   totalExcessKwh: number;
@@ -46,6 +47,12 @@ export interface BatteryProduct {
   capacityKwh: number;
 }
 
+export interface ExceededInterval {
+  timestamp: string;
+  consumption_kW: number;
+  excess_kW: number;
+}
+
 export const BATTERY_OPTIONS: BatteryProduct[] = [
   { label: 'WattsNext ESS Cabinet 64 kWh', capacityKwh: 64 },
   { label: 'WattsNext ESS Cabinet 96 kWh', capacityKwh: 96 },
@@ -59,10 +66,13 @@ export function processIntervals(
   contractedPowerKw: number
 ): ProcessedInterval[] {
   return rows.map((row) => {
+    const timestamp = parseTimestamp(row.timestamp);
+    const normalizedTimestamp = Number.isNaN(timestamp.getTime()) ? row.timestamp : timestamp.toISOString();
     const consumptionKw = row.consumptionKwh / 0.25;
     const excessKw = Math.max(0, consumptionKw - contractedPowerKw);
     return {
       ...row,
+      timestamp: normalizedTimestamp,
       consumptionKw,
       excessKw,
       excessKwh: excessKw * 0.25
@@ -78,17 +88,21 @@ export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
     if (interval.excessKw > 0) {
       if (!current) {
         current = {
-          start: interval.timestamp,
-          end: interval.timestamp,
+          peakTimestamp: interval.timestamp,
           durationIntervals: 0,
           maxExcessKw: 0,
           totalExcessKwh: 0,
           intervalIndexes: []
         };
       }
-      current.end = interval.timestamp;
       current.durationIntervals += 1;
-      current.maxExcessKw = Math.max(current.maxExcessKw, interval.excessKw);
+      if (
+        interval.excessKw > current.maxExcessKw ||
+        (interval.excessKw === current.maxExcessKw && interval.timestamp < current.peakTimestamp)
+      ) {
+        current.maxExcessKw = interval.excessKw;
+        current.peakTimestamp = interval.timestamp;
+      }
       current.totalExcessKwh += interval.excessKwh;
       current.intervalIndexes.push(index);
     } else if (current) {
@@ -249,4 +263,52 @@ export function buildDataQualityReport(intervals: IntervalRecord[]): DataQuality
     non15MinIntervals,
     warnings
   };
+}
+
+export function findMaxObserved(intervals: ProcessedInterval[]): {
+  maxObservedKw: number;
+  maxObservedTimestamp: string | null;
+} {
+  if (intervals.length === 0) {
+    return {
+      maxObservedKw: 0,
+      maxObservedTimestamp: null
+    };
+  }
+
+  let maxObservedKw = -1;
+  let maxObservedTimestamp: string | null = null;
+
+  intervals.forEach((interval) => {
+    if (
+      interval.consumptionKw > maxObservedKw ||
+      (interval.consumptionKw === maxObservedKw &&
+        maxObservedTimestamp !== null &&
+        interval.timestamp < maxObservedTimestamp)
+    ) {
+      maxObservedKw = interval.consumptionKw;
+      maxObservedTimestamp = interval.timestamp;
+    }
+  });
+
+  return {
+    maxObservedKw,
+    maxObservedTimestamp
+  };
+}
+
+export function selectTopExceededIntervals(
+  intervals: ProcessedInterval[],
+  day: string,
+  limit = 20
+): ExceededInterval[] {
+  return intervals
+    .filter((interval) => interval.timestamp.slice(0, 10) === day && interval.excessKw > 0)
+    .sort((a, b) => b.excessKw - a.excessKw || a.timestamp.localeCompare(b.timestamp))
+    .slice(0, limit)
+    .map((interval) => ({
+      timestamp: interval.timestamp,
+      consumption_kW: interval.consumptionKw,
+      excess_kW: interval.excessKw
+    }));
 }

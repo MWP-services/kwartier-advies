@@ -27,7 +27,7 @@ export function formatTimestamp(dateInput: Date | string): string {
   const date = typeof dateInput === 'string' ? parseTimestamp(dateInput) : dateInput;
   if (Number.isNaN(date.getTime())) return '-';
 
-  return new Intl.DateTimeFormat('nl-NL', {
+  const parts = new Intl.DateTimeFormat('nl-NL', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -35,5 +35,8 @@ export function formatTimestamp(dateInput: Date | string): string {
     minute: '2-digit',
     hour12: false,
     timeZone: 'Europe/Amsterdam'
-  }).format(date);
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.day}-${values.month}-${values.year} ${values.hour}:${values.minute}`;
 }

@@ -12,6 +12,8 @@ export interface ScenarioResult {
   exceedanceIntervalsAfter: number;
   exceedanceEnergyKwhBefore: number;
   exceedanceEnergyKwhAfter: number;
+  achievedComplianceDataset: number;
+  achievedComplianceDailyAverage: number;
   achievedCompliance: number;
   maxRemainingExcessKw: number;
   shavedSeries: { timestamp: string; originalKw: number; shavedKw: number }[];
@@ -30,6 +32,8 @@ export function simulateSingleScenario(
       ? sizingKwNeeded
       : Math.min(maxExcessKw, batteryCapacityKwh / 0.5));
   const initialSocRatio = config?.initialSocRatio ?? 0.5;
+  const chargeEfficiency = 0.95;
+  const contractKw = Math.max(0, ...intervals.map((interval) => interval.consumptionKw - interval.excessKw));
 
   let soc = batteryCapacityKwh * initialSocRatio;
   let exceedanceIntervalsBefore = 0;
@@ -37,22 +41,32 @@ export function simulateSingleScenario(
   let exceedanceEnergyKwhBefore = 0;
   let exceedanceEnergyKwhAfter = 0;
   let maxRemainingExcessKw = 0;
+  const dailyTotals = new Map<string, { before: number; after: number }>();
 
   const shavedSeries = intervals.map((interval) => {
+    const day = interval.timestamp.slice(0, 10);
+    const dayTotal = dailyTotals.get(day) ?? { before: 0, after: 0 };
+    dailyTotals.set(day, dayTotal);
+
+    const headroomKw = Math.max(0, contractKw - interval.consumptionKw);
+    const chargeKwh = Math.min(headroomKw, powerCapKw) * 0.25 * chargeEfficiency;
+    soc = Math.min(batteryCapacityKwh, soc + chargeKwh);
+
     if (interval.excessKw > 0) {
       exceedanceIntervalsBefore += 1;
       exceedanceEnergyKwhBefore += interval.excessKwh;
+      dayTotal.before += interval.excessKwh;
 
-      const targetShaveKw = Math.min(interval.excessKw, powerCapKw);
-      const energyNeededKwh = targetShaveKw * 0.25;
-      const energyDeliveredKwh = Math.min(energyNeededKwh, soc);
-      const shavedKw = energyDeliveredKwh / 0.25;
-      soc -= energyDeliveredKwh;
+      const dischargeNeedKwh = Math.min(interval.excessKw, powerCapKw) * 0.25;
+      const deliveredKwh = Math.min(dischargeNeedKwh, soc);
+      soc -= deliveredKwh;
+      const shavedKw = deliveredKwh / 0.25;
 
-      const remainingExcessKw = interval.excessKw - shavedKw;
+      const remainingExcessKw = interval.excessKw - deliveredKwh / 0.25;
       if (remainingExcessKw > 0) {
         exceedanceIntervalsAfter += 1;
         exceedanceEnergyKwhAfter += remainingExcessKw * 0.25;
+        dayTotal.after += remainingExcessKw * 0.25;
       }
       maxRemainingExcessKw = Math.max(maxRemainingExcessKw, remainingExcessKw);
 
@@ -70,10 +84,17 @@ export function simulateSingleScenario(
     };
   });
 
-  const achievedCompliance =
+  const achievedComplianceDataset =
     exceedanceEnergyKwhBefore === 0
       ? 1
       : 1 - exceedanceEnergyKwhAfter / exceedanceEnergyKwhBefore;
+  const dailyComplianceValues = Array.from(dailyTotals.values()).map(({ before, after }) =>
+    before === 0 ? 1 : 1 - after / before
+  );
+  const achievedComplianceDailyAverage =
+    dailyComplianceValues.length === 0
+      ? 1
+      : dailyComplianceValues.reduce((sum, value) => sum + value, 0) / dailyComplianceValues.length;
 
   return {
     optionLabel: BATTERY_OPTIONS.find((b) => b.capacityKwh === batteryCapacityKwh)?.label ?? `${batteryCapacityKwh} kWh`,
@@ -82,7 +103,9 @@ export function simulateSingleScenario(
     exceedanceIntervalsAfter,
     exceedanceEnergyKwhBefore,
     exceedanceEnergyKwhAfter,
-    achievedCompliance,
+    achievedComplianceDataset,
+    achievedComplianceDailyAverage,
+    achievedCompliance: achievedComplianceDataset,
     maxRemainingExcessKw,
     shavedSeries
   };

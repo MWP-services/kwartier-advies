@@ -16,7 +16,8 @@ export function ScenarioTable({ scenarios, recommendedCapacityKwh }: ScenarioTab
               <th className="p-2">Option</th>
               <th className="p-2">Before kWh</th>
               <th className="p-2">After kWh</th>
-              <th className="p-2">Achieved compliance</th>
+              <th className="p-2">Dataset compliance</th>
+              <th className="p-2">Daily avg compliance</th>
               <th className="p-2">Remaining max kW</th>
             </tr>
           </thead>
@@ -29,7 +30,8 @@ export function ScenarioTable({ scenarios, recommendedCapacityKwh }: ScenarioTab
                 <td className="p-2">{scenario.optionLabel}</td>
                 <td className="p-2">{scenario.exceedanceEnergyKwhBefore.toFixed(2)}</td>
                 <td className="p-2">{scenario.exceedanceEnergyKwhAfter.toFixed(2)}</td>
-                <td className="p-2">{(scenario.achievedCompliance * 100).toFixed(1)}%</td>
+                <td className="p-2">{(scenario.achievedComplianceDataset * 100).toFixed(1)}%</td>
+                <td className="p-2">{(scenario.achievedComplianceDailyAverage * 100).toFixed(1)}%</td>
                 <td className="p-2">{scenario.maxRemainingExcessKw.toFixed(2)}</td>
               </tr>
             ))}
