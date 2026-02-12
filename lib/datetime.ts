@@ -48,6 +48,23 @@ export function parseTimestamp(input: unknown): Date {
   return new Date(asString);
 }
 
+export function getLocalDayIso(
+  dateInput: Date | string,
+  timeZone = 'Europe/Amsterdam'
+): string {
+  const date = typeof dateInput === 'string' ? parseTimestamp(dateInput) : dateInput;
+  if (Number.isNaN(date.getTime())) return '';
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
 
 export function formatTimestamp(dateInput: Date | string): string {
   const date = typeof dateInput === 'string' ? parseTimestamp(dateInput) : dateInput;

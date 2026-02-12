@@ -13,7 +13,7 @@ import {
   YAxis
 } from 'recharts';
 import { buildDayProfile, type ExceededInterval, type PeakEvent, type ProcessedInterval } from '@/lib/calculations';
-import { formatTimestamp } from '@/lib/datetime';
+import { formatTimestamp, getLocalDayIso } from '@/lib/datetime';
 
 interface ChartsProps {
   intervals: ProcessedInterval[];
@@ -24,7 +24,7 @@ interface ChartsProps {
 }
 
 export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topExceededIntervals }: ChartsProps) {
-  const selectedDay = highestPeakDay ?? intervals[0]?.timestamp.slice(0, 10) ?? null;
+  const selectedDay = highestPeakDay ?? (intervals.length ? getLocalDayIso(intervals[0].timestamp) : null);
   const markerSet = new Set(topExceededIntervals.map((interval) => interval.timestamp));
   const daySeries = selectedDay
     ? buildDayProfile(intervals, selectedDay, 15).map((point) => ({

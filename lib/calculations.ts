@@ -1,4 +1,4 @@
-import { parseTimestamp } from './datetime';
+import { getLocalDayIso, parseTimestamp } from './datetime';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 
@@ -325,22 +325,22 @@ export function buildDayProfile(
 ): DayProfilePoint[] {
   if (!dayIso || intervalMinutes <= 0) return [];
 
-  const slotsPerDay = Math.floor((24 * 60) / intervalMinutes);
-  const dayStart = parseTimestamp(`${dayIso}T00:00:00.000Z`);
-  if (Number.isNaN(dayStart.getTime())) return [];
+  const [year, month, day] = dayIso.split('-').map(Number);
+  const dayStartLocal = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (Number.isNaN(dayStartLocal.getTime())) return [];
 
+  const slotsPerDay = Math.floor((24 * 60) / intervalMinutes);
   const profile = Array.from({ length: slotsPerDay }, (_, index) => ({
-    timestamp: new Date(dayStart.getTime() + index * intervalMinutes * 60_000).toISOString(),
+    timestamp: new Date(dayStartLocal.getTime() + index * intervalMinutes * 60_000).toISOString(),
     observedKw: 0
   }));
 
   intervals.forEach((interval) => {
-    if (interval.timestamp.slice(0, 10) !== dayIso) return;
+    if (getLocalDayIso(interval.timestamp) !== dayIso) return;
 
-    const date = parseTimestamp(interval.timestamp);
-    if (Number.isNaN(date.getTime())) return;
-
-    const minuteOfDay = date.getUTCHours() * 60 + date.getUTCMinutes();
+    const dt = parseTimestamp(interval.timestamp);
+    if (Number.isNaN(dt.getTime())) return;
+    const minuteOfDay = dt.getHours() * 60 + dt.getMinutes();
     const slotIndex = Math.floor(minuteOfDay / intervalMinutes);
     if (slotIndex < 0 || slotIndex >= slotsPerDay) return;
 

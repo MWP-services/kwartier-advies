@@ -122,24 +122,34 @@ describe('calculations', () => {
 
   it('builds a full 96-point day profile and fills missing quarters with 0', () => {
     const sparseRows = [
-      { timestamp: '2024-01-03T00:15:00.000Z', consumptionKwh: 25 },
-      { timestamp: '2024-01-03T12:30:00.000Z', consumptionKwh: 50 },
-      { timestamp: '2024-01-03T23:45:00.000Z', consumptionKwh: 75 },
-      { timestamp: '2024-01-04T00:00:00.000Z', consumptionKwh: 100 }
+      { timestamp: '2024-01-03T00:15:00+01:00', consumptionKwh: 25 },
+      { timestamp: '2024-01-03T12:30:00+01:00', consumptionKwh: 50 },
+      { timestamp: '2024-01-03T23:45:00+01:00', consumptionKwh: 75 },
+      { timestamp: '2024-01-04T00:00:00+01:00', consumptionKwh: 100 }
     ];
     const intervals = processIntervals(sparseRows, 500);
     const profile = buildDayProfile(intervals, '2024-01-03');
 
     expect(profile).toHaveLength(96);
     expect(profile[0]).toEqual({
-      timestamp: '2024-01-03T00:00:00.000Z',
+      timestamp: new Date(2024, 0, 3, 0, 0, 0, 0).toISOString(),
       observedKw: 0
     });
     expect(profile[1].observedKw).toBeCloseTo(100, 5);
     expect(profile[50].observedKw).toBeCloseTo(200, 5);
     expect(profile[95]).toEqual({
-      timestamp: '2024-01-03T23:45:00.000Z',
+      timestamp: new Date(2024, 0, 3, 23, 45, 0, 0).toISOString(),
       observedKw: 300
     });
+  });
+
+  it('maps local winter midnight interval to slot 0 for Amsterdam day profile', () => {
+    const winterRows = [{ timestamp: '2024-11-20T00:00:00+01:00', consumptionKwh: 25 }];
+    const intervals = processIntervals(winterRows, 500);
+    const profile = buildDayProfile(intervals, '2024-11-20');
+
+    expect(profile).toHaveLength(96);
+    expect(profile[0].observedKw).toBe(100);
+    expect(profile.slice(1).every((point) => point.observedKw === 0)).toBe(true);
   });
 });
