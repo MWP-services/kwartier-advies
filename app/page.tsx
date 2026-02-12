@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import type { AnalysisResult, AnalysisSettings } from '@/lib/analysis';
+import { analysisSettingsEqual, defaultAnalysisSettings } from '@/lib/analysis';
 import { Charts } from '@/components/Charts';
 import { ColumnMapper } from '@/components/ColumnMapper';
 import { ComplianceSlider } from '@/components/ComplianceSlider';
@@ -15,125 +17,174 @@ import {
   findMaxObserved,
   groupPeakEvents,
   processIntervals,
-  selectTopExceededIntervals,
-  type Method
+  selectTopExceededIntervals
 } from '@/lib/calculations';
 import { autoDetectColumns, mapRows, parseCsv, parseXlsx, type ColumnMapping } from '@/lib/parsing';
-import { normalizeConsumptionSeries, type InterpretationMode } from '@/lib/normalization';
+import { normalizeConsumptionSeries } from '@/lib/normalization';
 import { findHighestPeakDay, simulateAllScenarios } from '@/lib/simulation';
 
 const OUTLIER_KW_THRESHOLD = 5000;
 
+function mappingEqual(a: ColumnMapping | null, b: ColumnMapping): boolean {
+  if (!a) return false;
+  return (
+    a.timestamp === b.timestamp &&
+    a.consumptionKwh === b.consumptionKwh &&
+    (a.exportKwh ?? '') === (b.exportKwh ?? '') &&
+    (a.pvKwh ?? '') === (b.pvKwh ?? '')
+  );
+}
+
+function runAnalysis(
+  rawRows: Record<string, unknown>[],
+  mapping: ColumnMapping,
+  settings: AnalysisSettings
+): AnalysisResult | null {
+  const mappedRows = mapRows(rawRows, mapping);
+  if (mappedRows.length === 0) return null;
+
+  const normalized = normalizeConsumptionSeries(mappedRows, {
+    intervalMinutes: 15,
+    interpretationMode: settings.interpretationMode,
+    outlierKwThreshold: OUTLIER_KW_THRESHOLD,
+    allowNegativeDeltas: false
+  });
+  if (normalized.normalizedRows.length === 0) return null;
+
+  const intervals = processIntervals(normalized.normalizedRows, settings.contractedPowerKw);
+  const events = groupPeakEvents(intervals);
+  const sizing = computeSizing({
+    intervals,
+    events,
+    method: settings.method,
+    compliance: settings.compliance,
+    safetyFactor: settings.safetyFactor,
+    efficiency: settings.efficiency
+  });
+  const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded);
+  const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
+  const highestPeakDay = findHighestPeakDay(intervals);
+  const topExceededIntervals = highestPeakDay ? selectTopExceededIntervals(intervals, highestPeakDay, 20) : [];
+  const quality = buildDataQualityReport(normalized.normalizedRows);
+
+  return {
+    intervals,
+    events,
+    sizing,
+    scenarios,
+    highestPeakDay,
+    maxObservedKw,
+    maxObservedTimestamp,
+    topExceededIntervals,
+    normalizationDiagnostics: normalized.diagnostics,
+    quality
+  };
+}
+
 export default function HomePage() {
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
-  const [mapping, setMapping] = useState<ColumnMapping>({ timestamp: '', consumptionKwh: '' });
-  const [contractedPowerKw, setContractedPowerKw] = useState(500);
-  const [method, setMethod] = useState<Method>('MAX_PEAK');
-  const [safetyFactor, setSafetyFactor] = useState(1.2);
-  const [efficiency, setEfficiency] = useState(0.9);
-  const [compliance, setCompliance] = useState(0.95);
-  const [analyzed, setAnalyzed] = useState(false);
+  const [draftMapping, setDraftMapping] = useState<ColumnMapping>({ timestamp: '', consumptionKwh: '' });
+  const [appliedMapping, setAppliedMapping] = useState<ColumnMapping | null>(null);
+  const [draftSettings, setDraftSettings] = useState<AnalysisSettings>(defaultAnalysisSettings);
+  const [appliedSettings, setAppliedSettings] = useState<AnalysisSettings | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
   const [selectedScenario, setSelectedScenario] = useState(64);
-  const [interpretationMode, setInterpretationMode] = useState<InterpretationMode>('AUTO');
   const [error, setError] = useState<string | null>(null);
 
-  const mappedRows = useMemo(() => {
-    if (!mapping.timestamp || !mapping.consumptionKwh) return [];
-    return mapRows(rawRows, mapping);
-  }, [mapping, rawRows]);
-
-  const normalized = useMemo(() => {
-    if (mappedRows.length === 0) return null;
-    return normalizeConsumptionSeries(mappedRows, {
-      intervalMinutes: 15,
-      interpretationMode,
-      outlierKwThreshold: OUTLIER_KW_THRESHOLD,
-      allowNegativeDeltas: false
-    });
-  }, [interpretationMode, mappedRows]);
+  const draftMappedRows = useMemo(() => {
+    if (!draftMapping.timestamp || !draftMapping.consumptionKwh) return [];
+    return mapRows(rawRows, draftMapping);
+  }, [draftMapping, rawRows]);
 
   const canAnalyze =
-    !!mapping.timestamp &&
-    !!mapping.consumptionKwh &&
-    !!normalized &&
-    normalized.normalizedRows.length > 0;
+    draftMappedRows.length > 0 &&
+    draftSettings.contractedPowerKw > 0 &&
+    draftSettings.efficiency > 0 &&
+    draftSettings.compliance >= 0.7 &&
+    draftSettings.compliance <= 1;
 
-  const processed = useMemo(() => {
-    if (!analyzed || !normalized || normalized.normalizedRows.length === 0) return null;
-    const intervals = processIntervals(normalized.normalizedRows, contractedPowerKw);
-    const events = groupPeakEvents(intervals);
-    const sizing = computeSizing({
-      intervals,
-      events,
-      method,
-      compliance,
-      safetyFactor,
-      efficiency
-    });
-    const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded);
-    const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
-    const highestPeakDay = findHighestPeakDay(intervals);
-    const topExceededIntervals = highestPeakDay
-      ? selectTopExceededIntervals(intervals, highestPeakDay, 20)
-      : [];
-    const quality = buildDataQualityReport(normalized.normalizedRows);
-    return {
-      intervals,
-      events,
-      sizing,
-      scenarios,
-      highestPeakDay,
-      maxObservedKw,
-      maxObservedTimestamp,
-      topExceededIntervals,
-      normalizationDiagnostics: normalized.diagnostics,
-      quality
-    };
-  }, [analyzed, compliance, contractedPowerKw, efficiency, method, normalized, safetyFactor]);
+  const hasPendingChanges =
+    !!appliedSettings &&
+    (!analysisSettingsEqual(draftSettings, appliedSettings) || !mappingEqual(appliedMapping, draftMapping));
 
   const handleFile = async (file: File) => {
     setError(null);
     try {
+      let detectedMapping: ColumnMapping | null = null;
       if (file.name.toLowerCase().endsWith('.csv')) {
         const content = await file.text();
         const result = parseCsv(content);
         setRawRows(result.rows);
         setHeaders(result.headers);
-        const detected = autoDetectColumns(result.headers);
-        if (detected) setMapping(detected);
+        detectedMapping = autoDetectColumns(result.headers);
       } else {
         const buffer = await file.arrayBuffer();
         const result = parseXlsx(buffer);
         setRawRows(result.rows);
         setHeaders(result.headers);
-        const detected = autoDetectColumns(result.headers);
-        if (detected) setMapping(detected);
+        detectedMapping = autoDetectColumns(result.headers);
       }
-      setAnalyzed(false);
+      if (detectedMapping) {
+        setDraftMapping(detectedMapping);
+      }
+      setAppliedSettings(null);
+      setAppliedMapping(null);
+      setAnalysisResult(null);
+      setAnalyzedAt(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not parse file');
     }
   };
 
+  const handleAnalyze = () => {
+    setError(null);
+    if (!draftMapping.timestamp || !draftMapping.consumptionKwh) {
+      setError('Selecteer eerst timestamp- en consumption-kolommen.');
+      return;
+    }
+    if (!canAnalyze) {
+      setError('Controleer instellingen en data voordat je analyseert.');
+      return;
+    }
+
+    const result = runAnalysis(rawRows, draftMapping, draftSettings);
+    if (!result) {
+      setError('Geen bruikbare rijen na normalisatie of filtering.');
+      return;
+    }
+
+    setAppliedSettings({ ...draftSettings });
+    setAppliedMapping({ ...draftMapping });
+    setAnalysisResult(result);
+    setAnalyzedAt(new Date().toISOString());
+  };
+
+  const resetDraft = () => {
+    if (!appliedSettings || !appliedMapping) return;
+    setDraftSettings({ ...appliedSettings });
+    setDraftMapping({ ...appliedMapping });
+  };
+
   const downloadPdf = async () => {
-    if (!processed) return;
+    if (!analysisResult || !appliedSettings) return;
     const response = await fetch('/api/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contractedPowerKw,
-        maxObservedKw: processed.maxObservedKw,
-        maxObservedTimestamp: processed.maxObservedTimestamp,
-        exceedanceCount: processed.events.length,
-        compliance,
-        method,
-        efficiency,
-        safetyFactor,
-        sizing: processed.sizing,
-        quality: processed.quality,
-        topEvents: processed.events,
-        scenarios: processed.scenarios
+        contractedPowerKw: appliedSettings.contractedPowerKw,
+        maxObservedKw: analysisResult.maxObservedKw,
+        maxObservedTimestamp: analysisResult.maxObservedTimestamp,
+        exceedanceCount: analysisResult.events.length,
+        compliance: appliedSettings.compliance,
+        method: appliedSettings.method,
+        efficiency: appliedSettings.efficiency,
+        safetyFactor: appliedSettings.safetyFactor,
+        sizing: analysisResult.sizing,
+        quality: analysisResult.quality,
+        topEvents: analysisResult.events,
+        scenarios: analysisResult.scenarios
       })
     });
 
@@ -153,7 +204,7 @@ export default function HomePage() {
 
       <Upload onFile={handleFile} />
       {error && <p className="rounded border border-red-200 bg-red-50 p-3 text-red-700">{error}</p>}
-      {headers.length > 0 && <ColumnMapper headers={headers} mapping={mapping} onChange={setMapping} />}
+      {headers.length > 0 && <ColumnMapper headers={headers} mapping={draftMapping} onChange={setDraftMapping} />}
 
       <div className="grid gap-4 rounded-lg border bg-white p-4 shadow-sm lg:grid-cols-3">
         <label className="text-sm">
@@ -161,8 +212,10 @@ export default function HomePage() {
           <input
             className="mt-1 w-full rounded border p-2"
             type="number"
-            value={contractedPowerKw}
-            onChange={(event) => setContractedPowerKw(Number(event.target.value))}
+            value={draftSettings.contractedPowerKw}
+            onChange={(event) =>
+              setDraftSettings((prev) => ({ ...prev, contractedPowerKw: Number(event.target.value) }))
+            }
           />
         </label>
 
@@ -170,8 +223,10 @@ export default function HomePage() {
           Method
           <select
             className="mt-1 w-full rounded border p-2"
-            value={method}
-            onChange={(event) => setMethod(event.target.value as Method)}
+            value={draftSettings.method}
+            onChange={(event) =>
+              setDraftSettings((prev) => ({ ...prev, method: event.target.value as AnalysisSettings['method'] }))
+            }
           >
             <option value="MAX_PEAK">MAX_PEAK</option>
             <option value="P95">P95</option>
@@ -183,8 +238,13 @@ export default function HomePage() {
           Interpretation
           <select
             className="mt-1 w-full rounded border p-2"
-            value={interpretationMode}
-            onChange={(event) => setInterpretationMode(event.target.value as InterpretationMode)}
+            value={draftSettings.interpretationMode}
+            onChange={(event) =>
+              setDraftSettings((prev) => ({
+                ...prev,
+                interpretationMode: event.target.value as AnalysisSettings['interpretationMode']
+              }))
+            }
           >
             <option value="AUTO">Auto</option>
             <option value="INTERVAL">Interval values</option>
@@ -199,8 +259,10 @@ export default function HomePage() {
               className="mt-1 w-full rounded border p-2"
               type="number"
               step="0.01"
-              value={safetyFactor}
-              onChange={(event) => setSafetyFactor(Number(event.target.value))}
+              value={draftSettings.safetyFactor}
+              onChange={(event) =>
+                setDraftSettings((prev) => ({ ...prev, safetyFactor: Number(event.target.value) }))
+              }
             />
           </label>
           <label className="text-sm">
@@ -209,84 +271,110 @@ export default function HomePage() {
               className="mt-1 w-full rounded border p-2"
               type="number"
               step="0.01"
-              value={efficiency}
-              onChange={(event) => setEfficiency(Number(event.target.value))}
+              value={draftSettings.efficiency}
+              onChange={(event) =>
+                setDraftSettings((prev) => ({ ...prev, efficiency: Number(event.target.value) }))
+              }
             />
           </label>
         </div>
 
         <div className="lg:col-span-3">
-          <ComplianceSlider compliance={compliance} onChange={setCompliance} />
+          <ComplianceSlider
+            compliance={draftSettings.compliance}
+            onChange={(value) => setDraftSettings((prev) => ({ ...prev, compliance: value }))}
+          />
         </div>
 
-        <button
-          className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
-          onClick={() => setAnalyzed(true)}
-          disabled={!canAnalyze}
-        >
-          Analyze
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            onClick={handleAnalyze}
+            disabled={!canAnalyze}
+          >
+            Analyze
+          </button>
+          <button
+            className="rounded border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:opacity-60"
+            onClick={resetDraft}
+            disabled={!hasPendingChanges}
+          >
+            Reset changes
+          </button>
+        </div>
       </div>
 
-      {processed && (
+      {hasPendingChanges && (
+        <p className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          Changes not applied. Klik op Analyze om resultaten te verversen.
+        </p>
+      )}
+
+      {analysisResult ? (
         <>
-          {processed.maxObservedKw > OUTLIER_KW_THRESHOLD * 2 && (
+          {analysisResult.maxObservedKw > OUTLIER_KW_THRESHOLD * 2 && (
             <p className="rounded border border-amber-300 bg-amber-50 p-3 text-amber-800">
               Onrealistisch vermogen gedetecteerd - controleer kolomkeuze
             </p>
           )}
 
           <KpiCards
-            maxObservedKw={processed.maxObservedKw}
-            maxObservedTimestamp={processed.maxObservedTimestamp}
-            exceedanceIntervals={processed.events.length}
-            sizing={processed.sizing}
+            maxObservedKw={analysisResult.maxObservedKw}
+            maxObservedTimestamp={analysisResult.maxObservedTimestamp}
+            exceedanceIntervals={analysisResult.events.length}
+            sizing={analysisResult.sizing}
           />
 
           <DataQualityPanel
-            diagnostics={processed.normalizationDiagnostics}
-            quality={processed.quality}
+            diagnostics={analysisResult.normalizationDiagnostics}
+            quality={analysisResult.quality}
           />
 
           <Charts
-            intervals={processed.intervals}
-            contractKw={contractedPowerKw}
-            topEvents={processed.events}
-            highestPeakDay={processed.highestPeakDay}
-            topExceededIntervals={processed.topExceededIntervals}
+            intervals={analysisResult.intervals}
+            contractKw={appliedSettings?.contractedPowerKw ?? draftSettings.contractedPowerKw}
+            topEvents={analysisResult.events}
+            highestPeakDay={analysisResult.highestPeakDay}
+            topExceededIntervals={analysisResult.topExceededIntervals}
           />
 
           <ScenarioTable
-            scenarios={processed.scenarios}
-            recommendedCapacityKwh={processed.sizing.recommendedProduct.capacityKwh}
+            scenarios={analysisResult.scenarios}
+            recommendedCapacityKwh={analysisResult.sizing.recommendedProduct.capacityKwh}
           />
 
           <ScenarioCharts
-            scenarios={processed.scenarios}
+            scenarios={analysisResult.scenarios}
             selectedScenarioCapacity={selectedScenario}
             onSelectScenario={setSelectedScenario}
           />
 
           <div className="rounded-lg border bg-white p-4">
             <h3 className="font-semibold">Recommendation</h3>
-            <p>Recommended: {processed.sizing.recommendedProduct.label}</p>
+            <p>Recommended: {analysisResult.sizing.recommendedProduct.label}</p>
             <p>
               Alternative:{' '}
-              {processed.sizing.alternativeProduct
-                ? processed.sizing.alternativeProduct.label
+              {analysisResult.sizing.alternativeProduct
+                ? analysisResult.sizing.alternativeProduct.label
                 : 'No larger product available'}
             </p>
+            {analyzedAt && <p className="mt-1 text-xs text-slate-500">Last analyzed: {analyzedAt}</p>}
             <p className="mt-2 text-xs text-slate-500">
               Sizing for peak shaving; final engineering validation required.
             </p>
             <button
-              className="mt-3 rounded bg-emerald-600 px-4 py-2 font-semibold text-white"
+              className="mt-3 rounded bg-emerald-600 px-4 py-2 font-semibold text-white disabled:opacity-60"
               onClick={downloadPdf}
+              disabled={!analysisResult}
             >
               Download PDF report
             </button>
           </div>
         </>
+      ) : (
+        <div className="rounded-lg border bg-white p-4 text-sm text-slate-600 shadow-sm">
+          Upload data and click Analyze to generate results.
+        </div>
       )}
     </main>
   );
