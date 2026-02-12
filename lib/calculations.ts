@@ -53,6 +53,11 @@ export interface ExceededInterval {
   excess_kW: number;
 }
 
+export interface DayProfilePoint {
+  timestamp: string;
+  observedKw: number;
+}
+
 export const BATTERY_OPTIONS: BatteryProduct[] = [
   { label: 'WattsNext ESS Cabinet 64 kWh', capacityKwh: 64 },
   { label: 'WattsNext ESS Cabinet 96 kWh', capacityKwh: 96 },
@@ -311,4 +316,36 @@ export function selectTopExceededIntervals(
       consumption_kW: interval.consumptionKw,
       excess_kW: interval.excessKw
     }));
+}
+
+export function buildDayProfile(
+  intervals: ProcessedInterval[],
+  dayIso: string,
+  intervalMinutes = 15
+): DayProfilePoint[] {
+  if (!dayIso || intervalMinutes <= 0) return [];
+
+  const slotsPerDay = Math.floor((24 * 60) / intervalMinutes);
+  const dayStart = parseTimestamp(`${dayIso}T00:00:00.000Z`);
+  if (Number.isNaN(dayStart.getTime())) return [];
+
+  const profile = Array.from({ length: slotsPerDay }, (_, index) => ({
+    timestamp: new Date(dayStart.getTime() + index * intervalMinutes * 60_000).toISOString(),
+    observedKw: 0
+  }));
+
+  intervals.forEach((interval) => {
+    if (interval.timestamp.slice(0, 10) !== dayIso) return;
+
+    const date = parseTimestamp(interval.timestamp);
+    if (Number.isNaN(date.getTime())) return;
+
+    const minuteOfDay = date.getUTCHours() * 60 + date.getUTCMinutes();
+    const slotIndex = Math.floor(minuteOfDay / intervalMinutes);
+    if (slotIndex < 0 || slotIndex >= slotsPerDay) return;
+
+    profile[slotIndex].observedKw = Math.max(profile[slotIndex].observedKw, interval.consumptionKw);
+  });
+
+  return profile;
 }

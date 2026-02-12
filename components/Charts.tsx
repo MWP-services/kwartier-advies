@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
-import type { ExceededInterval, PeakEvent, ProcessedInterval } from '@/lib/calculations';
+import { buildDayProfile, type ExceededInterval, type PeakEvent, type ProcessedInterval } from '@/lib/calculations';
 import { formatTimestamp } from '@/lib/datetime';
 
 interface ChartsProps {
@@ -24,11 +24,16 @@ interface ChartsProps {
 }
 
 export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topExceededIntervals }: ChartsProps) {
-  const selectedDay = highestPeakDay ?? intervals[0]?.timestamp.slice(0, 10);
+  const selectedDay = highestPeakDay ?? intervals[0]?.timestamp.slice(0, 10) ?? null;
   const markerSet = new Set(topExceededIntervals.map((interval) => interval.timestamp));
-  const daySeries = intervals
-    .filter((interval) => interval.timestamp.slice(0, 10) === selectedDay)
-    .map((i) => ({ ...i, contractKw, isTopExceeded: markerSet.has(i.timestamp) }));
+  const daySeries = selectedDay
+    ? buildDayProfile(intervals, selectedDay, 15).map((point) => ({
+        timestamp: point.timestamp,
+        consumptionKw: point.observedKw,
+        contractKw,
+        isTopExceeded: markerSet.has(point.timestamp)
+      }))
+    : [];
 
   const bins = 20;
   const maxKw = Math.max(1, ...intervals.map((item) => item.consumptionKw));
@@ -55,9 +60,13 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
           <ResponsiveContainer>
             <ComposedChart data={daySeries}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="timestamp" hide />
+              <XAxis
+                dataKey="timestamp"
+                tickFormatter={(value: string) => value.slice(11, 16)}
+                minTickGap={24}
+              />
               <YAxis />
-              <Tooltip />
+              <Tooltip labelFormatter={(value) => (typeof value === 'string' ? value.slice(11, 16) : String(value))} />
               <Bar dataKey="consumptionKw" fill="#3b82f6" />
               <Line type="monotone" dataKey="contractKw" stroke="#ef4444" dot={false} />
               {daySeries

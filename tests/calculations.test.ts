@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildDayProfile,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
@@ -117,5 +118,28 @@ describe('calculations', () => {
     expect(events).toHaveLength(1);
     expect(events[0].maxExcessKw).toBeCloseTo(220, 5);
     expect(events[0].peakTimestamp).toBe('2024-01-01T00:15:00.000Z');
+  });
+
+  it('builds a full 96-point day profile and fills missing quarters with 0', () => {
+    const sparseRows = [
+      { timestamp: '2024-01-03T00:15:00.000Z', consumptionKwh: 25 },
+      { timestamp: '2024-01-03T12:30:00.000Z', consumptionKwh: 50 },
+      { timestamp: '2024-01-03T23:45:00.000Z', consumptionKwh: 75 },
+      { timestamp: '2024-01-04T00:00:00.000Z', consumptionKwh: 100 }
+    ];
+    const intervals = processIntervals(sparseRows, 500);
+    const profile = buildDayProfile(intervals, '2024-01-03');
+
+    expect(profile).toHaveLength(96);
+    expect(profile[0]).toEqual({
+      timestamp: '2024-01-03T00:00:00.000Z',
+      observedKw: 0
+    });
+    expect(profile[1].observedKw).toBeCloseTo(100, 5);
+    expect(profile[50].observedKw).toBeCloseTo(200, 5);
+    expect(profile[95]).toEqual({
+      timestamp: '2024-01-03T23:45:00.000Z',
+      observedKw: 300
+    });
   });
 });
