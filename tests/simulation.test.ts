@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { processIntervals } from '@/lib/calculations';
-import { simulateAllScenarios, simulateSingleScenario } from '@/lib/simulation';
+import {
+  generateScenarioOptions,
+  simulateAllScenarios,
+  simulateSingleScenario
+} from '@/lib/simulation';
 
 const rows = Array.from({ length: 32 }, (_, idx) => ({
   timestamp: new Date(Date.UTC(2024, 0, 1, 0, idx * 15)).toISOString(),
@@ -17,10 +21,12 @@ describe('simulation', () => {
     expect(result.exceedanceIntervalsAfter).toBeLessThan(result.exceedanceIntervalsBefore);
   });
 
-  it('returns all predefined battery scenarios', () => {
+  it('returns a compact relevant scenario set including fixed jumps', () => {
     const intervals = processIntervals(rows, 500);
-    const scenarios = simulateAllScenarios(intervals, 200);
-    expect(scenarios).toHaveLength(5);
+    const scenarios = simulateAllScenarios(intervals, 200, 500);
+    expect(scenarios.length).toBeLessThanOrEqual(12);
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 2090)).toBeTruthy();
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 5015)).toBeTruthy();
   });
 
   it('reports dataset and daily average compliance separately', () => {
@@ -50,5 +56,23 @@ describe('simulation', () => {
     const large = simulateSingleScenario(intervals, 261, 300, 300, { initialSocRatio: 0 });
 
     expect(large.achievedComplianceDataset).toBeGreaterThanOrEqual(small.achievedComplianceDataset);
+  });
+
+  it('target=500 includes nearby modular 2x261 (522 kWh)', () => {
+    const options = generateScenarioOptions({ targetKwh: 500, maxTotalOptions: 12 });
+    expect(options.find((option) => option.label === '2x261 (522 kWh)')).toBeTruthy();
+  });
+
+  it('target=70 includes close modular options around 64/96', () => {
+    const options = generateScenarioOptions({ targetKwh: 70, maxTotalOptions: 12 });
+    const has1x96 = options.some((option) => option.label === '1x96 (96 kWh)');
+    const has2x64 = options.some((option) => option.label === '2x64 (128 kWh)');
+    expect(has1x96 || has2x64).toBe(true);
+  });
+
+  it('scenario options are deduplicated by capacity', () => {
+    const options = generateScenarioOptions({ targetKwh: 500, maxTotalOptions: 12 });
+    const uniqueCapacities = new Set(options.map((option) => option.capacityKwh));
+    expect(uniqueCapacities.size).toBe(options.length);
   });
 });

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildDayKwSeries,
   buildDayProfile,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
   processIntervals,
+  selectMinimumCostBatteryOptions,
   selectTopExceededIntervals
 } from '@/lib/calculations';
 
@@ -132,13 +134,15 @@ describe('calculations', () => {
 
     expect(profile).toHaveLength(96);
     expect(profile[0]).toEqual({
-      timestamp: new Date(2024, 0, 3, 0, 0, 0, 0).toISOString(),
+      timestampLabel: '00:00',
+      timestampIso: new Date(2024, 0, 3, 0, 0, 0, 0).toISOString(),
       observedKw: 0
     });
     expect(profile[1].observedKw).toBeCloseTo(100, 5);
     expect(profile[50].observedKw).toBeCloseTo(200, 5);
     expect(profile[95]).toEqual({
-      timestamp: new Date(2024, 0, 3, 23, 45, 0, 0).toISOString(),
+      timestampLabel: '23:45',
+      timestampIso: new Date(2024, 0, 3, 23, 45, 0, 0).toISOString(),
       observedKw: 300
     });
   });
@@ -151,5 +155,67 @@ describe('calculations', () => {
     expect(profile).toHaveLength(96);
     expect(profile[0].observedKw).toBe(100);
     expect(profile.slice(1).every((point) => point.observedKw === 0)).toBe(true);
+  });
+
+  it('maps 22:00Z to slot 0 of next Amsterdam day during DST', () => {
+    const dstRows = [{ timestamp: '2024-09-12T22:00:00.000Z', consumptionKwh: 25 }];
+    const intervals = processIntervals(dstRows, 500);
+    const profile = buildDayProfile(intervals, '2024-09-13', 15, 'Europe/Amsterdam');
+
+    expect(profile).toHaveLength(96);
+    expect(profile[0].timestampLabel).toBe('00:00');
+    expect(profile[0].observedKw).toBe(100);
+    expect(profile.slice(1).every((point) => point.observedKw === 0)).toBe(true);
+  });
+
+  it('buildDayKwSeries aligns with buildDayProfile on 96 HH:mm slots', () => {
+    const rows = [
+      { timestamp: '2024-09-12T22:00:00.000Z', consumptionKwh: 25 },
+      { timestamp: '2024-09-13T10:15:00+02:00', consumptionKwh: 30 }
+    ];
+    const intervals = processIntervals(rows, 500);
+    const dayIso = '2024-09-13';
+    const profile = buildDayProfile(intervals, dayIso, 15, 'Europe/Amsterdam');
+    const daySeries = buildDayKwSeries(
+      intervals.map((interval) => ({ timestamp: interval.timestamp, consumptionKw: interval.consumptionKw })),
+      dayIso,
+      15,
+      'Europe/Amsterdam'
+    );
+
+    expect(daySeries).toHaveLength(96);
+    expect(daySeries[0].timeLabel).toBe('00:00');
+    expect(daySeries[0].consumptionKw).toBe(profile[0].observedKw);
+    expect(daySeries[0].timeLabel).toBe(profile[0].timestampLabel);
+    expect(daySeries[41].timeLabel).toBe('10:15');
+    expect(daySeries[41].consumptionKw).toBe(profile[41].observedKw);
+  });
+
+  it('chooses 2x261 kWh for R=500 as lowest cost valid configuration', () => {
+    const result = selectMinimumCostBatteryOptions(500);
+    expect(result.recommendedProduct.label).toBe('2x 261 kWh (modulair)');
+    expect(result.recommendedProduct.capacityKwh).toBe(522);
+    expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(87991.92, 2);
+  });
+
+  it('chooses 2.09 MWh for R=2000 when cheaper than modular alternatives', () => {
+    const result = selectMinimumCostBatteryOptions(2000);
+    expect(result.recommendedProduct.label).toBe('WattsNext All-in-one Container 2.09 MWh');
+    expect(result.recommendedProduct.capacityKwh).toBe(2090);
+    expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(318658.06, 2);
+  });
+
+  it('chooses modular 261 kWh stack for R=2600 because it is cheaper than 5.015 MWh', () => {
+    const result = selectMinimumCostBatteryOptions(2600);
+    expect(result.recommendedProduct.label).toBe('10x 261 kWh (modulair)');
+    expect(result.recommendedProduct.capacityKwh).toBe(2610);
+    expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(439959.6, 2);
+  });
+
+  it('chooses 1x96 over 2x64 for R=70 by total price', () => {
+    const result = selectMinimumCostBatteryOptions(70);
+    expect(result.recommendedProduct.label).toBe('1x 96 kWh (modulair)');
+    expect(result.recommendedProduct.capacityKwh).toBe(96);
+    expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(22225.98, 2);
   });
 });

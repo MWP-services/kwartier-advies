@@ -13,7 +13,7 @@ import {
   YAxis
 } from 'recharts';
 import { buildDayProfile, type ExceededInterval, type PeakEvent, type ProcessedInterval } from '@/lib/calculations';
-import { formatTimestamp, getLocalDayIso } from '@/lib/datetime';
+import { formatTimestamp, getLocalDayIso, getLocalHourMinute } from '@/lib/datetime';
 
 interface ChartsProps {
   intervals: ProcessedInterval[];
@@ -24,16 +24,28 @@ interface ChartsProps {
 }
 
 export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topExceededIntervals }: ChartsProps) {
-  const selectedDay = highestPeakDay ?? (intervals.length ? getLocalDayIso(intervals[0].timestamp) : null);
-  const markerSet = new Set(topExceededIntervals.map((interval) => interval.timestamp));
+  const timeZone = 'Europe/Amsterdam';
+  const selectedDay = highestPeakDay ?? (intervals.length ? getLocalDayIso(intervals[0].timestamp, timeZone) : null);
+  const markerSet = new Set(
+    topExceededIntervals
+      .filter((interval) => getLocalDayIso(interval.timestamp, timeZone) === selectedDay)
+      .map((interval) => {
+        const { hour, minute } = getLocalHourMinute(interval.timestamp, timeZone);
+        return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      })
+  );
   const daySeries = selectedDay
-    ? buildDayProfile(intervals, selectedDay, 15).map((point) => ({
-        timestamp: point.timestamp,
+    ? buildDayProfile(intervals, selectedDay, 15, timeZone).map((point) => ({
+        timestampLabel: point.timestampLabel,
+        timestampIso: point.timestampIso,
         consumptionKw: point.observedKw,
         contractKw,
-        isTopExceeded: markerSet.has(point.timestamp)
+        isTopExceeded: markerSet.has(point.timestampLabel)
       }))
     : [];
+  const maxDayKw = Math.max(0, ...daySeries.map((point) => point.consumptionKw ?? 0));
+  const yMaxBase = Math.max(contractKw, maxDayKw);
+  const yMax = (yMaxBase > 0 ? yMaxBase : 60) * 1.1;
 
   const bins = 20;
   const maxKw = Math.max(1, ...intervals.map((item) => item.consumptionKw));
@@ -61,20 +73,19 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
             <ComposedChart data={daySeries}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis
-                dataKey="timestamp"
-                tickFormatter={(value: string) => value.slice(11, 16)}
+                dataKey="timestampLabel"
                 minTickGap={24}
               />
-              <YAxis />
-              <Tooltip labelFormatter={(value) => (typeof value === 'string' ? value.slice(11, 16) : String(value))} />
+              <YAxis domain={[0, yMax]} />
+              <Tooltip labelFormatter={(value) => (typeof value === 'string' ? value : String(value))} />
               <Bar dataKey="consumptionKw" fill="#3b82f6" />
               <Line type="monotone" dataKey="contractKw" stroke="#ef4444" dot={false} />
               {daySeries
                 .filter((interval) => interval.isTopExceeded)
                 .map((interval) => (
                   <ReferenceDot
-                    key={interval.timestamp}
-                    x={interval.timestamp}
+                    key={interval.timestampIso}
+                    x={interval.timestampLabel}
                     y={interval.consumptionKw}
                     r={4}
                     fill="#ef4444"

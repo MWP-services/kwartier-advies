@@ -66,6 +66,27 @@ export function getLocalDayIso(
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+export function getLocalHourMinute(
+  dateInput: Date | string,
+  timeZone = 'Europe/Amsterdam'
+): { hour: number; minute: number } {
+  const date = typeof dateInput === 'string' ? parseTimestamp(dateInput) : dateInput;
+  if (Number.isNaN(date.getTime())) return { hour: Number.NaN, minute: Number.NaN };
+
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return {
+    hour: Number(values.hour),
+    minute: Number(values.minute)
+  };
+}
+
 export function formatTimestamp(dateInput: Date | string): string {
   const date = typeof dateInput === 'string' ? parseTimestamp(dateInput) : dateInput;
   if (Number.isNaN(date.getTime())) return '-';

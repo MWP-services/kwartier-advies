@@ -1,4 +1,4 @@
-import { getLocalDayIso, parseTimestamp } from './datetime';
+import { getLocalDayIso, getLocalHourMinute, parseTimestamp } from './datetime';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 
@@ -45,6 +45,20 @@ export interface SizingResult {
 export interface BatteryProduct {
   label: string;
   capacityKwh: number;
+  modular?: boolean;
+  unitPriceEur?: number;
+  unitCapacityKwh?: number;
+  count?: number;
+  totalPriceEur?: number;
+  breakdown?: BatteryBreakdown[];
+}
+
+export interface BatteryBreakdown {
+  type: string;
+  count: number;
+  unitCapacityKwh: number;
+  unitPriceEur: number;
+  totalPriceEur: number;
 }
 
 export interface ExceededInterval {
@@ -54,17 +68,138 @@ export interface ExceededInterval {
 }
 
 export interface DayProfilePoint {
-  timestamp: string;
+  timestampLabel: string;
+  timestampIso: string;
   observedKw: number;
 }
 
+export interface DayKwSeriesPoint {
+  timeLabel: string;
+  timestampIso: string;
+  consumptionKw: number;
+}
+
 export const BATTERY_OPTIONS: BatteryProduct[] = [
-  { label: 'WattsNext ESS Cabinet 64 kWh', capacityKwh: 64 },
-  { label: 'WattsNext ESS Cabinet 96 kWh', capacityKwh: 96 },
-  { label: 'ESS All-in-one Cabinet 261 kWh', capacityKwh: 261 },
-  { label: 'WattsNext All-in-one Container 2.09 MWh', capacityKwh: 2090 },
-  { label: 'WattsNext All in-one Container 5.01 MWh', capacityKwh: 5010 }
+  {
+    label: 'WattsNext ESS Cabinet 64 kWh',
+    capacityKwh: 64,
+    modular: true,
+    unitPriceEur: 15689.33
+  },
+  {
+    label: 'WattsNext ESS Cabinet 96 kWh',
+    capacityKwh: 96,
+    modular: true,
+    unitPriceEur: 22225.98
+  },
+  {
+    label: 'ESS All-in-one Cabinet 261 kWh',
+    capacityKwh: 261,
+    modular: true,
+    unitPriceEur: 43995.96
+  },
+  {
+    label: 'WattsNext All-in-one Container 2.09 MWh',
+    capacityKwh: 2090,
+    modular: false,
+    unitPriceEur: 318658.06
+  },
+  {
+    label: 'WattsNext All in-one Container 5.015 MWh',
+    capacityKwh: 5015,
+    modular: false,
+    unitPriceEur: 675052.49
+  }
 ];
+
+interface BatteryConfigurationCandidate {
+  label: string;
+  totalCapacityKwh: number;
+  totalPriceEur: number;
+  overCapacityKwh: number;
+  count: number;
+  unitCapacityKwh: number;
+  unitPriceEur: number;
+}
+
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function toBatteryProduct(candidate: BatteryConfigurationCandidate): BatteryProduct {
+  const totalPriceEur = roundCurrency(candidate.totalPriceEur);
+  return {
+    label: candidate.label,
+    capacityKwh: candidate.totalCapacityKwh,
+    unitCapacityKwh: candidate.unitCapacityKwh,
+    count: candidate.count,
+    unitPriceEur: roundCurrency(candidate.unitPriceEur),
+    totalPriceEur,
+    breakdown: [
+      {
+        type: `${candidate.unitCapacityKwh} kWh`,
+        count: candidate.count,
+        unitCapacityKwh: candidate.unitCapacityKwh,
+        unitPriceEur: roundCurrency(candidate.unitPriceEur),
+        totalPriceEur
+      }
+    ]
+  };
+}
+
+export function selectMinimumCostBatteryOptions(requiredKwh: number): {
+  recommendedProduct: BatteryProduct;
+  alternativeProduct: BatteryProduct | null;
+} {
+  const normalizedRequired = Math.max(0, requiredKwh);
+  const candidates: BatteryConfigurationCandidate[] = [];
+
+  BATTERY_OPTIONS.forEach((option) => {
+    const unitPriceEur = option.unitPriceEur ?? 0;
+    if (option.modular) {
+      const maxCount = Math.max(1, Math.ceil(normalizedRequired / option.capacityKwh));
+      for (let count = 1; count <= maxCount; count += 1) {
+        const totalCapacityKwh = count * option.capacityKwh;
+        if (totalCapacityKwh < normalizedRequired) continue;
+        const totalPriceEur = count * unitPriceEur;
+        candidates.push({
+          label: `${count}x ${option.capacityKwh} kWh (modulair)`,
+          totalCapacityKwh,
+          totalPriceEur,
+          overCapacityKwh: totalCapacityKwh - normalizedRequired,
+          count,
+          unitCapacityKwh: option.capacityKwh,
+          unitPriceEur
+        });
+      }
+      return;
+    }
+
+    if (option.capacityKwh >= normalizedRequired) {
+      candidates.push({
+        label: option.label,
+        totalCapacityKwh: option.capacityKwh,
+        totalPriceEur: unitPriceEur,
+        overCapacityKwh: option.capacityKwh - normalizedRequired,
+        count: 1,
+        unitCapacityKwh: option.capacityKwh,
+        unitPriceEur
+      });
+    }
+  });
+
+  const sorted = candidates.sort(
+    (a, b) =>
+      a.totalPriceEur - b.totalPriceEur ||
+      a.overCapacityKwh - b.overCapacityKwh ||
+      a.totalCapacityKwh - b.totalCapacityKwh
+  );
+
+  const recommendedProduct = toBatteryProduct(sorted[0]);
+  const alternativeProduct = sorted[1] ? toBatteryProduct(sorted[1]) : null;
+
+  return { recommendedProduct, alternativeProduct };
+}
 
 export function processIntervals(
   rows: IntervalRecord[],
@@ -204,12 +339,7 @@ export function computeSizing(params: {
   const kWhNeeded = (kWhNeededRaw / efficiency) * safetyFactor;
   const kWNeeded = kWNeededRaw * safetyFactor;
 
-  const recommendedProduct = BATTERY_OPTIONS.find((option) => kWhNeeded <= option.capacityKwh) ??
-    BATTERY_OPTIONS[BATTERY_OPTIONS.length - 1];
-  const recommendedIndex = BATTERY_OPTIONS.findIndex(
-    (option) => option.capacityKwh === recommendedProduct.capacityKwh
-  );
-  const alternativeProduct = BATTERY_OPTIONS[recommendedIndex + 1] ?? null;
+  const { recommendedProduct, alternativeProduct } = selectMinimumCostBatteryOptions(kWhNeeded);
 
   return {
     kWhNeededRaw,
@@ -308,7 +438,7 @@ export function selectTopExceededIntervals(
   limit = 20
 ): ExceededInterval[] {
   return intervals
-    .filter((interval) => interval.timestamp.slice(0, 10) === day && interval.excessKw > 0)
+    .filter((interval) => getLocalDayIso(interval.timestamp) === day && interval.excessKw > 0)
     .sort((a, b) => b.excessKw - a.excessKw || a.timestamp.localeCompare(b.timestamp))
     .slice(0, limit)
     .map((interval) => ({
@@ -321,8 +451,32 @@ export function selectTopExceededIntervals(
 export function buildDayProfile(
   intervals: ProcessedInterval[],
   dayIso: string,
-  intervalMinutes = 15
+  intervalMinutes = 15,
+  timeZone = 'Europe/Amsterdam'
 ): DayProfilePoint[] {
+  const fullDaySeries = buildDayKwSeries(
+    intervals.map((interval) => ({
+      timestamp: interval.timestamp,
+      consumptionKw: interval.consumptionKw
+    })),
+    dayIso,
+    intervalMinutes,
+    timeZone
+  );
+
+  return fullDaySeries.map((slot) => ({
+    timestampLabel: slot.timeLabel,
+    timestampIso: slot.timestampIso,
+    observedKw: slot.consumptionKw
+  }));
+}
+
+export function buildDayKwSeries(
+  intervals: { timestamp: string; consumptionKw: number }[],
+  dayIso: string,
+  intervalMinutes = 15,
+  timeZone = 'Europe/Amsterdam'
+): DayKwSeriesPoint[] {
   if (!dayIso || intervalMinutes <= 0) return [];
 
   const [year, month, day] = dayIso.split('-').map(Number);
@@ -330,21 +484,30 @@ export function buildDayProfile(
   if (Number.isNaN(dayStartLocal.getTime())) return [];
 
   const slotsPerDay = Math.floor((24 * 60) / intervalMinutes);
-  const profile = Array.from({ length: slotsPerDay }, (_, index) => ({
-    timestamp: new Date(dayStartLocal.getTime() + index * intervalMinutes * 60_000).toISOString(),
-    observedKw: 0
-  }));
+  const profile = Array.from({ length: slotsPerDay }, (_, index): DayKwSeriesPoint => {
+    const minutes = index * intervalMinutes;
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    return {
+      timeLabel: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+      timestampIso: new Date(dayStartLocal.getTime() + minutes * 60_000).toISOString(),
+      consumptionKw: 0
+    };
+  });
 
   intervals.forEach((interval) => {
-    if (getLocalDayIso(interval.timestamp) !== dayIso) return;
+    if (getLocalDayIso(interval.timestamp, timeZone) !== dayIso) return;
 
     const dt = parseTimestamp(interval.timestamp);
     if (Number.isNaN(dt.getTime())) return;
-    const minuteOfDay = dt.getHours() * 60 + dt.getMinutes();
+    const { hour, minute } = getLocalHourMinute(dt, timeZone);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
+
+    const minuteOfDay = hour * 60 + minute;
     const slotIndex = Math.floor(minuteOfDay / intervalMinutes);
     if (slotIndex < 0 || slotIndex >= slotsPerDay) return;
 
-    profile[slotIndex].observedKw = Math.max(profile[slotIndex].observedKw, interval.consumptionKw);
+    profile[slotIndex].consumptionKw = Math.max(profile[slotIndex].consumptionKw, interval.consumptionKw);
   });
 
   return profile;

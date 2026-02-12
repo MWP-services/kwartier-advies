@@ -61,7 +61,7 @@ function runAnalysis(
     safetyFactor: settings.safetyFactor,
     efficiency: settings.efficiency
   });
-  const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded);
+  const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded, sizing.recommendedProduct.capacityKwh);
   const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
   const highestPeakDay = findHighestPeakDay(intervals);
   const topExceededIntervals = highestPeakDay ? selectTopExceededIntervals(intervals, highestPeakDay, 20) : [];
@@ -347,6 +347,8 @@ export default function HomePage() {
             scenarios={analysisResult.scenarios}
             selectedScenarioCapacity={selectedScenario}
             onSelectScenario={setSelectedScenario}
+            highestPeakDay={analysisResult.highestPeakDay}
+            contractKw={appliedSettings?.contractedPowerKw ?? draftSettings.contractedPowerKw}
           />
 
           <div className="rounded-lg border bg-white p-4">
