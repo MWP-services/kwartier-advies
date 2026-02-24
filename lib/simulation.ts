@@ -110,10 +110,18 @@ export function generateScenarioOptions(params: {
   });
 
   MODULAR_BASE_SIZES.forEach((baseSize) => {
-    const closestPerBase = allOptions
+    const optionsForBase = allOptions
       .filter((option) => option.capacityKwh % baseSize === 0)
-      .sort(relevanceSort)[0];
+      .sort((a, b) => a.capacityKwh - b.capacityKwh);
+
+    const closestPerBase = [...optionsForBase].sort(relevanceSort)[0];
     if (closestPerBase) selected.set(closestPerBase.capacityKwh, closestPerBase);
+
+    // Also include one smaller and one larger option per base so charts show impact progression.
+    const belowTarget = [...optionsForBase].reverse().find((option) => option.capacityKwh < targetKwh);
+    const aboveTarget = optionsForBase.find((option) => option.capacityKwh > targetKwh);
+    if (belowTarget) selected.set(belowTarget.capacityKwh, belowTarget);
+    if (aboveTarget) selected.set(aboveTarget.capacityKwh, aboveTarget);
   });
 
   allOptions
@@ -136,7 +144,6 @@ export function simulateSingleScenario(
   config?: SimulationConfig,
   optionLabel?: string
 ): ScenarioResult {
-  const powerCapKw = config?.powerCapKw ?? (sizingKwNeeded > 0 ? sizingKwNeeded : Math.min(maxExcessKw, batteryCapacityKwh / 0.5));
   const initialSocRatio = config?.initialSocRatio ?? 0.5;
   const spec = getBatterySpecForCapacity(batteryCapacityKwh);
   const hasDischargeEfficiencyOverride = config?.dischargeEfficiency != null;
@@ -146,6 +153,9 @@ export function simulateSingleScenario(
   const chargeEff = hasDischargeEfficiencyOverride ? 1 : Math.sqrt(spec.roundTripEfficiency);
   const maxChargeKw = spec.maxChargeKw;
   const maxDischargeKw = spec.maxDischargeKw;
+  // By default simulate each scenario with its own physical power capability.
+  // A global powerCapKw can still be provided explicitly through config when needed.
+  const powerCapKw = config?.powerCapKw ?? Math.min(maxExcessKw, maxDischargeKw);
   const batteryCapacityLimitKwh = spec.capacityKwh;
   const contractKw = Math.max(0, ...intervals.map((interval) => interval.consumptionKw - interval.excessKw));
 

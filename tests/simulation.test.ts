@@ -63,6 +63,13 @@ describe('simulation', () => {
     expect(options.find((option) => option.label === '2x261 (522 kWh)')).toBeTruthy();
   });
 
+  it('includes smaller-than-target options so impact progression remains visible', () => {
+    const options = generateScenarioOptions({ targetKwh: 500, maxTotalOptions: 12 });
+
+    expect(options.some((option) => option.capacityKwh < 500)).toBe(true);
+    expect(options.some((option) => option.capacityKwh >= 500)).toBe(true);
+  });
+
   it('target=70 includes close modular options around 64/96', () => {
     const options = generateScenarioOptions({ targetKwh: 70, maxTotalOptions: 12 });
     const has1x96 = options.some((option) => option.label === '1x96 (96 kWh)');
@@ -108,6 +115,18 @@ describe('simulation', () => {
     expect(result.maxDischargeKw).toBe(30);
     expect(result.exceedanceEnergyKwhBefore).toBeCloseTo(25, 5);
     expect(result.exceedanceEnergyKwhAfter).toBeCloseTo(17.5, 5);
+  });
+
+  it('uses each scenario battery power capability by default (no fixed residual across all batteries)', () => {
+    const onePeakRows = [{ timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 143 * 0.25 }];
+    const intervals = processIntervals(onePeakRows, 43); // excess = 100 kW => 25 kWh in one interval
+
+    const small = simulateSingleScenario(intervals, 64, 60, 100, { initialSocRatio: 1 });
+    const large = simulateSingleScenario(intervals, 261, 60, 100, { initialSocRatio: 1 });
+
+    expect(small.exceedanceEnergyKwhAfter).toBeCloseTo(17.5, 5); // 30 kW discharge limit => 7.5 kWh shaved
+    expect(large.exceedanceEnergyKwhAfter).toBeCloseTo(0, 5); // 125 kW discharge limit can shave full 100 kW interval
+    expect(large.exceedanceEnergyKwhAfter).toBeLessThan(small.exceedanceEnergyKwhAfter);
   });
 
   it('uses sizing discharge efficiency consistently so safetyFactor=1 can fully eliminate a matching exceedance', () => {
