@@ -1,12 +1,77 @@
 const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const QUARTER_MS = 15 * 60 * 1000;
+const SOURCE_TIME_ZONE = 'Europe/Amsterdam';
+
+interface DateParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+function partsToUtcMs(parts: DateParts): number {
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, 0);
+}
+
+function getZonedParts(date: Date, timeZone: string): DateParts {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+    timeZone
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    hour: Number(values.hour),
+    minute: Number(values.minute),
+    second: Number(values.second)
+  };
+}
+
+function makeDateInTimeZone(parts: DateParts, timeZone: string): Date {
+  // Parse Excel local timestamps as local time; fix DST/UTC shift.
+  let utcMs = partsToUtcMs(parts);
+
+  // Iteratively align the formatted wall time in the target timezone to the requested local parts.
+  for (let i = 0; i < 3; i += 1) {
+    const actual = getZonedParts(new Date(utcMs), timeZone);
+    const diffMs = partsToUtcMs(parts) - partsToUtcMs(actual);
+    if (diffMs === 0) break;
+    utcMs += diffMs;
+  }
+
+  return new Date(utcMs);
+}
 
 function parseExcelSerialDate(serial: number): Date {
   // Excel floating point drift fix: snap to the nearest quarter hour for kwartierdata.
-  const ms = EXCEL_EPOCH_MS + serial * DAY_MS;
-  const snappedMs = Math.round(ms / QUARTER_MS) * QUARTER_MS;
-  return new Date(snappedMs);
+  const naiveMs = EXCEL_EPOCH_MS + serial * DAY_MS;
+  const snappedNaiveMs = Math.round(naiveMs / QUARTER_MS) * QUARTER_MS;
+  const naiveUtc = new Date(snappedNaiveMs);
+
+  return makeDateInTimeZone(
+    {
+      year: naiveUtc.getUTCFullYear(),
+      month: naiveUtc.getUTCMonth() + 1,
+      day: naiveUtc.getUTCDate(),
+      hour: naiveUtc.getUTCHours(),
+      minute: naiveUtc.getUTCMinutes(),
+      second: naiveUtc.getUTCSeconds()
+    },
+    SOURCE_TIME_ZONE
+  );
 }
 
 function parseNlDateTime(s: string): Date | null {
@@ -20,13 +85,16 @@ function parseNlDateTime(s: string): Date | null {
   if (!m) return null;
 
   const [, dd, mm, yyyy, HH, MM, SS] = m;
-  const d = new Date(
-    Number(yyyy),
-    Number(mm) - 1,
-    Number(dd),
-    Number(HH),
-    Number(MM),
-    SS ? Number(SS) : 0
+  const d = makeDateInTimeZone(
+    {
+      year: Number(yyyy),
+      month: Number(mm),
+      day: Number(dd),
+      hour: Number(HH),
+      minute: Number(MM),
+      second: SS ? Number(SS) : 0
+    },
+    SOURCE_TIME_ZONE
   );
   return Number.isNaN(d.getTime()) ? null : d;
 }

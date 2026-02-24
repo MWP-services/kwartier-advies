@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findMaxObserved, processIntervals, type IntervalRecord } from '@/lib/calculations';
+import { formatTimestamp } from '@/lib/datetime';
 import { normalizeConsumptionSeries } from '@/lib/normalization';
 
 describe('normalization', () => {
@@ -68,7 +69,7 @@ describe('normalization', () => {
 
     const result = normalizeConsumptionSeries(rows, { interpretationMode: 'INTERVAL' });
 
-    expect(result.normalizedRows[0].timestamp.startsWith('2025-05-04')).toBe(true);
-    expect(result.normalizedRows[1].timestamp.startsWith('2025-05-04')).toBe(true);
+    expect(formatTimestamp(result.normalizedRows[0].timestamp)).toContain('04-05-2025 00:00');
+    expect(formatTimestamp(result.normalizedRows[1].timestamp)).toContain('04-05-2025 00:15');
   });
 });
