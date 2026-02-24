@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDayKwSeries,
   buildDayProfile,
+  buildDataQualityReport,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
@@ -217,5 +218,19 @@ describe('calculations', () => {
     expect(result.recommendedProduct.label).toBe('1x 96 kWh (modulair)');
     expect(result.recommendedProduct.capacityKwh).toBe(96);
     expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(22225.98, 2);
+  });
+
+  it('treats near-15-minute timestamp deltas as valid in data quality report', () => {
+    const startMs = Date.UTC(2024, 0, 1, 0, 0, 0, 0);
+    const rows = [
+      { timestamp: new Date(startMs).toISOString(), consumptionKwh: 1 },
+      { timestamp: new Date(startMs + 899_999).toISOString(), consumptionKwh: 1 }, // 14.999983 min
+      { timestamp: new Date(startMs + 1_800_000).toISOString(), consumptionKwh: 1 }, // +15.000017 min
+    ];
+
+    const report = buildDataQualityReport(rows);
+
+    expect(report.non15MinIntervals).toBe(0);
+    expect(report.missingIntervalsCount).toBe(0);
   });
 });

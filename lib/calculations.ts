@@ -372,12 +372,13 @@ export function buildDataQualityReport(intervals: IntervalRecord[]): DataQuality
   const duplicateCount = timestamps.length - new Set(timestamps.map((d) => d.toISOString())).size;
   let non15MinIntervals = 0;
   let missingIntervalsCount = 0;
+  const EPS = 0.01;
 
   for (let i = 1; i < timestamps.length; i += 1) {
     const diffMinutes = (timestamps[i].getTime() - timestamps[i - 1].getTime()) / 60000;
-    if (diffMinutes !== 15) {
+    if (Math.abs(diffMinutes - 15) > EPS) {
       non15MinIntervals += 1;
-      if (diffMinutes > 15) {
+      if (diffMinutes > 15 + EPS) {
         missingIntervalsCount += Math.max(0, Math.round(diffMinutes / 15) - 1);
       }
     }

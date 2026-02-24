@@ -1,5 +1,13 @@
 const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 const DAY_MS = 24 * 60 * 60 * 1000;
+const QUARTER_MS = 15 * 60 * 1000;
+
+function parseExcelSerialDate(serial: number): Date {
+  // Excel floating point drift fix: snap to the nearest quarter hour for kwartierdata.
+  const ms = EXCEL_EPOCH_MS + serial * DAY_MS;
+  const snappedMs = Math.round(ms / QUARTER_MS) * QUARTER_MS;
+  return new Date(snappedMs);
+}
 
 function parseNlDateTime(s: string): Date | null {
   // Support: "dd-mm-yyyy hh:mm", "dd-mm-yyyy hh:mm:ss"
@@ -28,7 +36,7 @@ export function parseTimestamp(input: unknown): Date {
 
   // Excel serial date
   if (typeof input === 'number' && Number.isFinite(input)) {
-    return new Date(EXCEL_EPOCH_MS + input * DAY_MS);
+    return parseExcelSerialDate(input);
   }
 
   const asString = String(input ?? '').trim();
@@ -37,7 +45,7 @@ export function parseTimestamp(input: unknown): Date {
   // Numeric string that looks like Excel serial date
   const numeric = Number(asString);
   if (Number.isFinite(numeric) && /^\d+(\.\d+)?$/.test(asString)) {
-    return new Date(EXCEL_EPOCH_MS + numeric * DAY_MS);
+    return parseExcelSerialDate(numeric);
   }
 
   // NL date-time parsing (fix for "19-11-2024 12:45")

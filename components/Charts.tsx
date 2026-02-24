@@ -146,7 +146,7 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
       </div>
 
       <div className="rounded-lg border bg-white p-4 lg:col-span-2">
-        <h3 className="mb-2 font-semibold">Top 10 Peak Events</h3>
+        <h3 className="mb-2 font-semibold">All Peak Events</h3>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
@@ -158,7 +158,7 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
               </tr>
             </thead>
             <tbody>
-              {topEvents.slice(0, 10).map((event) => (
+              {topEvents.map((event) => (
                 <tr key={`${event.peakTimestamp}-${event.durationIntervals}`} className="border-b">
                   <td className="p-2">{formatTimestamp(event.peakTimestamp)}</td>
                   <td className="p-2">{event.durationIntervals}</td>
