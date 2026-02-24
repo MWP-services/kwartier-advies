@@ -30,6 +30,7 @@ export interface AnalysisResult {
   highestPeakDay: string | null;
   maxObservedKw: number;
   maxObservedTimestamp: string | null;
+  exceedanceIntervals: number;
   topExceededIntervals: ExceededInterval[];
   normalizationDiagnostics: NormalizationDiagnostics;
   quality: DataQualityReport;

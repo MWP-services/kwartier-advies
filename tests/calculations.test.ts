@@ -3,6 +3,7 @@ import {
   buildDayKwSeries,
   buildDayProfile,
   buildDataQualityReport,
+  countExceedanceIntervals,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
@@ -121,6 +122,22 @@ describe('calculations', () => {
     expect(events).toHaveLength(1);
     expect(events[0].maxExcessKw).toBeCloseTo(220, 5);
     expect(events[0].peakTimestamp).toBe('2024-01-01T00:15:00.000Z');
+  });
+
+  it('counts exceedance intervals as sum of event durations (not number of events)', () => {
+    const rows = [
+      { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 100 }, // no exceed
+      { timestamp: '2024-01-01T00:15:00.000Z', consumptionKwh: 140 }, // exceed
+      { timestamp: '2024-01-01T00:30:00.000Z', consumptionKwh: 140 }, // exceed (same event, duration=2)
+      { timestamp: '2024-01-01T00:45:00.000Z', consumptionKwh: 100 }, // no exceed
+      { timestamp: '2024-01-01T01:00:00.000Z', consumptionKwh: 140 } // exceed (second event, duration=1)
+    ];
+    const intervals = processIntervals(rows, 500);
+    const events = groupPeakEvents(intervals);
+
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.durationIntervals)).toEqual([2, 1]);
+    expect(countExceedanceIntervals(events)).toBe(3);
   });
 
   it('builds a full 96-point day profile and fills missing quarters with 0', () => {

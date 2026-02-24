@@ -13,6 +13,7 @@ import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
 import {
   buildDataQualityReport,
+  countExceedanceIntervals,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
@@ -66,6 +67,7 @@ function runAnalysis(
   const highestPeakDay = findHighestPeakDay(intervals);
   const topExceededIntervals = highestPeakDay ? selectTopExceededIntervals(intervals, highestPeakDay, 20) : [];
   const quality = buildDataQualityReport(normalized.normalizedRows);
+  const exceedanceIntervals = countExceedanceIntervals(events);
 
   return {
     intervals,
@@ -77,7 +79,8 @@ function runAnalysis(
     maxObservedTimestamp,
     topExceededIntervals,
     normalizationDiagnostics: normalized.diagnostics,
-    quality
+    quality,
+    exceedanceIntervals
   };
 }
 
@@ -176,7 +179,7 @@ export default function HomePage() {
         contractedPowerKw: appliedSettings.contractedPowerKw,
         maxObservedKw: analysisResult.maxObservedKw,
         maxObservedTimestamp: analysisResult.maxObservedTimestamp,
-        exceedanceCount: analysisResult.events.length,
+        exceedanceCount: analysisResult.exceedanceIntervals,
         compliance: appliedSettings.compliance,
         method: appliedSettings.method,
         efficiency: appliedSettings.efficiency,
@@ -321,7 +324,7 @@ export default function HomePage() {
           <KpiCards
             maxObservedKw={analysisResult.maxObservedKw}
             maxObservedTimestamp={analysisResult.maxObservedTimestamp}
-            exceedanceIntervals={analysisResult.events.length}
+            exceedanceIntervals={analysisResult.exceedanceIntervals}
             sizing={analysisResult.sizing}
           />
 

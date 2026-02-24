@@ -258,6 +258,10 @@ export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
   return events;
 }
 
+export function countExceedanceIntervals(events: PeakEvent[]): number {
+  return events.reduce((sum, event) => sum + event.durationIntervals, 0);
+}
+
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
