@@ -2,6 +2,7 @@ import type {
   DataQualityReport,
   ExceededInterval,
   PeakEvent,
+  PeakMoment,
   ProcessedInterval,
   SizingResult
 } from './calculations';
@@ -25,6 +26,7 @@ export interface AnalysisSettings {
 export interface AnalysisResult {
   intervals: ProcessedInterval[];
   events: PeakEvent[];
+  peakMoments: PeakMoment[];
   sizing: SizingResult;
   scenarios: ScenarioResult[];
   highestPeakDay: string | null;

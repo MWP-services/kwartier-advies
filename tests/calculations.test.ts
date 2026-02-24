@@ -3,10 +3,10 @@ import {
   buildDayKwSeries,
   buildDayProfile,
   buildDataQualityReport,
-  countExceedanceIntervals,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
+  listPeakMoments,
   processIntervals,
   selectMinimumCostBatteryOptions,
   selectTopExceededIntervals
@@ -124,7 +124,7 @@ describe('calculations', () => {
     expect(events[0].peakTimestamp).toBe('2024-01-01T00:15:00.000Z');
   });
 
-  it('counts exceedance intervals as sum of event durations (not number of events)', () => {
+  it('lists individual exceedance intervals as separate peak moments (no duration clustering in table source)', () => {
     const rows = [
       { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 100 }, // no exceed
       { timestamp: '2024-01-01T00:15:00.000Z', consumptionKwh: 140 }, // exceed
@@ -134,10 +134,16 @@ describe('calculations', () => {
     ];
     const intervals = processIntervals(rows, 500);
     const events = groupPeakEvents(intervals);
+    const peakMoments = listPeakMoments(intervals);
 
     expect(events).toHaveLength(2);
     expect(events.map((event) => event.durationIntervals)).toEqual([2, 1]);
-    expect(countExceedanceIntervals(events)).toBe(3);
+    expect(peakMoments).toHaveLength(3);
+    expect(peakMoments.map((moment) => moment.timestamp)).toEqual([
+      '2024-01-01T00:15:00.000Z',
+      '2024-01-01T00:30:00.000Z',
+      '2024-01-01T01:00:00.000Z'
+    ]);
   });
 
   it('builds a full 96-point day profile and fills missing quarters with 0', () => {

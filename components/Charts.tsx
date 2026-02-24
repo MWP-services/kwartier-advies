@@ -12,18 +12,18 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
-import { buildDayProfile, type ExceededInterval, type PeakEvent, type ProcessedInterval } from '@/lib/calculations';
+import { buildDayProfile, type ExceededInterval, type PeakMoment, type ProcessedInterval } from '@/lib/calculations';
 import { formatTimestamp, getLocalDayIso, getLocalHourMinute } from '@/lib/datetime';
 
 interface ChartsProps {
   intervals: ProcessedInterval[];
   contractKw: number;
-  topEvents: PeakEvent[];
+  peakMoments: PeakMoment[];
   highestPeakDay: string | null;
   topExceededIntervals: ExceededInterval[];
 }
 
-export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topExceededIntervals }: ChartsProps) {
+export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, topExceededIntervals }: ChartsProps) {
   const timeZone = 'Europe/Amsterdam';
   const selectedDay = highestPeakDay ?? (intervals.length ? getLocalDayIso(intervals[0].timestamp, timeZone) : null);
   const markerSet = new Set(
@@ -152,18 +152,18 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
             <thead>
               <tr className="border-b text-left">
                 <th className="p-2">Peak timestamp</th>
-                <th className="p-2">Duration</th>
-                <th className="p-2">Max excess kW</th>
-                <th className="p-2">Total excess kWh</th>
+                <th className="p-2">Consumption kW</th>
+                <th className="p-2">Excess kW</th>
+                <th className="p-2">Excess kWh</th>
               </tr>
             </thead>
             <tbody>
-              {topEvents.map((event) => (
-                <tr key={`${event.peakTimestamp}-${event.durationIntervals}`} className="border-b">
-                  <td className="p-2">{formatTimestamp(event.peakTimestamp)}</td>
-                  <td className="p-2">{event.durationIntervals}</td>
-                  <td className="p-2">{event.maxExcessKw.toFixed(2)}</td>
-                  <td className="p-2">{event.totalExcessKwh.toFixed(2)}</td>
+              {peakMoments.map((moment) => (
+                <tr key={moment.timestamp} className="border-b">
+                  <td className="p-2">{formatTimestamp(moment.timestamp)}</td>
+                  <td className="p-2">{moment.consumptionKw.toFixed(2)}</td>
+                  <td className="p-2">{moment.excessKw.toFixed(2)}</td>
+                  <td className="p-2">{moment.excessKwh.toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>

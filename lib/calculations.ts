@@ -23,6 +23,13 @@ export interface PeakEvent {
   intervalIndexes: number[];
 }
 
+export interface PeakMoment {
+  timestamp: string;
+  consumptionKw: number;
+  excessKw: number;
+  excessKwh: number;
+}
+
 export interface DataQualityReport {
   rows: number;
   startDate: string | null;
@@ -258,8 +265,16 @@ export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
   return events;
 }
 
-export function countExceedanceIntervals(events: PeakEvent[]): number {
-  return events.reduce((sum, event) => sum + event.durationIntervals, 0);
+export function listPeakMoments(intervals: ProcessedInterval[]): PeakMoment[] {
+  return intervals
+    .filter((interval) => interval.excessKw > 0)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    .map((interval) => ({
+      timestamp: interval.timestamp,
+      consumptionKw: interval.consumptionKw,
+      excessKw: interval.excessKw,
+      excessKwh: interval.excessKwh
+    }));
 }
 
 function percentile(values: number[], p: number): number {

@@ -13,10 +13,10 @@ import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
 import {
   buildDataQualityReport,
-  countExceedanceIntervals,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
+  listPeakMoments,
   processIntervals,
   selectTopExceededIntervals
 } from '@/lib/calculations';
@@ -54,6 +54,7 @@ function runAnalysis(
 
   const intervals = processIntervals(normalized.normalizedRows, settings.contractedPowerKw);
   const events = groupPeakEvents(intervals);
+  const peakMoments = listPeakMoments(intervals);
   const sizing = computeSizing({
     intervals,
     events,
@@ -67,11 +68,12 @@ function runAnalysis(
   const highestPeakDay = findHighestPeakDay(intervals);
   const topExceededIntervals = highestPeakDay ? selectTopExceededIntervals(intervals, highestPeakDay, 20) : [];
   const quality = buildDataQualityReport(normalized.normalizedRows);
-  const exceedanceIntervals = countExceedanceIntervals(events);
+  const exceedanceIntervals = peakMoments.length;
 
   return {
     intervals,
     events,
+    peakMoments,
     sizing,
     scenarios,
     highestPeakDay,
@@ -336,7 +338,7 @@ export default function HomePage() {
           <Charts
             intervals={analysisResult.intervals}
             contractKw={appliedSettings?.contractedPowerKw ?? draftSettings.contractedPowerKw}
-            topEvents={analysisResult.events}
+            peakMoments={analysisResult.peakMoments}
             highestPeakDay={analysisResult.highestPeakDay}
             topExceededIntervals={analysisResult.topExceededIntervals}
           />
