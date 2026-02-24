@@ -177,7 +177,7 @@ export default function HomePage() {
     setDraftMapping({ ...appliedMapping });
   };
 
-  const downloadPdf = async () => {
+  const downloadReport = async () => {
     if (!analysisResult || !appliedSettings) return;
     const response = await fetch('/api/report', {
       method: 'POST',
@@ -194,6 +194,9 @@ export default function HomePage() {
         sizing: analysisResult.sizing,
         quality: analysisResult.quality,
         topEvents: analysisResult.events,
+        peakMoments: analysisResult.peakMoments,
+        intervals: analysisResult.intervals,
+        highestPeakDay: analysisResult.highestPeakDay,
         scenarios: analysisResult.scenarios
       })
     });
@@ -202,7 +205,7 @@ export default function HomePage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'peak-shaving-report.pdf';
+    a.download = 'wattsnext-peak-shaving-report.html';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -388,10 +391,10 @@ export default function HomePage() {
             </p>
             <button
               className="mt-3 rounded bg-emerald-600 px-4 py-2 font-semibold text-white disabled:opacity-60"
-              onClick={downloadPdf}
+              onClick={downloadReport}
               disabled={!analysisResult}
             >
-              Download PDF report
+              Download Interactive Report
             </button>
           </div>
         </>

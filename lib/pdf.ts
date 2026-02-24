@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import type { DataQualityReport, PeakEvent, SizingResult } from './calculations';
+import type { DataQualityReport, PeakEvent, PeakMoment, ProcessedInterval, SizingResult } from './calculations';
 import { formatTimestamp } from './datetime';
 import type { ScenarioResult } from './simulation';
 
@@ -15,6 +15,9 @@ export interface PdfPayload {
   sizing: SizingResult;
   quality: DataQualityReport;
   topEvents: PeakEvent[];
+  peakMoments?: PeakMoment[];
+  intervals?: ProcessedInterval[];
+  highestPeakDay?: string | null;
   scenarios: ScenarioResult[];
 }
 
