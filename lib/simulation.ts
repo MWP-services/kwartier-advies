@@ -5,6 +5,8 @@ import { getLocalDayIso } from './datetime';
 export interface SimulationConfig {
   powerCapKw?: number;
   initialSocRatio?: number;
+  // Use the sizing efficiency directly as battery-side -> grid-side discharge efficiency.
+  dischargeEfficiency?: number;
 }
 
 export interface ScenarioResult {
@@ -137,8 +139,11 @@ export function simulateSingleScenario(
   const powerCapKw = config?.powerCapKw ?? (sizingKwNeeded > 0 ? sizingKwNeeded : Math.min(maxExcessKw, batteryCapacityKwh / 0.5));
   const initialSocRatio = config?.initialSocRatio ?? 0.5;
   const spec = getBatterySpecForCapacity(batteryCapacityKwh);
-  const chargeEff = Math.sqrt(spec.roundTripEfficiency);
-  const dischargeEff = Math.sqrt(spec.roundTripEfficiency);
+  const hasDischargeEfficiencyOverride = config?.dischargeEfficiency != null;
+  const dischargeEff = hasDischargeEfficiencyOverride
+    ? Math.max(0, Math.min(1, config?.dischargeEfficiency ?? 1))
+    : Math.sqrt(spec.roundTripEfficiency);
+  const chargeEff = hasDischargeEfficiencyOverride ? 1 : Math.sqrt(spec.roundTripEfficiency);
   const maxChargeKw = spec.maxChargeKw;
   const maxDischargeKw = spec.maxDischargeKw;
   const batteryCapacityLimitKwh = spec.capacityKwh;

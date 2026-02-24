@@ -35,7 +35,7 @@ export async function generateReportPdf(payload: PdfPayload): Promise<Uint8Array
     }`,
     `Exceedance intervals: ${payload.exceedanceCount}`,
     `Compliance target: ${(payload.compliance * 100).toFixed(0)}%`,
-    `Recommended product: ${payload.sizing.recommendedProduct.label}`,
+    `Recommended product: ${payload.sizing.recommendedProduct?.label ?? 'No feasible battery by kW + kWh'}`,
     `Sizing requirement: ${payload.sizing.kWhNeeded.toFixed(2)} kWh / ${payload.sizing.kWNeeded.toFixed(2)} kW`,
     '',
     'Data quality',

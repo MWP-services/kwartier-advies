@@ -109,4 +109,37 @@ describe('simulation', () => {
     expect(result.exceedanceEnergyKwhBefore).toBeCloseTo(25, 5);
     expect(result.exceedanceEnergyKwhAfter).toBeCloseTo(17.5, 5);
   });
+
+  it('uses sizing discharge efficiency consistently so safetyFactor=1 can fully eliminate a matching exceedance', () => {
+    const beforeExcessKwh = 5.72;
+    const efficiency = 0.84;
+    const kWhNeeded = beforeExcessKwh / efficiency;
+    const rows = [{ timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: (43 + beforeExcessKwh / 0.25) * 0.25 }];
+    const intervals = processIntervals(rows, 43);
+
+    const result = simulateSingleScenario(intervals, 64, 100, 100, {
+      initialSocRatio: kWhNeeded / 64,
+      dischargeEfficiency: efficiency
+    });
+
+    expect(result.exceedanceEnergyKwhBefore).toBeCloseTo(beforeExcessKwh, 6);
+    expect(result.exceedanceEnergyKwhAfter).toBeLessThan(1e-6);
+  });
+
+  it('clamps after exceedance to zero when safety factor makes battery-side budget larger than before energy', () => {
+    const beforeExcessKwh = 5.72;
+    const efficiency = 0.84;
+    const safetyFactor = 1.2;
+    const kWhNeeded = (beforeExcessKwh / efficiency) * safetyFactor;
+    const rows = [{ timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: (43 + beforeExcessKwh / 0.25) * 0.25 }];
+    const intervals = processIntervals(rows, 43);
+
+    const result = simulateSingleScenario(intervals, 64, 100, 100, {
+      initialSocRatio: kWhNeeded / 64,
+      dischargeEfficiency: efficiency
+    });
+
+    expect(result.exceedanceEnergyKwhBefore).toBeCloseTo(beforeExcessKwh, 6);
+    expect(result.exceedanceEnergyKwhAfter).toBeLessThan(1e-6);
+  });
 });

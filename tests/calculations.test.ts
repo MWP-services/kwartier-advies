@@ -217,30 +217,48 @@ describe('calculations', () => {
 
   it('chooses 2x261 kWh for R=500 as lowest cost valid configuration', () => {
     const result = selectMinimumCostBatteryOptions(500);
-    expect(result.recommendedProduct.label).toBe('2x 261 kWh (modulair)');
-    expect(result.recommendedProduct.capacityKwh).toBe(522);
-    expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(87991.92, 2);
+    expect(result.recommendedProduct?.label).toBe('2x 261 kWh (modulair)');
+    expect(result.recommendedProduct?.capacityKwh).toBe(522);
+    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(87991.92, 2);
   });
 
   it('chooses 2.09 MWh for R=2000 when cheaper than modular alternatives', () => {
     const result = selectMinimumCostBatteryOptions(2000);
-    expect(result.recommendedProduct.label).toBe('WattsNext All-in-one Container 2.09 MWh');
-    expect(result.recommendedProduct.capacityKwh).toBe(2090);
-    expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(318658.06, 2);
+    expect(result.recommendedProduct?.label).toBe('WattsNext All-in-one Container 2.09 MWh');
+    expect(result.recommendedProduct?.capacityKwh).toBe(2090);
+    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(318658.06, 2);
   });
 
   it('chooses modular 261 kWh stack for R=2600 because it is cheaper than 5.015 MWh', () => {
     const result = selectMinimumCostBatteryOptions(2600);
-    expect(result.recommendedProduct.label).toBe('10x 261 kWh (modulair)');
-    expect(result.recommendedProduct.capacityKwh).toBe(2610);
-    expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(439959.6, 2);
+    expect(result.recommendedProduct?.label).toBe('10x 261 kWh (modulair)');
+    expect(result.recommendedProduct?.capacityKwh).toBe(2610);
+    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(439959.6, 2);
   });
 
   it('chooses 1x96 over 2x64 for R=70 by total price', () => {
     const result = selectMinimumCostBatteryOptions(70);
-    expect(result.recommendedProduct.label).toBe('1x 96 kWh (modulair)');
-    expect(result.recommendedProduct.capacityKwh).toBe(96);
-    expect(result.recommendedProduct.totalPriceEur).toBeCloseTo(22225.98, 2);
+    expect(result.recommendedProduct?.label).toBe('1x 96 kWh (modulair)');
+    expect(result.recommendedProduct?.capacityKwh).toBe(96);
+    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(22225.98, 2);
+  });
+
+  it('filters out candidates that meet kWh but not kW and selects a power-feasible option', () => {
+    const result = selectMinimumCostBatteryOptions(70, 60);
+
+    expect(result.noFeasibleBatteryByPower).toBe(false);
+    expect(result.recommendedProduct?.label).toBe('2x 64 kWh (modulair)');
+    expect(result.recommendedProduct?.capacityKwh).toBe(128);
+    expect(result.recommendedProduct?.powerKw).toBe(60);
+  });
+
+  it('chooses the cheapest candidate that satisfies both kWh and kW', () => {
+    const result = selectMinimumCostBatteryOptions(200, 100);
+
+    expect(result.noFeasibleBatteryByPower).toBe(false);
+    expect(result.recommendedProduct?.label).toBe('1x 261 kWh (modulair)');
+    expect(result.recommendedProduct?.capacityKwh).toBe(261);
+    expect(result.recommendedProduct?.powerKw).toBe(125);
   });
 
   it('treats near-15-minute timestamp deltas as valid in data quality report', () => {

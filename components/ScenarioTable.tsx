@@ -2,7 +2,7 @@ import type { ScenarioResult } from '@/lib/simulation';
 
 interface ScenarioTableProps {
   scenarios: ScenarioResult[];
-  recommendedCapacityKwh: number;
+  recommendedCapacityKwh: number | null;
 }
 
 export function ScenarioTable({ scenarios, recommendedCapacityKwh }: ScenarioTableProps) {
@@ -25,7 +25,7 @@ export function ScenarioTable({ scenarios, recommendedCapacityKwh }: ScenarioTab
             {scenarios.map((scenario) => (
               <tr
                 key={scenario.capacityKwh}
-                className={`border-b ${scenario.capacityKwh === recommendedCapacityKwh ? 'bg-emerald-50' : ''}`}
+                className={`border-b ${recommendedCapacityKwh != null && scenario.capacityKwh === recommendedCapacityKwh ? 'bg-emerald-50' : ''}`}
               >
                 <td className="p-2">{scenario.optionLabel}</td>
                 <td className="p-2">{scenario.exceedanceEnergyKwhBefore.toFixed(2)}</td>

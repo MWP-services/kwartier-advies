@@ -63,7 +63,12 @@ function runAnalysis(
     safetyFactor: settings.safetyFactor,
     efficiency: settings.efficiency
   });
-  const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded, sizing.recommendedProduct.capacityKwh);
+  const scenarios = simulateAllScenarios(
+    intervals,
+    sizing.kWNeeded,
+    sizing.recommendedProduct?.capacityKwh ?? 0,
+    { dischargeEfficiency: settings.efficiency }
+  );
   const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
   const highestPeakDay = findHighestPeakDay(intervals);
   const topExceededIntervals = highestPeakDay ? selectTopExceededIntervals(intervals, highestPeakDay, 20) : [];
@@ -322,6 +327,11 @@ export default function HomePage() {
               Onrealistisch vermogen gedetecteerd - controleer kolomkeuze
             </p>
           )}
+          {analysisResult.sizing.noFeasibleBatteryByPower && (
+            <p className="rounded border border-amber-300 bg-amber-50 p-3 text-amber-800">
+              Geen batterijconfiguratie voldoet aan het benodigde vermogen (kW).
+            </p>
+          )}
 
           <KpiCards
             maxObservedKw={analysisResult.maxObservedKw}
@@ -345,7 +355,7 @@ export default function HomePage() {
 
           <ScenarioTable
             scenarios={analysisResult.scenarios}
-            recommendedCapacityKwh={analysisResult.sizing.recommendedProduct.capacityKwh}
+            recommendedCapacityKwh={analysisResult.sizing.recommendedProduct?.capacityKwh ?? null}
           />
 
           <ScenarioCharts
@@ -358,7 +368,12 @@ export default function HomePage() {
 
           <div className="rounded-lg border bg-white p-4">
             <h3 className="font-semibold">Recommendation</h3>
-            <p>Recommended: {analysisResult.sizing.recommendedProduct.label}</p>
+            <p>
+              Recommended:{' '}
+              {analysisResult.sizing.recommendedProduct
+                ? analysisResult.sizing.recommendedProduct.label
+                : 'Geen haalbare batterijconfiguratie op basis van kWh + kW'}
+            </p>
             <p>
               Alternative:{' '}
               {analysisResult.sizing.alternativeProduct
