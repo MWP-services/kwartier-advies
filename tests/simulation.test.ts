@@ -93,6 +93,8 @@ describe('simulation', () => {
 
     expect(result.maxChargeKw).toBe(32);
     expect(result.endingSocKwh).toBeCloseTo(32 * 0.25 * Math.sqrt(0.9), 5);
+    expect(result.shavedSeries[1].originalKw).toBeCloseTo(2, 5);
+    expect(result.shavedSeries[1].shavedKw).toBeCloseTo(34, 5);
   });
 
   it('charges 96 kWh battery up to headroom when headroom is below max charge', () => {

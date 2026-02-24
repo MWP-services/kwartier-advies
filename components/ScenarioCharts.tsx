@@ -4,77 +4,49 @@ import {
   Bar,
   CartesianGrid,
   ComposedChart,
-  Line,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis
 } from 'recharts';
-import { buildDayKwSeries } from '@/lib/calculations';
-import { getLocalDayIso } from '@/lib/datetime';
+import type { SizingResult } from '@/lib/calculations';
 import type { ScenarioResult } from '@/lib/simulation';
 
 interface ScenarioChartsProps {
   scenarios: ScenarioResult[];
   selectedScenarioCapacity: number;
   onSelectScenario: (capacity: number) => void;
-  highestPeakDay: string | null;
-  contractKw: number;
+  sizing: SizingResult;
+  efficiency: number;
+  safetyFactor: number;
+  compliance: number;
 }
 
 export function ScenarioCharts({
   scenarios,
   selectedScenarioCapacity,
   onSelectScenario,
-  highestPeakDay,
-  contractKw
+  sizing,
+  efficiency,
+  safetyFactor,
+  compliance
 }: ScenarioChartsProps) {
-  const timeZone = 'Europe/Amsterdam';
   const selected = scenarios.find((scenario) => scenario.capacityKwh === selectedScenarioCapacity) ?? scenarios[0];
-  const selectedDay =
-    highestPeakDay ?? (selected?.shavedSeries.length ? getLocalDayIso(selected.shavedSeries[0].timestamp, timeZone) : null);
-
-  const beforeSeries =
-    selectedDay && selected
-      ? buildDayKwSeries(
-          selected.shavedSeries.map((point) => ({
-            timestamp: point.timestamp,
-            consumptionKw: point.originalKw
-          })),
-          selectedDay,
-          15,
-          timeZone
-        )
-      : [];
-  const afterSeries =
-    selectedDay && selected
-      ? buildDayKwSeries(
-          selected.shavedSeries.map((point) => ({
-            timestamp: point.timestamp,
-            consumptionKw: point.shavedKw
-          })),
-          selectedDay,
-          15,
-          timeZone
-        )
-      : [];
-  const dayData = beforeSeries.map((point, index) => ({
-    timeLabel: point.timeLabel,
-    beforeKw: point.consumptionKw,
-    afterKw: afterSeries[index]?.consumptionKw ?? 0,
-    contractKw
-  }));
-  const maxOverlayKw = Math.max(
-    0,
-    ...dayData.map((point) => Math.max(point.beforeKw ?? 0, point.afterKw ?? 0, point.contractKw ?? 0))
-  );
-  const overlayYMax = (maxOverlayKw > 0 ? maxOverlayKw : 60) * 1.1;
+  const gridAfterComplianceKwh = sizing.kWhNeededRaw;
+  const gridBeforeComplianceKwh = compliance > 0 ? gridAfterComplianceKwh / compliance : gridAfterComplianceKwh;
+  const batteryBeforeSafetyKwh = efficiency > 0 ? gridAfterComplianceKwh / efficiency : 0;
+  const finalBatteryKwh = sizing.kWhNeeded;
+  const sizingBreakdownData = [
+    { step: 'Grid basis', value: Math.max(0, gridBeforeComplianceKwh) },
+    { step: 'After compliance', value: Math.max(0, gridAfterComplianceKwh) },
+    { step: 'After efficiency', value: Math.max(0, batteryBeforeSafetyKwh) },
+    { step: 'Final (buffer)', value: Math.max(0, finalBatteryKwh) }
+  ];
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="rounded-lg border bg-white p-4">
-        <h3 className="mb-2 font-semibold">Exceedance energy before/after</h3>
+        <h3 className="mb-2 font-semibold">Exceedance energy before/after (dataset simulation)</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={scenarios}>
@@ -91,7 +63,7 @@ export function ScenarioCharts({
 
       <div className="rounded-lg border bg-white p-4">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-semibold">Highest peak day overlay</h3>
+          <h3 className="font-semibold">Sizing breakdown (kWh)</h3>
           <select
             value={selectedScenarioCapacity}
             onChange={(event) => onSelectScenario(Number(event.target.value))}
@@ -104,18 +76,27 @@ export function ScenarioCharts({
             ))}
           </select>
         </div>
-        <div className="h-64">
+        <div className="h-56">
           <ResponsiveContainer>
-            <ComposedChart data={dayData}>
+            <ComposedChart data={sizingBreakdownData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="timeLabel" minTickGap={24} />
-              <YAxis domain={[0, overlayYMax]} />
-              <Tooltip labelFormatter={(value) => (typeof value === 'string' ? value : String(value))} />
-              <Line dataKey="beforeKw" stroke="#ef4444" dot={false} name="Original" />
-              <Line dataKey="afterKw" stroke="#10b981" dot={false} name="Shaved" />
-              <ReferenceLine y={contractKw} stroke="#0369a1" strokeDasharray="4 4" />
+              <XAxis dataKey="step" />
+              <YAxis />
+              <Tooltip formatter={(value) => `${Number(value).toFixed(2)} kWh`} />
+              <Bar dataKey="value" fill="#0ea5e9" name="kWh" />
             </ComposedChart>
           </ResponsiveContainer>
+        </div>
+        {selected && (
+          <p className="mt-2 text-xs text-slate-600">
+            Geselecteerde scenario-optie voor vergelijking: <span className="font-medium">{selected.optionLabel}</span>
+          </p>
+        )}
+        <div className="mt-2 grid gap-1 text-xs text-slate-600 md:grid-cols-2">
+          <div>Compliance target: {(compliance * 100).toFixed(0)}%</div>
+          <div>Efficiency: {(efficiency * 100).toFixed(0)}%</div>
+          <div>Safety factor: {safetyFactor.toFixed(2)}x</div>
+          <div>Buffer + losses included in final `kWh needed`</div>
         </div>
       </div>
     </div>

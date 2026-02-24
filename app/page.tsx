@@ -362,8 +362,10 @@ export default function HomePage() {
             scenarios={analysisResult.scenarios}
             selectedScenarioCapacity={selectedScenario}
             onSelectScenario={setSelectedScenario}
-            highestPeakDay={analysisResult.highestPeakDay}
-            contractKw={appliedSettings?.contractedPowerKw ?? draftSettings.contractedPowerKw}
+            sizing={analysisResult.sizing}
+            efficiency={appliedSettings?.efficiency ?? draftSettings.efficiency}
+            safetyFactor={appliedSettings?.safetyFactor ?? draftSettings.safetyFactor}
+            compliance={appliedSettings?.compliance ?? draftSettings.compliance}
           />
 
           <div className="rounded-lg border bg-white p-4">

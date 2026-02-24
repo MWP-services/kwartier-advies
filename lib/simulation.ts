@@ -176,6 +176,8 @@ export function simulateSingleScenario(
     const actualChargeKw = Math.min(headroomKw, maxChargeKw);
     const chargeKwh = actualChargeKw * 0.25 * chargeEff;
     soc = Math.min(batteryCapacityLimitKwh, soc + chargeKwh);
+    // Show the actual post-battery grid load in overlays: charging increases grid load, discharge reduces it.
+    let postBatteryGridKw = interval.consumptionKw + actualChargeKw;
 
     if (interval.excessKw > 0) {
       exceedanceIntervalsBefore += 1;
@@ -187,27 +189,28 @@ export function simulateSingleScenario(
       const deliveredFromSocKwh = Math.min(dischargeNeedKwh / dischargeEff, soc);
       soc -= deliveredFromSocKwh;
       const deliveredToLoadKwh = deliveredFromSocKwh * dischargeEff;
-      const shavedKw = deliveredToLoadKwh / 0.25;
+      const dischargeKw = deliveredToLoadKwh / 0.25;
 
-      const remainingExcessKw = Math.max(0, interval.excessKw - shavedKw);
+      const remainingExcessKw = Math.max(0, interval.excessKw - dischargeKw);
       if (remainingExcessKw > 0) {
         exceedanceIntervalsAfter += 1;
         exceedanceEnergyKwhAfter += remainingExcessKw * 0.25;
         dayTotal.after += remainingExcessKw * 0.25;
       }
       maxRemainingExcessKw = Math.max(maxRemainingExcessKw, remainingExcessKw);
+      postBatteryGridKw = interval.consumptionKw - dischargeKw;
 
       return {
         timestamp: interval.timestamp,
         originalKw: interval.consumptionKw,
-        shavedKw: interval.consumptionKw - shavedKw
+        shavedKw: postBatteryGridKw
       };
     }
 
     return {
       timestamp: interval.timestamp,
       originalKw: interval.consumptionKw,
-      shavedKw: interval.consumptionKw
+      shavedKw: postBatteryGridKw
     };
   });
 
