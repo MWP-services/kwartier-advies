@@ -18,7 +18,10 @@ export function KpiCards({ maxObservedKw, maxObservedTimestamp, exceedanceInterv
     { label: 'Exceedance intervals', value: String(exceedanceIntervals) },
     { label: 'kWh needed', value: sizing.kWhNeeded.toFixed(2) },
     { label: 'kW needed', value: sizing.kWNeeded.toFixed(2) },
-    { label: 'Recommended', value: sizing.recommendedProduct.capacityKwh + ' kWh' }
+    {
+      label: 'Recommended',
+      value: sizing.recommendedProduct ? `${sizing.recommendedProduct.capacityKwh} kWh` : 'No feasible option'
+    }
   ];
 
   return (

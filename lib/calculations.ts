@@ -45,16 +45,19 @@ export interface SizingResult {
   kWNeededRaw: number;
   kWhNeeded: number;
   kWNeeded: number;
-  recommendedProduct: BatteryProduct;
+  recommendedProduct: BatteryProduct | null;
   alternativeProduct: BatteryProduct | null;
+  noFeasibleBatteryByPower: boolean;
 }
 
 export interface BatteryProduct {
   label: string;
   capacityKwh: number;
+  powerKw: number;
   modular?: boolean;
   unitPriceEur?: number;
   unitCapacityKwh?: number;
+  unitPowerKw?: number;
   count?: number;
   totalPriceEur?: number;
   breakdown?: BatteryBreakdown[];
@@ -90,30 +93,35 @@ export const BATTERY_OPTIONS: BatteryProduct[] = [
   {
     label: 'WattsNext ESS Cabinet 64 kWh',
     capacityKwh: 64,
+    powerKw: 30,
     modular: true,
     unitPriceEur: 15689.33
   },
   {
     label: 'WattsNext ESS Cabinet 96 kWh',
     capacityKwh: 96,
+    powerKw: 48,
     modular: true,
     unitPriceEur: 22225.98
   },
   {
     label: 'ESS All-in-one Cabinet 261 kWh',
     capacityKwh: 261,
+    powerKw: 125,
     modular: true,
     unitPriceEur: 43995.96
   },
   {
     label: 'WattsNext All-in-one Container 2.09 MWh',
     capacityKwh: 2090,
+    powerKw: 1000,
     modular: false,
     unitPriceEur: 318658.06
   },
   {
     label: 'WattsNext All in-one Container 5.015 MWh',
     capacityKwh: 5015,
+    powerKw: 2580,
     modular: false,
     unitPriceEur: 675052.49
   }
@@ -122,10 +130,13 @@ export const BATTERY_OPTIONS: BatteryProduct[] = [
 interface BatteryConfigurationCandidate {
   label: string;
   totalCapacityKwh: number;
+  totalPowerKw: number;
   totalPriceEur: number;
   overCapacityKwh: number;
+  overPowerKw: number;
   count: number;
   unitCapacityKwh: number;
+  unitPowerKw: number;
   unitPriceEur: number;
 }
 
@@ -138,7 +149,9 @@ function toBatteryProduct(candidate: BatteryConfigurationCandidate): BatteryProd
   return {
     label: candidate.label,
     capacityKwh: candidate.totalCapacityKwh,
+    powerKw: candidate.totalPowerKw,
     unitCapacityKwh: candidate.unitCapacityKwh,
+    unitPowerKw: candidate.unitPowerKw,
     count: candidate.count,
     unitPriceEur: roundCurrency(candidate.unitPriceEur),
     totalPriceEur,
@@ -154,42 +167,54 @@ function toBatteryProduct(candidate: BatteryConfigurationCandidate): BatteryProd
   };
 }
 
-export function selectMinimumCostBatteryOptions(requiredKwh: number): {
-  recommendedProduct: BatteryProduct;
+export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw = 0): {
+  recommendedProduct: BatteryProduct | null;
   alternativeProduct: BatteryProduct | null;
+  noFeasibleBatteryByPower: boolean;
 } {
-  const normalizedRequired = Math.max(0, requiredKwh);
+  const normalizedRequiredKwh = Math.max(0, requiredKwh);
+  const normalizedRequiredKw = Math.max(0, requiredKw);
   const candidates: BatteryConfigurationCandidate[] = [];
 
   BATTERY_OPTIONS.forEach((option) => {
     const unitPriceEur = option.unitPriceEur ?? 0;
     if (option.modular) {
-      const maxCount = Math.max(1, Math.ceil(normalizedRequired / option.capacityKwh));
+      const minCountByKwh = Math.ceil(normalizedRequiredKwh / option.capacityKwh);
+      const minCountByKw = Math.ceil(normalizedRequiredKw / option.powerKw);
+      const requiredCount = Math.max(1, minCountByKwh, minCountByKw);
+      const maxCount = requiredCount;
       for (let count = 1; count <= maxCount; count += 1) {
         const totalCapacityKwh = count * option.capacityKwh;
-        if (totalCapacityKwh < normalizedRequired) continue;
+        const totalPowerKw = count * option.powerKw;
+        if (totalCapacityKwh < normalizedRequiredKwh || totalPowerKw < normalizedRequiredKw) continue;
         const totalPriceEur = count * unitPriceEur;
         candidates.push({
           label: `${count}x ${option.capacityKwh} kWh (modulair)`,
           totalCapacityKwh,
+          totalPowerKw,
           totalPriceEur,
-          overCapacityKwh: totalCapacityKwh - normalizedRequired,
+          overCapacityKwh: totalCapacityKwh - normalizedRequiredKwh,
+          overPowerKw: totalPowerKw - normalizedRequiredKw,
           count,
           unitCapacityKwh: option.capacityKwh,
+          unitPowerKw: option.powerKw,
           unitPriceEur
         });
       }
       return;
     }
 
-    if (option.capacityKwh >= normalizedRequired) {
+    if (option.capacityKwh >= normalizedRequiredKwh && option.powerKw >= normalizedRequiredKw) {
       candidates.push({
         label: option.label,
         totalCapacityKwh: option.capacityKwh,
+        totalPowerKw: option.powerKw,
         totalPriceEur: unitPriceEur,
-        overCapacityKwh: option.capacityKwh - normalizedRequired,
+        overCapacityKwh: option.capacityKwh - normalizedRequiredKwh,
+        overPowerKw: option.powerKw - normalizedRequiredKw,
         count: 1,
         unitCapacityKwh: option.capacityKwh,
+        unitPowerKw: option.powerKw,
         unitPriceEur
       });
     }
@@ -199,13 +224,26 @@ export function selectMinimumCostBatteryOptions(requiredKwh: number): {
     (a, b) =>
       a.totalPriceEur - b.totalPriceEur ||
       a.overCapacityKwh - b.overCapacityKwh ||
+      a.overPowerKw - b.overPowerKw ||
       a.totalCapacityKwh - b.totalCapacityKwh
   );
+
+  if (sorted.length === 0) {
+    return {
+      recommendedProduct: null,
+      alternativeProduct: null,
+      noFeasibleBatteryByPower: normalizedRequiredKw > 0
+    };
+  }
 
   const recommendedProduct = toBatteryProduct(sorted[0]);
   const alternativeProduct = sorted[1] ? toBatteryProduct(sorted[1]) : null;
 
-  return { recommendedProduct, alternativeProduct };
+  return {
+    recommendedProduct,
+    alternativeProduct,
+    noFeasibleBatteryByPower: false
+  };
 }
 
 export function processIntervals(
@@ -358,7 +396,10 @@ export function computeSizing(params: {
   const kWhNeeded = (kWhNeededRaw / efficiency) * safetyFactor;
   const kWNeeded = kWNeededRaw * safetyFactor;
 
-  const { recommendedProduct, alternativeProduct } = selectMinimumCostBatteryOptions(kWhNeeded);
+  const { recommendedProduct, alternativeProduct, noFeasibleBatteryByPower } = selectMinimumCostBatteryOptions(
+    kWhNeeded,
+    kWNeeded
+  );
 
   return {
     kWhNeededRaw,
@@ -366,7 +407,8 @@ export function computeSizing(params: {
     kWhNeeded,
     kWNeeded,
     recommendedProduct,
-    alternativeProduct
+    alternativeProduct,
+    noFeasibleBatteryByPower
   };
 }
 
