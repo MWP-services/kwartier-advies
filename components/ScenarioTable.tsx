@@ -8,17 +8,17 @@ interface ScenarioTableProps {
 export function ScenarioTable({ scenarios, recommendedCapacityKwh }: ScenarioTableProps) {
   return (
     <div className="wx-card">
-      <h3 className="wx-title">Multi-battery scenario comparison</h3>
+      <h3 className="wx-title">Vergelijking batterijscenario&apos;s</h3>
       <div className="overflow-x-auto">
         <table className="wx-table min-w-full text-sm">
           <thead>
             <tr className="border-b text-left">
-              <th className="p-2">Option</th>
-              <th className="p-2">Before kWh</th>
-              <th className="p-2">After kWh</th>
-              <th className="p-2">Dataset compliance</th>
-              <th className="p-2">Daily avg compliance</th>
-              <th className="p-2">Remaining max kW</th>
+              <th className="p-2">Optie</th>
+              <th className="p-2">Voor kWh</th>
+              <th className="p-2">Na kWh</th>
+              <th className="p-2">Compliance dataset</th>
+              <th className="p-2">Gem. dagcompliance</th>
+              <th className="p-2">Resterende max kW</th>
             </tr>
           </thead>
           <tbody>

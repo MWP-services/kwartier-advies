@@ -37,16 +37,16 @@ export function ScenarioCharts({
   const batteryBeforeSafetyKwh = efficiency > 0 ? gridAfterComplianceKwh / efficiency : 0;
   const finalBatteryKwh = sizing.kWhNeeded;
   const sizingBreakdownData = [
-    { step: 'Grid basis', value: Math.max(0, gridBeforeComplianceKwh) },
-    { step: 'After compliance', value: Math.max(0, gridAfterComplianceKwh) },
-    { step: 'After efficiency', value: Math.max(0, batteryBeforeSafetyKwh) },
-    { step: 'Final (buffer)', value: Math.max(0, finalBatteryKwh) }
+    { step: 'Netbasis', value: Math.max(0, gridBeforeComplianceKwh) },
+    { step: 'Na compliance', value: Math.max(0, gridAfterComplianceKwh) },
+    { step: 'Na efficiëntie', value: Math.max(0, batteryBeforeSafetyKwh) },
+    { step: 'Eindwaarde (buffer)', value: Math.max(0, finalBatteryKwh) }
   ];
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="wx-card">
-        <h3 className="wx-title">Exceedance energy before/after (dataset simulation)</h3>
+        <h3 className="wx-title">Overschrijdingsenergie voor/na (datasetsimulatie)</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={scenarios}>
@@ -54,8 +54,8 @@ export function ScenarioCharts({
               <XAxis dataKey="optionLabel" interval={0} angle={-20} textAnchor="end" height={60} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="exceedanceEnergyKwhBefore" fill="#f97316" name="Before" />
-              <Bar dataKey="exceedanceEnergyKwhAfter" fill="#3b82f6" name="After" />
+              <Bar dataKey="exceedanceEnergyKwhBefore" fill="#f97316" name="Voor" />
+              <Bar dataKey="exceedanceEnergyKwhAfter" fill="#3b82f6" name="Na" />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -63,7 +63,7 @@ export function ScenarioCharts({
 
       <div className="wx-card">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="wx-title !mb-0">Sizing breakdown (kWh)</h3>
+          <h3 className="wx-title !mb-0">Dimensioneringsopbouw (kWh)</h3>
           <select
             value={selectedScenarioCapacity}
             onChange={(event) => onSelectScenario(Number(event.target.value))}
@@ -93,10 +93,10 @@ export function ScenarioCharts({
           </p>
         )}
         <div className="mt-2 grid gap-1 text-xs text-slate-600 md:grid-cols-2">
-          <div>Compliance target: {(compliance * 100).toFixed(0)}%</div>
-          <div>Efficiency: {(efficiency * 100).toFixed(0)}%</div>
-          <div>Safety factor: {safetyFactor.toFixed(2)}x</div>
-          <div>Buffer + losses included in final `kWh needed`</div>
+          <div>Compliance-doel: {(compliance * 100).toFixed(0)}%</div>
+          <div>Efficiëntie: {(efficiency * 100).toFixed(0)}%</div>
+          <div>Veiligheidsfactor: {safetyFactor.toFixed(2)}x</div>
+          <div>Buffer + verliezen zijn verwerkt in de uiteindelijke benodigde kWh</div>
         </div>
       </div>
     </div>

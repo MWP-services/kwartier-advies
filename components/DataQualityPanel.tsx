@@ -17,13 +17,13 @@ export function DataQualityPanel({ diagnostics, quality }: DataQualityPanelProps
 
   return (
     <div className="wx-card">
-      <h3 className="wx-title">Data quality</h3>
+      <h3 className="wx-title">Datakwaliteit</h3>
       <div className="mt-2 grid gap-2 text-sm md:grid-cols-2">
         <p>Interpretatie: {interpretationLabel}</p>
         <p>
           Rijen totaal/gebruikt: {diagnostics.rowsTotal} / {diagnostics.rowsUsed}
         </p>
-        <p>Missing intervals: {quality.missingIntervalsCount}</p>
+        <p>Ontbrekende intervallen: {quality.missingIntervalsCount}</p>
         <p>
           Outliers uitgesloten: {diagnostics.countOutliers}
           {diagnostics.firstOutlierTimestamp

@@ -85,10 +85,10 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
   const batteryBeforeSafetyKwh =
     payload.efficiency > 0 ? gridAfterComplianceKwh / payload.efficiency : payload.sizing.kWhNeeded;
   const sizingBreakdown = [
-    { step: 'Grid basis', value: Math.max(0, gridBeforeComplianceKwh) },
-    { step: 'After compliance', value: Math.max(0, gridAfterComplianceKwh) },
-    { step: 'After efficiency', value: Math.max(0, batteryBeforeSafetyKwh) },
-    { step: 'Final (buffer)', value: Math.max(0, payload.sizing.kWhNeeded) }
+    { step: 'Netbasis', value: Math.max(0, gridBeforeComplianceKwh) },
+    { step: 'Na compliance', value: Math.max(0, gridAfterComplianceKwh) },
+    { step: 'Na efficiëntie', value: Math.max(0, batteryBeforeSafetyKwh) },
+    { step: 'Eindwaarde (buffer)', value: Math.max(0, payload.sizing.kWhNeeded) }
   ];
 
   const scenarioChartData = payload.scenarios.map((scenario) => ({
@@ -107,11 +107,11 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
   }));
 
   const kpiCards = [
-    ['Contracted power', `${payload.contractedPowerKw.toFixed(2)} kW`],
-    ['Max observed', `${payload.maxObservedKw.toFixed(2)} kW`],
-    ['Exceedance intervals', String(payload.exceedanceCount)],
-    ['Sizing requirement', `${payload.sizing.kWhNeeded.toFixed(2)} kWh / ${payload.sizing.kWNeeded.toFixed(2)} kW`],
-    ['Recommended', payload.sizing.recommendedProduct?.label ?? 'No feasible battery by kW + kWh']
+    ['Gecontracteerd vermogen', `${payload.contractedPowerKw.toFixed(2)} kW`],
+    ['Maximaal gemeten', `${payload.maxObservedKw.toFixed(2)} kW`],
+    ['Overschrijdingsintervallen', String(payload.exceedanceCount)],
+    ['Benodigde sizing', `${payload.sizing.kWhNeeded.toFixed(2)} kWh / ${payload.sizing.kWNeeded.toFixed(2)} kW`],
+    ['Aanbevolen', payload.sizing.recommendedProduct?.label ?? 'Geen haalbare batterij op basis van kW + kWh']
   ];
 
   const intervals = payload.intervals ?? [];
@@ -168,7 +168,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WattsNext Peak Shaving Report</title>
+  <title>WattsNext Peak Shaving Rapport</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
     :root {
@@ -431,12 +431,12 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
         }
       </div>
       <div class="brand">
-        <h1>Peak Shaving Report</h1>
-        <p>ENERGY SOLUTIONS</p>
+        <h1>Peak Shaving Rapport</h1>
+        <p>ENERGIEOPLOSSINGEN</p>
       </div>
       <div class="stamp">
-        <div class="pill">Peak Shaving Report</div>
-        <div style="margin-top:8px;">Method: ${payload.method}</div>
+        <div class="pill">Peak Shaving Rapport</div>
+        <div style="margin-top:8px;">Methode: ${payload.method}</div>
         <div>Compliance: ${(payload.compliance * 100).toFixed(0)}%</div>
       </div>
     </section>
@@ -487,7 +487,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>Exceedance Energy Before/After (Dataset Simulation)</h3>
+        <h3>Overschrijdingsenergie Voor/Na (Datasetsimulatie)</h3>
         <div id="exceedance-chart" class="plot"></div>
         <div id="exceedance-baseline-note" class="muted" style="margin-top:6px;"></div>
         <div class="callout">
@@ -496,7 +496,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
         </div>
       </div>
       <div class="card">
-        <h3>Sizing Breakdown (kWh)</h3>
+        <h3>Dimensioneringsopbouw (kWh)</h3>
         <div id="sizing-chart" class="plot short"></div>
         <div class="callout">
           <p class="callout-title">Uitleg</p>
@@ -507,12 +507,12 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>Highest Peak Day Profile</h3>
+        <h3>Profiel hoogste piekdag</h3>
         <div id="highest-peak-chart" class="plot"></div>
         <div class="muted">Blauw = gemeten verbruik, groen = contractlijn, rood = overschrijding boven contract (kW), oranje markers = piekmomenten.</div>
       </div>
       <div class="card">
-        <h3>Consumption Histogram</h3>
+        <h3>Verbruikshistogram</h3>
         <div id="histogram-chart" class="plot"></div>
         <div class="muted">Verdeling van kwartierverbruik. Groen = ruim onder contract, oranje = dichtbij contract, rood = boven contract.</div>
       </div>
@@ -520,45 +520,45 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>All Peak Moments</h3>
+        <h3>Alle piekmomenten</h3>
         <table>
           <thead>
             <tr>
-              <th>Peak timestamp</th>
-              <th>Consumption kW</th>
-              <th>Excess kW</th>
-              <th>Excess kWh</th>
+              <th>Piektijdstip</th>
+              <th>Verbruik kW</th>
+              <th>Overschrijding kW</th>
+              <th>Overschrijding kWh</th>
             </tr>
           </thead>
           <tbody id="peak-moments-body"></tbody>
         </table>
       </div>
       <div class="card">
-        <h3>Data Quality & Assumptions</h3>
+        <h3>Datakwaliteit & aannames</h3>
         <table>
           <tbody>
-            <tr><th>Rows</th><td>${payload.quality.rows}</td></tr>
-            <tr><th>Date range</th><td>${payload.quality.startDate ?? '-'} to ${payload.quality.endDate ?? '-'}</td></tr>
-            <tr><th>Missing intervals</th><td>${payload.quality.missingIntervalsCount}</td></tr>
-            <tr><th>Duplicates</th><td>${payload.quality.duplicateCount}</td></tr>
-            <tr><th>Non-15-min transitions</th><td>${payload.quality.non15MinIntervals}</td></tr>
-            <tr><th>Max observed timestamp</th><td>${payload.maxObservedTimestamp ? formatTimestamp(payload.maxObservedTimestamp) : '-'}</td></tr>
-            <tr><th>Efficiency</th><td>${(payload.efficiency * 100).toFixed(0)}%</td></tr>
-            <tr><th>Safety factor</th><td>${payload.safetyFactor.toFixed(2)}x</td></tr>
+            <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
+            <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
+            <tr><th>Ontbrekende intervallen</th><td>${payload.quality.missingIntervalsCount}</td></tr>
+            <tr><th>Duplicaten</th><td>${payload.quality.duplicateCount}</td></tr>
+            <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
+            <tr><th>Tijdstip maximaal gemeten</th><td>${payload.maxObservedTimestamp ? formatTimestamp(payload.maxObservedTimestamp) : '-'}</td></tr>
+            <tr><th>Efficiëntie</th><td>${(payload.efficiency * 100).toFixed(0)}%</td></tr>
+            <tr><th>Veiligheidsfactor</th><td>${payload.safetyFactor.toFixed(2)}x</td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
     <section class="card" style="margin-top:16px;">
-      <h3>Peak Events (clustered)</h3>
+      <h3>Piekgebeurtenissen (geclusterd)</h3>
       <table>
         <thead>
           <tr>
-            <th>Peak timestamp</th>
-            <th>Duration (x15m)</th>
-            <th>Max excess kW</th>
-            <th>Total excess kWh</th>
+            <th>Piektijdstip</th>
+            <th>Duur (x15m)</th>
+            <th>Max overschrijding kW</th>
+            <th>Totale overschrijding kWh</th>
           </tr>
         </thead>
         <tbody id="peak-events-body"></tbody>
@@ -566,7 +566,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
     </section>
 
     <footer class="footer">
-      <div>WattsNext Energy Solutions</div>
+      <div>WattsNext Energieoplossingen</div>
       <div>Pagina 1</div>
     </footer>
   </div>
@@ -591,21 +591,21 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
     Plotly.newPlot('exceedance-chart', [
       {
         type: 'bar',
-        name: 'Before',
+        name: 'Voor',
         x: scenarioData.map(d => d.optionLabel),
         y: scenarioData.map(d => d.before),
         marker: {color: '#F59E0B'},
-        hovertemplate: '%{x}<br>Before: %{y:.2f} kWh<extra></extra>'
+        hovertemplate: '%{x}<br>Voor: %{y:.2f} kWh<extra></extra>'
       },
       {
         type: 'bar',
-        name: 'After',
+        name: 'Na',
         x: scenarioData.map(d => d.optionLabel),
         y: scenarioData.map(d => d.after),
         marker: {color: '#22C55E'},
         customdata: reductionPct.map((pct, i) => [reductionKwh[i], pct]),
         hovertemplate:
-          '%{x}<br>After: %{y:.2f} kWh<br>Reduction: %{customdata[0]:.2f} kWh (%{customdata[1]:.1f}%)<extra></extra>'
+          '%{x}<br>Na: %{y:.2f} kWh<br>Reductie: %{customdata[0]:.2f} kWh (%{customdata[1]:.1f}%)<extra></extra>'
       }
     ], {
       ...wattsTheme,
@@ -621,7 +621,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
     const baselineNote = document.getElementById('exceedance-baseline-note');
     if (baselineNote) {
       baselineNote.textContent =
-        'Before is opgebouwd uit ' +
+        'Voor is opgebouwd uit ' +
         exceedanceIntervalsCount +
         ' overschrijdingsintervallen: totaal ' +
         beforeBaseline.toFixed(2) +
@@ -660,23 +660,23 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
     Plotly.newPlot('highest-peak-chart', [
       {
         type: 'bar',
-        name: 'Excess boven contract (kW)',
+        name: 'Overschrijding boven contract (kW)',
         x: profileIndex,
         y: profileExcess,
         customdata: profileTimes,
         marker: {color: '#EF4444', opacity: 0.5},
-        hovertemplate: '%{customdata}<br>Excess: %{y:.2f} kW<extra></extra>'
+        hovertemplate: '%{customdata}<br>Overschrijding: %{y:.2f} kW<extra></extra>'
       },
       {
         type: 'scatter',
         mode: 'lines',
-        name: 'Consumption kW',
+        name: 'Verbruik kW',
         x: profileIndex,
         y: profileConsumption,
         customdata: profileContract.map((contract, i) => [profileTimes[i], contract, profileExcess[i]]),
         line: {color: '#2563EB', width: 2.5},
         hovertemplate:
-          '%{customdata[0]}<br>Consumption: %{y:.2f} kW<br>Contract: %{customdata[1]:.2f} kW<br>Excess: %{customdata[2]:.2f} kW<extra></extra>'
+          '%{customdata[0]}<br>Verbruik: %{y:.2f} kW<br>Contract: %{customdata[1]:.2f} kW<br>Overschrijding: %{customdata[2]:.2f} kW<extra></extra>'
       },
       {
         type: 'scatter',
@@ -691,12 +691,12 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       {
         type: 'scatter',
         mode: 'markers',
-        name: 'Peak moments',
+        name: 'Piektijdstippen',
         x: peakIndices,
         y: peakValues,
         customdata: peakTimes,
         marker: {color: '#F97316', size: 6, symbol: 'diamond'},
-        hovertemplate: '%{customdata}<br>Peak moment: %{y:.2f} kW<extra></extra>'
+        hovertemplate: '%{customdata}<br>Piekmoment: %{y:.2f} kW<extra></extra>'
       }
     ], {
       ...wattsTheme,

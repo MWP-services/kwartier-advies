@@ -15,13 +15,13 @@ export function ColumnMapper({ headers, mapping, onChange }: ColumnMapperProps) 
 
   return (
     <div className="wx-card">
-      <h2 className="wx-title">Column Mapping</h2>
+      <h2 className="wx-title">Kolomkoppeling</h2>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         {[
           ['timestamp', 'timestamp'],
           ['consumptionKwh', 'consumption_kwh'],
-          ['exportKwh', 'export_kwh (optional)'],
-          ['pvKwh', 'pv_kwh (optional)']
+          ['exportKwh', 'export_kwh (optioneel)'],
+          ['pvKwh', 'pv_kwh (optioneel)']
         ].map(([key, label]) => (
           <label key={key} className="text-sm">
             {label}
@@ -30,7 +30,7 @@ export function ColumnMapper({ headers, mapping, onChange }: ColumnMapperProps) 
               value={mapping[key as keyof ColumnMapping] ?? ''}
               onChange={(event) => update(key as keyof ColumnMapping, event.target.value)}
             >
-              <option value="">Select column</option>
+              <option value="">Selecteer kolom</option>
               {headers.map((header) => (
                 <option key={header} value={header}>
                   {header}

@@ -9,7 +9,7 @@ export function ComplianceSlider({ compliance, onChange }: ComplianceSliderProps
   return (
     <div className="wx-card">
       <div className="flex items-center justify-between">
-        <label className="wx-title !mb-0">Compliance target</label>
+        <label className="wx-title !mb-0">Compliance-doel</label>
         <span className="rounded-md bg-lime-50 px-2 py-1 text-sm font-semibold text-lime-800">
           {Math.round(compliance * 100)}%
         </span>
@@ -24,7 +24,7 @@ export function ComplianceSlider({ compliance, onChange }: ComplianceSliderProps
         onChange={(event) => onChange(Number(event.target.value) / 100)}
       />
       <p className="mt-2 text-xs text-slate-600">
-        Compliance = target percentage of peak exceedance to shave.
+        Compliance = doelpercentage van piekoverschrijding dat wordt afgevlakt.
       </p>
     </div>
   );

@@ -67,7 +67,7 @@ export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, top
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="wx-card">
-        <h3 className="wx-title">Highest Peak Day Profile</h3>
+        <h3 className="wx-title">Profiel hoogste piekdag</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={daySeries}>
@@ -99,9 +99,9 @@ export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, top
           <table className="wx-table min-w-full text-xs">
             <thead className="sticky top-0 bg-slate-50">
               <tr className="border-b text-left">
-                <th className="p-2">Timestamp</th>
-                <th className="p-2">Consumption kW</th>
-                <th className="p-2">Excess kW</th>
+                <th className="p-2">Tijdstip</th>
+                <th className="p-2">Verbruik kW</th>
+                <th className="p-2">Overschrijding kW</th>
               </tr>
             </thead>
             <tbody>
@@ -118,7 +118,7 @@ export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, top
       </div>
 
       <div className="wx-card">
-        <h3 className="wx-title">Consumption Histogram</h3>
+        <h3 className="wx-title">Verbruikshistogram</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={hist}>
@@ -146,15 +146,15 @@ export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, top
       </div>
 
       <div className="wx-card lg:col-span-2">
-        <h3 className="wx-title">All Peak Events</h3>
+        <h3 className="wx-title">Alle piekmomenten</h3>
         <div className="overflow-x-auto">
           <table className="wx-table min-w-full text-sm">
             <thead>
               <tr className="border-b text-left">
-                <th className="p-2">Peak timestamp</th>
-                <th className="p-2">Consumption kW</th>
-                <th className="p-2">Excess kW</th>
-                <th className="p-2">Excess kWh</th>
+                <th className="p-2">Piektijdstip</th>
+                <th className="p-2">Verbruik kW</th>
+                <th className="p-2">Overschrijding kW</th>
+                <th className="p-2">Overschrijding kWh</th>
               </tr>
             </thead>
             <tbody>

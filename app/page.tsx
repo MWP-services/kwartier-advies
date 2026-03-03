@@ -143,7 +143,7 @@ export default function HomePage() {
       setAnalysisResult(null);
       setAnalyzedAt(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not parse file');
+      setError(err instanceof Error ? err.message : 'Bestand kon niet worden ingelezen');
     }
   };
 
@@ -258,12 +258,12 @@ export default function HomePage() {
               priority
             />
             <div>
-              <h1 className="text-2xl font-bold md:text-3xl">Peak Shaving Advisor</h1>
+              <h1 className="text-2xl font-bold md:text-3xl">Peak Shaving Adviseur</h1>
               <p className="text-sm text-slate-600">Snelle batterij-analyse in WattsNext-stijl</p>
             </div>
           </div>
           <div className="rounded-lg border border-lime-200 bg-lime-50 px-3 py-2 text-xs font-medium text-lime-800">
-            ENERGY SOLUTIONS
+            ENERGIEOPLOSSINGEN
           </div>
         </div>
       </section>
@@ -274,7 +274,7 @@ export default function HomePage() {
 
       <div className="wx-card grid gap-4 lg:grid-cols-3">
         <label className="text-sm">
-          Contracted power (kW)
+          Gecontracteerd vermogen (kW)
           <input
             className="wx-input"
             type="number"
@@ -286,7 +286,7 @@ export default function HomePage() {
         </label>
 
         <label className="text-sm">
-          Method
+          Methode
           <select
             className="wx-input"
             value={draftSettings.method}
@@ -301,7 +301,7 @@ export default function HomePage() {
         </label>
 
         <label className="text-sm">
-          Interpretation
+          Interpretatie
           <select
             className="wx-input"
             value={draftSettings.interpretationMode}
@@ -313,14 +313,14 @@ export default function HomePage() {
             }
           >
             <option value="AUTO">Auto</option>
-            <option value="INTERVAL">Interval values</option>
-            <option value="CUMULATIVE_DELTA">Cumulative meter readings (delta)</option>
+            <option value="INTERVAL">Intervalwaarden</option>
+            <option value="CUMULATIVE_DELTA">Cumulatieve meterstanden (delta)</option>
           </select>
         </label>
 
         <div className="grid grid-cols-2 gap-2">
           <label className="text-sm">
-            Safety factor
+            Veiligheidsfactor
             <input
               className="wx-input"
               type="number"
@@ -332,7 +332,7 @@ export default function HomePage() {
             />
           </label>
           <label className="text-sm">
-            Efficiency
+            Efficiëntie
             <input
               className="wx-input"
               type="number"
@@ -358,21 +358,21 @@ export default function HomePage() {
             onClick={handleAnalyze}
             disabled={!canAnalyze || isAnalyzing}
           >
-            {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+            {isAnalyzing ? 'Analyseren...' : 'Analyseer'}
           </button>
           <button
             className="wx-btn-secondary"
             onClick={resetDraft}
             disabled={!hasPendingChanges}
           >
-            Reset changes
+            Wijzigingen resetten
           </button>
         </div>
       </div>
 
       {hasPendingChanges && (
         <p className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          Changes not applied. Klik op Analyze om resultaten te verversen.
+          Wijzigingen zijn nog niet toegepast. Klik op Analyseer om resultaten te verversen.
         </p>
       )}
 
@@ -425,35 +425,35 @@ export default function HomePage() {
           />
 
           <div className="wx-card">
-            <h3 className="wx-title">Recommendation</h3>
+            <h3 className="wx-title">Advies</h3>
             <p>
-              Recommended:{' '}
+              Aanbevolen:{' '}
               {analysisResult.sizing.recommendedProduct
                 ? analysisResult.sizing.recommendedProduct.label
                 : 'Geen haalbare batterijconfiguratie op basis van kWh + kW'}
             </p>
             <p>
-              Alternative:{' '}
+              Alternatief:{' '}
               {analysisResult.sizing.alternativeProduct
                 ? analysisResult.sizing.alternativeProduct.label
-                : 'No larger product available'}
+                : 'Geen grotere productoptie beschikbaar'}
             </p>
-            {analyzedAt && <p className="mt-1 text-xs text-slate-500">Last analyzed: {analyzedAt}</p>}
+            {analyzedAt && <p className="mt-1 text-xs text-slate-500">Laatst geanalyseerd: {analyzedAt}</p>}
             <p className="mt-2 text-xs text-slate-500">
-              Sizing for peak shaving; final engineering validation required.
+              Dimensionering voor peak shaving; finale engineeringvalidatie blijft vereist.
             </p>
             <button
               className="wx-btn-primary mt-3"
               onClick={downloadReport}
               disabled={!analysisResult}
             >
-              Download Interactive Report
+              Download interactief rapport
             </button>
           </div>
         </>
       ) : (
         <div className="wx-card text-sm text-slate-600">
-          Upload data and click Analyze to generate results.
+          Upload data en klik op Analyseer om resultaten te genereren.
         </div>
       )}
     </main>
