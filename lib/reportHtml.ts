@@ -491,7 +491,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
         <div id="exceedance-chart" class="plot"></div>
         <div class="callout">
           <p class="callout-title">Uitleg</p>
-          <p class="callout-body">Deze grafiek toont het effect per batterijoptie op de gemeten overschrijdingsenergie in de dataset (voor en na simulatie).</p>
+          <p class="callout-body">Per batterijoptie zie je overschrijdingsenergie vóór en na inzet, inclusief reductie in kWh en procenten.</p>
         </div>
       </div>
       <div class="card">
@@ -508,7 +508,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       <div class="card">
         <h3>Highest Peak Day Profile</h3>
         <div id="highest-peak-chart" class="plot"></div>
-        <div class="muted">Blauw = gemeten verbruik, groen = gecontracteerd vermogen, markers = overschrijdende kwartieren.</div>
+        <div class="muted">Blauw = gemeten verbruik, groen = contractlijn, rood = overschrijding boven contract (kW), oranje markers = piekmomenten.</div>
       </div>
       <div class="card">
         <h3>Consumption Histogram</h3>
@@ -585,26 +585,48 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       margin: {t: 12, r: 12, b: 70, l: 55}
     };
 
+    const reductionKwh = scenarioData.map(d => Math.max(0, d.before - d.after));
+    const reductionPct = scenarioData.map(d => (d.before > 0 ? ((d.before - d.after) / d.before) * 100 : 0));
+    const reductionLabels = reductionPct.map((pct, i) => '-' + reductionKwh[i].toFixed(2) + ' kWh (' + pct.toFixed(1) + '%)');
+
     Plotly.newPlot('exceedance-chart', [
       {
         type: 'bar',
         name: 'Before',
         x: scenarioData.map(d => d.optionLabel),
         y: scenarioData.map(d => d.before),
-        marker: {color: '#F59E0B'}
+        marker: {color: '#F59E0B'},
+        hovertemplate: '%{x}<br>Before: %{y:.2f} kWh<extra></extra>'
       },
       {
         type: 'bar',
         name: 'After',
         x: scenarioData.map(d => d.optionLabel),
         y: scenarioData.map(d => d.after),
-        marker: {color: '#22C55E'}
+        marker: {color: '#22C55E'},
+        customdata: reductionPct.map((pct, i) => [reductionKwh[i], pct]),
+        hovertemplate:
+          '%{x}<br>After: %{y:.2f} kWh<br>Reduction: %{customdata[0]:.2f} kWh (%{customdata[1]:.1f}%)<extra></extra>'
+      },
+      {
+        type: 'scatter',
+        mode: 'text',
+        name: 'Reduction',
+        showlegend: false,
+        x: scenarioData.map(d => d.optionLabel),
+        y: scenarioData.map(d => d.after),
+        text: reductionLabels,
+        textposition: 'top center',
+        textfont: {size: 10, color: '#334155'},
+        hoverinfo: 'skip'
       }
     ], {
       ...wattsTheme,
       barmode: 'group',
-      xaxis: {tickangle: -25},
-      yaxis: {title: 'kWh'}
+      hovermode: 'x unified',
+      xaxis: {tickangle: -20},
+      yaxis: {title: 'kWh', rangemode: 'tozero'},
+      margin: {t: 30, r: 12, b: 90, l: 55}
     }, {responsive: true, displaylogo: false});
 
     Plotly.newPlot('sizing-chart', [{
@@ -621,21 +643,41 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       yaxis: {title: 'kWh'}
     }, {responsive: true, displaylogo: false});
 
+    const profileTimes = dayProfile.map(d => d.timeLabel);
+    const profileConsumption = dayProfile.map(d => d.consumptionKw);
+    const profileContract = dayProfile.map(d => d.contractKw);
+    const profileExcess = dayProfile.map(d => Math.max(0, d.consumptionKw - d.contractKw));
+    const tickStep = 4; // 4 x 15 min = elk uur label
+    const xTickVals = profileTimes.filter((_, index) => index % tickStep === 0);
+
     Plotly.newPlot('highest-peak-chart', [
       {
         type: 'bar',
+        name: 'Excess boven contract (kW)',
+        x: profileTimes,
+        y: profileExcess,
+        marker: {color: '#EF4444', opacity: 0.5},
+        hovertemplate: '%{x}<br>Excess: %{y:.2f} kW<extra></extra>'
+      },
+      {
+        type: 'scatter',
+        mode: 'lines',
         name: 'Consumption kW',
-        x: dayProfile.map(d => d.timeLabel),
-        y: dayProfile.map(d => d.consumptionKw),
-        marker: {color: '#60A5FA'}
+        x: profileTimes,
+        y: profileConsumption,
+        customdata: profileContract.map((contract, i) => [contract, profileExcess[i]]),
+        line: {color: '#2563EB', width: 2.5},
+        hovertemplate:
+          '%{x}<br>Consumption: %{y:.2f} kW<br>Contract: %{customdata[0]:.2f} kW<br>Excess: %{customdata[1]:.2f} kW<extra></extra>'
       },
       {
         type: 'scatter',
         mode: 'lines',
         name: 'Contract kW',
-        x: dayProfile.map(d => d.timeLabel),
-        y: dayProfile.map(d => d.contractKw),
-        line: {color: '#22C55E', width: 3}
+        x: profileTimes,
+        y: profileContract,
+        line: {color: '#22C55E', width: 2.5, dash: 'dash'},
+        hovertemplate: '%{x}<br>Contract: %{y:.2f} kW<extra></extra>'
       },
       {
         type: 'scatter',
@@ -643,12 +685,30 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
         name: 'Peak moments',
         x: dayProfile.filter(d => d.isPeakMoment).map(d => d.timeLabel),
         y: dayProfile.filter(d => d.isPeakMoment).map(d => d.consumptionKw),
-        marker: {color: '#F97316', size: 8}
+        marker: {color: '#F97316', size: 10, symbol: 'diamond'},
+        hovertemplate: '%{x}<br>Peak moment: %{y:.2f} kW<extra></extra>'
       }
     ], {
       ...wattsTheme,
-      xaxis: {tickangle: -25},
-      yaxis: {title: 'kW'}
+      barmode: 'overlay',
+      hovermode: 'x unified',
+      xaxis: {
+        tickmode: 'array',
+        tickvals: xTickVals,
+        tickangle: 0,
+        showgrid: true,
+        gridcolor: '#F1F5F9',
+        showspikes: true,
+        spikemode: 'across',
+        spikesnap: 'cursor'
+      },
+      yaxis: {
+        title: 'kW',
+        showgrid: true,
+        gridcolor: '#E5E7EB',
+        rangemode: 'tozero'
+      },
+      legend: {orientation: 'h', y: 1.18}
     }, {responsive: true, displaylogo: false});
 
     Plotly.newPlot('histogram-chart', [{
