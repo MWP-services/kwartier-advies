@@ -644,58 +644,71 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
     }, {responsive: true, displaylogo: false});
 
     const profileTimes = dayProfile.map(d => d.timeLabel);
+    const profileIndex = dayProfile.map((_, index) => index);
     const profileConsumption = dayProfile.map(d => d.consumptionKw);
     const profileContract = dayProfile.map(d => d.contractKw);
     const profileExcess = dayProfile.map(d => Math.max(0, d.consumptionKw - d.contractKw));
-    const tickStep = 4; // 4 x 15 min = elk uur label
-    const xTickVals = profileTimes.filter((_, index) => index % tickStep === 0);
+    const tickStep = 8; // 8 x 15 min = elke 2 uur label
+    const xTickVals = profileIndex.filter((index) => index % tickStep === 0);
+    const xTickText = xTickVals.map((index) => profileTimes[index]);
+    const peakIndices = dayProfile
+      .map((d, index) => ({ ...d, index }))
+      .filter((d) => d.isPeakMoment)
+      .map((d) => d.index);
+    const peakTimes = peakIndices.map((index) => profileTimes[index]);
+    const peakValues = peakIndices.map((index) => profileConsumption[index]);
 
     Plotly.newPlot('highest-peak-chart', [
       {
         type: 'bar',
         name: 'Excess boven contract (kW)',
-        x: profileTimes,
+        x: profileIndex,
         y: profileExcess,
+        customdata: profileTimes,
         marker: {color: '#EF4444', opacity: 0.5},
-        hovertemplate: '%{x}<br>Excess: %{y:.2f} kW<extra></extra>'
+        hovertemplate: '%{customdata}<br>Excess: %{y:.2f} kW<extra></extra>'
       },
       {
         type: 'scatter',
         mode: 'lines',
         name: 'Consumption kW',
-        x: profileTimes,
+        x: profileIndex,
         y: profileConsumption,
-        customdata: profileContract.map((contract, i) => [contract, profileExcess[i]]),
+        customdata: profileContract.map((contract, i) => [profileTimes[i], contract, profileExcess[i]]),
         line: {color: '#2563EB', width: 2.5},
         hovertemplate:
-          '%{x}<br>Consumption: %{y:.2f} kW<br>Contract: %{customdata[0]:.2f} kW<br>Excess: %{customdata[1]:.2f} kW<extra></extra>'
+          '%{customdata[0]}<br>Consumption: %{y:.2f} kW<br>Contract: %{customdata[1]:.2f} kW<br>Excess: %{customdata[2]:.2f} kW<extra></extra>'
       },
       {
         type: 'scatter',
         mode: 'lines',
         name: 'Contract kW',
-        x: profileTimes,
+        x: profileIndex,
         y: profileContract,
+        customdata: profileTimes,
         line: {color: '#22C55E', width: 2.5, dash: 'dash'},
-        hovertemplate: '%{x}<br>Contract: %{y:.2f} kW<extra></extra>'
+        hovertemplate: '%{customdata}<br>Contract: %{y:.2f} kW<extra></extra>'
       },
       {
         type: 'scatter',
         mode: 'markers',
         name: 'Peak moments',
-        x: dayProfile.filter(d => d.isPeakMoment).map(d => d.timeLabel),
-        y: dayProfile.filter(d => d.isPeakMoment).map(d => d.consumptionKw),
+        x: peakIndices,
+        y: peakValues,
+        customdata: peakTimes,
         marker: {color: '#F97316', size: 10, symbol: 'diamond'},
-        hovertemplate: '%{x}<br>Peak moment: %{y:.2f} kW<extra></extra>'
+        hovertemplate: '%{customdata}<br>Peak moment: %{y:.2f} kW<extra></extra>'
       }
     ], {
       ...wattsTheme,
       barmode: 'overlay',
       hovermode: 'x unified',
       xaxis: {
+        type: 'linear',
         tickmode: 'array',
         tickvals: xTickVals,
-        tickangle: 0,
+        ticktext: xTickText,
+        tickangle: -20,
         showgrid: true,
         gridcolor: '#F1F5F9',
         showspikes: true,
@@ -708,7 +721,8 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
         gridcolor: '#E5E7EB',
         rangemode: 'tozero'
       },
-      legend: {orientation: 'h', y: 1.18}
+      legend: {orientation: 'h', y: 1.18},
+      margin: {t: 22, r: 12, b: 92, l: 55}
     }, {responsive: true, displaylogo: false});
 
     Plotly.newPlot('histogram-chart', [{
