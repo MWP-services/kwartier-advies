@@ -35,8 +35,16 @@ function getEmbeddedAsset(candidates: string[]): { dataUri: string; filePath: st
 function getEmbeddedLogoSrc(): string | null {
   const asset = getEmbeddedAsset([
     path.join(process.cwd(), '.next', 'assets', 'wattsnext-logo.png'),
+    path.join(process.cwd(), '.next', 'assets', 'wattsnext-logo.jpg'),
+    path.join(process.cwd(), '.next', 'assets', 'logo.png'),
     path.join(process.cwd(), '.next', 'assets', 'logo.jpg'),
+    path.join(process.cwd(), 'assets', 'wattsnext-logo.png'),
+    path.join(process.cwd(), 'assets', 'wattsnext-logo.jpg'),
+    path.join(process.cwd(), 'assets', 'logo.png'),
+    path.join(process.cwd(), 'assets', 'logo.jpg'),
     path.join(process.cwd(), 'public', 'assets', 'wattsnext-logo.png'),
+    path.join(process.cwd(), 'public', 'assets', 'wattsnext-logo.jpg'),
+    path.join(process.cwd(), 'public', 'assets', 'logo.png'),
     path.join(process.cwd(), 'public', 'assets', 'logo.jpg')
   ]);
   return asset?.dataUri ?? null;
@@ -57,8 +65,13 @@ function getRecommendedBrochureInfo(payload: PdfPayload): { key: string; dataUri
   const asset = getEmbeddedAsset([
     path.join(process.cwd(), '.next', 'assets', `${baseKey}.pdf`),
     path.join(process.cwd(), '.next', 'assets', `${baseKey}.jpg`),
+    path.join(process.cwd(), '.next', 'assets', `${baseKey}.png`),
+    path.join(process.cwd(), 'assets', `${baseKey}.pdf`),
+    path.join(process.cwd(), 'assets', `${baseKey}.jpg`),
+    path.join(process.cwd(), 'assets', `${baseKey}.png`),
     path.join(process.cwd(), 'public', 'assets', `${baseKey}.pdf`),
-    path.join(process.cwd(), 'public', 'assets', `${baseKey}.jpg`)
+    path.join(process.cwd(), 'public', 'assets', `${baseKey}.jpg`),
+    path.join(process.cwd(), 'public', 'assets', `${baseKey}.png`)
   ]);
   return asset ? { key: baseKey, dataUri: asset.dataUri } : null;
 }
