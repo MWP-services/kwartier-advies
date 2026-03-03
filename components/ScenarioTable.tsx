@@ -7,10 +7,10 @@ interface ScenarioTableProps {
 
 export function ScenarioTable({ scenarios, recommendedCapacityKwh }: ScenarioTableProps) {
   return (
-    <div className="rounded-lg border bg-white p-4">
-      <h3 className="mb-2 font-semibold">Multi-battery scenario comparison</h3>
+    <div className="wx-card">
+      <h3 className="wx-title">Multi-battery scenario comparison</h3>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="wx-table min-w-full text-sm">
           <thead>
             <tr className="border-b text-left">
               <th className="p-2">Option</th>

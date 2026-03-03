@@ -27,9 +27,9 @@ export function KpiCards({ maxObservedKw, maxObservedTimestamp, exceedanceInterv
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
       {cards.map((card) => (
-        <div key={card.label} className="rounded-lg border bg-white p-3 shadow-sm">
-          <div className="text-xs text-slate-500">{card.label}</div>
-          <div className="text-lg font-semibold">{card.value}</div>
+        <div key={card.label} className="wx-card p-3">
+          <div className="text-xs uppercase tracking-wide text-slate-500">{card.label}</div>
+          <div className="text-lg font-semibold text-slate-900">{card.value}</div>
           {'subtext' in card && card.subtext ? <div className="text-xs text-slate-500">{card.subtext}</div> : null}
         </div>
       ))}

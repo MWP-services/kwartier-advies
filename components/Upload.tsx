@@ -6,9 +6,10 @@ interface UploadProps {
 
 export function Upload({ onFile }: UploadProps) {
   return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm">
-      <label className="mb-2 block text-sm font-medium">Upload CSV or XLSX</label>
+    <div className="wx-card">
+      <label className="wx-title mb-2 block text-sm font-medium">Upload CSV or XLSX</label>
       <input
+        className="wx-input"
         type="file"
         accept=".csv,.xlsx"
         onChange={(event) => {

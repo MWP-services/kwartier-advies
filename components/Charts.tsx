@@ -66,8 +66,8 @@ export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, top
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-lg border bg-white p-4">
-        <h3 className="mb-2 font-semibold">Highest Peak Day Profile</h3>
+      <div className="wx-card">
+        <h3 className="wx-title">Highest Peak Day Profile</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={daySeries}>
@@ -96,7 +96,7 @@ export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, top
           </ResponsiveContainer>
         </div>
         <div className="mt-3 max-h-40 overflow-y-auto rounded border">
-          <table className="min-w-full text-xs">
+          <table className="wx-table min-w-full text-xs">
             <thead className="sticky top-0 bg-slate-50">
               <tr className="border-b text-left">
                 <th className="p-2">Timestamp</th>
@@ -117,8 +117,8 @@ export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, top
         </div>
       </div>
 
-      <div className="rounded-lg border bg-white p-4">
-        <h3 className="mb-2 font-semibold">Consumption Histogram</h3>
+      <div className="wx-card">
+        <h3 className="wx-title">Consumption Histogram</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={hist}>
@@ -145,10 +145,10 @@ export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, top
         </div>
       </div>
 
-      <div className="rounded-lg border bg-white p-4 lg:col-span-2">
-        <h3 className="mb-2 font-semibold">All Peak Events</h3>
+      <div className="wx-card lg:col-span-2">
+        <h3 className="wx-title">All Peak Events</h3>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="wx-table min-w-full text-sm">
             <thead>
               <tr className="border-b text-left">
                 <th className="p-2">Peak timestamp</th>

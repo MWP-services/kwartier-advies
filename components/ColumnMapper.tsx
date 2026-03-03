@@ -14,8 +14,8 @@ export function ColumnMapper({ headers, mapping, onChange }: ColumnMapperProps) 
   };
 
   return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm">
-      <h2 className="mb-2 font-semibold">Column Mapping</h2>
+    <div className="wx-card">
+      <h2 className="wx-title">Column Mapping</h2>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         {[
           ['timestamp', 'timestamp'],
@@ -26,7 +26,7 @@ export function ColumnMapper({ headers, mapping, onChange }: ColumnMapperProps) 
           <label key={key} className="text-sm">
             {label}
             <select
-              className="mt-1 w-full rounded border p-2"
+              className="wx-input"
               value={mapping[key as keyof ColumnMapping] ?? ''}
               onChange={(event) => update(key as keyof ColumnMapping, event.target.value)}
             >

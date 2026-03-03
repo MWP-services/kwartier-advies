@@ -16,8 +16,8 @@ export function DataQualityPanel({ diagnostics, quality }: DataQualityPanelProps
       : diagnostics.interpretationUsed;
 
   return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm">
-      <h3 className="font-semibold">Data quality</h3>
+    <div className="wx-card">
+      <h3 className="wx-title">Data quality</h3>
       <div className="mt-2 grid gap-2 text-sm md:grid-cols-2">
         <p>Interpretatie: {interpretationLabel}</p>
         <p>

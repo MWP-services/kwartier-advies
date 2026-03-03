@@ -45,8 +45,8 @@ export function ScenarioCharts({
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-lg border bg-white p-4">
-        <h3 className="mb-2 font-semibold">Exceedance energy before/after (dataset simulation)</h3>
+      <div className="wx-card">
+        <h3 className="wx-title">Exceedance energy before/after (dataset simulation)</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={scenarios}>
@@ -61,13 +61,13 @@ export function ScenarioCharts({
         </div>
       </div>
 
-      <div className="rounded-lg border bg-white p-4">
+      <div className="wx-card">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-semibold">Sizing breakdown (kWh)</h3>
+          <h3 className="wx-title !mb-0">Sizing breakdown (kWh)</h3>
           <select
             value={selectedScenarioCapacity}
             onChange={(event) => onSelectScenario(Number(event.target.value))}
-            className="rounded border p-1 text-sm"
+            className="wx-input !mt-0 !w-auto !py-1 text-sm"
           >
             {scenarios.map((scenario) => (
               <option key={scenario.capacityKwh} value={scenario.capacityKwh}>

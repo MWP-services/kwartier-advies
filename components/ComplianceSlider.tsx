@@ -7,13 +7,15 @@ interface ComplianceSliderProps {
 
 export function ComplianceSlider({ compliance, onChange }: ComplianceSliderProps) {
   return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm">
+    <div className="wx-card">
       <div className="flex items-center justify-between">
-        <label className="font-semibold">Compliance target</label>
-        <span className="text-sm">{Math.round(compliance * 100)}%</span>
+        <label className="wx-title !mb-0">Compliance target</label>
+        <span className="rounded-md bg-lime-50 px-2 py-1 text-sm font-semibold text-lime-800">
+          {Math.round(compliance * 100)}%
+        </span>
       </div>
       <input
-        className="mt-3 w-full"
+        className="mt-3 w-full accent-lime-700"
         type="range"
         min={70}
         max={100}
