@@ -251,8 +251,15 @@ export function processIntervals(
   contractedPowerKw: number
 ): ProcessedInterval[] {
   return rows.map((row) => {
-    const timestamp = parseTimestamp(row.timestamp);
-    const normalizedTimestamp = Number.isNaN(timestamp.getTime()) ? row.timestamp : timestamp.toISOString();
+    const rawTimestamp = row.timestamp;
+    // Fast path: normalized pipeline already uses ISO UTC timestamps.
+    const normalizedTimestamp =
+      typeof rawTimestamp === 'string' && /^\d{4}-\d{2}-\d{2}T.*Z$/.test(rawTimestamp)
+        ? rawTimestamp
+        : (() => {
+            const timestamp = parseTimestamp(rawTimestamp);
+            return Number.isNaN(timestamp.getTime()) ? String(rawTimestamp) : timestamp.toISOString();
+          })();
     const consumptionKw = row.consumptionKwh / 0.25;
     const excessKw = Math.max(0, consumptionKw - contractedPowerKw);
     return {
@@ -306,7 +313,6 @@ export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
 export function listPeakMoments(intervals: ProcessedInterval[]): PeakMoment[] {
   return intervals
     .filter((interval) => interval.excessKw > 0)
-    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
     .map((interval) => ({
       timestamp: interval.timestamp,
       consumptionKw: interval.consumptionKw,

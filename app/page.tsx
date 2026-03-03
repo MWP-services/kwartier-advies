@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { AnalysisResult, AnalysisSettings } from '@/lib/analysis';
 import { analysisSettingsEqual, defaultAnalysisSettings } from '@/lib/analysis';
 import { Charts } from '@/components/Charts';
@@ -102,14 +102,12 @@ export default function HomePage() {
   const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
   const [selectedScenario, setSelectedScenario] = useState(64);
   const [error, setError] = useState<string | null>(null);
-
-  const draftMappedRows = useMemo(() => {
-    if (!draftMapping.timestamp || !draftMapping.consumptionKwh) return [];
-    return mapRows(rawRows, draftMapping);
-  }, [draftMapping, rawRows]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const canAnalyze =
-    draftMappedRows.length > 0 &&
+    rawRows.length > 0 &&
+    !!draftMapping.timestamp &&
+    !!draftMapping.consumptionKwh &&
     draftSettings.contractedPowerKw > 0 &&
     draftSettings.efficiency > 0 &&
     draftSettings.compliance >= 0.7 &&
@@ -148,7 +146,7 @@ export default function HomePage() {
     }
   };
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     setError(null);
     if (!draftMapping.timestamp || !draftMapping.consumptionKwh) {
       setError('Selecteer eerst timestamp- en consumption-kolommen.');
@@ -159,16 +157,24 @@ export default function HomePage() {
       return;
     }
 
-    const result = runAnalysis(rawRows, draftMapping, draftSettings);
-    if (!result) {
-      setError('Geen bruikbare rijen na normalisatie of filtering.');
-      return;
-    }
+    setIsAnalyzing(true);
+    // Yield once so the UI can paint the loading state before heavy synchronous analysis starts.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    setAppliedSettings({ ...draftSettings });
-    setAppliedMapping({ ...draftMapping });
-    setAnalysisResult(result);
-    setAnalyzedAt(new Date().toISOString());
+    try {
+      const result = runAnalysis(rawRows, draftMapping, draftSettings);
+      if (!result) {
+        setError('Geen bruikbare rijen na normalisatie of filtering.');
+        return;
+      }
+
+      setAppliedSettings({ ...draftSettings });
+      setAppliedMapping({ ...draftMapping });
+      setAnalysisResult(result);
+      setAnalyzedAt(new Date().toISOString());
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const resetDraft = () => {
@@ -303,9 +309,9 @@ export default function HomePage() {
           <button
             className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             onClick={handleAnalyze}
-            disabled={!canAnalyze}
+            disabled={!canAnalyze || isAnalyzing}
           >
-            Analyze
+            {isAnalyzing ? 'Analyzing...' : 'Analyze'}
           </button>
           <button
             className="rounded border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:opacity-60"
