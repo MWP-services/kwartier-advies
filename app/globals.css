@@ -2,6 +2,117 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-50 text-slate-900;
+@layer base {
+  :root {
+    --wx-bg: #f7faf6;
+    --wx-text: #232323;
+    --wx-muted: #6b7280;
+    --wx-green: #4e8d3e;
+    --wx-green-dark: #3b812b;
+    --wx-lime: #9ab826;
+    --wx-warm: #e28e11;
+    --wx-yellow: #f1d23a;
+    --wx-border: #dfe7dc;
+    --wx-panel: #ffffff;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+  }
+
+  body {
+    color: var(--wx-text);
+    background:
+      radial-gradient(circle at 10% 0%, rgba(78, 141, 62, 0.16), transparent 28%),
+      radial-gradient(circle at 100% 0%, rgba(241, 210, 58, 0.14), transparent 24%),
+      radial-gradient(circle at 80% 38%, rgba(226, 142, 17, 0.08), transparent 30%),
+      var(--wx-bg);
+  }
+
+  input,
+  select,
+  button {
+    outline: none;
+  }
+
+  input:focus,
+  select:focus {
+    box-shadow: 0 0 0 3px rgba(78, 141, 62, 0.2);
+    border-color: var(--wx-green);
+  }
+}
+
+@layer components {
+  .wx-shell {
+    @apply mx-auto max-w-7xl space-y-5 px-4 py-6 md:px-6;
+  }
+
+  .wx-hero {
+    @apply relative overflow-hidden rounded-2xl border p-5 md:p-6;
+    border-color: var(--wx-border);
+    background: linear-gradient(135deg, #ffffff 0%, #f5faf3 100%);
+    box-shadow: 0 14px 30px rgba(41, 66, 28, 0.1);
+  }
+
+  .wx-hero::after {
+    content: '';
+    position: absolute;
+    right: -30px;
+    top: -30px;
+    width: 180px;
+    height: 180px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(78, 141, 62, 0.18), transparent 66%);
+    pointer-events: none;
+  }
+
+  .wx-card {
+    @apply rounded-xl border p-4 shadow-sm;
+    border-color: var(--wx-border);
+    background: var(--wx-panel);
+  }
+
+  .wx-title {
+    @apply mb-2 text-base font-semibold;
+    position: relative;
+    padding-left: 12px;
+  }
+
+  .wx-title::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 2px;
+    width: 6px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--wx-green);
+  }
+
+  .wx-btn-primary {
+    @apply rounded-lg px-4 py-2 font-semibold text-white transition disabled:opacity-60;
+    background: linear-gradient(135deg, var(--wx-green) 0%, var(--wx-green-dark) 100%);
+  }
+
+  .wx-btn-primary:hover {
+    filter: brightness(1.04);
+  }
+
+  .wx-btn-secondary {
+    @apply rounded-lg border px-4 py-2 font-semibold transition disabled:opacity-60;
+    border-color: #b8ccb1;
+    color: #2e5f20;
+    background: #f4fbf1;
+  }
+
+  .wx-input {
+    @apply mt-1 w-full rounded-lg border px-3 py-2;
+    border-color: #cbd9c8;
+    background: #ffffff;
+  }
+
+  .wx-table th {
+    background: #f2f8ef;
+  }
 }
