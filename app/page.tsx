@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import type { AnalysisResult, AnalysisSettings } from '@/lib/analysis';
 import { analysisSettingsEqual, defaultAnalysisSettings } from '@/lib/analysis';
 import { Charts } from '@/components/Charts';
@@ -244,19 +245,38 @@ export default function HomePage() {
   };
 
   return (
-    <main className="mx-auto max-w-7xl space-y-4 p-4">
-      <h1 className="text-2xl font-bold">Peak Shaving Advisor (MVP)</h1>
-      <p className="text-sm text-slate-600">Upload 15-minute interval data and generate a battery advice report.</p>
+    <main className="wx-shell">
+      <section className="wx-hero">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <Image
+              src="/assets/wattsnext-logo.png"
+              alt="WattsNext logo"
+              width={170}
+              height={86}
+              className="h-auto w-[140px] md:w-[170px]"
+              priority
+            />
+            <div>
+              <h1 className="text-2xl font-bold md:text-3xl">Peak Shaving Advisor</h1>
+              <p className="text-sm text-slate-600">Snelle batterij-analyse in WattsNext-stijl</p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-lime-200 bg-lime-50 px-3 py-2 text-xs font-medium text-lime-800">
+            ENERGY SOLUTIONS
+          </div>
+        </div>
+      </section>
 
       <Upload onFile={handleFile} />
       {error && <p className="rounded border border-red-200 bg-red-50 p-3 text-red-700">{error}</p>}
       {headers.length > 0 && <ColumnMapper headers={headers} mapping={draftMapping} onChange={setDraftMapping} />}
 
-      <div className="grid gap-4 rounded-lg border bg-white p-4 shadow-sm lg:grid-cols-3">
+      <div className="wx-card grid gap-4 lg:grid-cols-3">
         <label className="text-sm">
           Contracted power (kW)
           <input
-            className="mt-1 w-full rounded border p-2"
+            className="wx-input"
             type="number"
             value={draftSettings.contractedPowerKw}
             onChange={(event) =>
@@ -268,7 +288,7 @@ export default function HomePage() {
         <label className="text-sm">
           Method
           <select
-            className="mt-1 w-full rounded border p-2"
+            className="wx-input"
             value={draftSettings.method}
             onChange={(event) =>
               setDraftSettings((prev) => ({ ...prev, method: event.target.value as AnalysisSettings['method'] }))
@@ -283,7 +303,7 @@ export default function HomePage() {
         <label className="text-sm">
           Interpretation
           <select
-            className="mt-1 w-full rounded border p-2"
+            className="wx-input"
             value={draftSettings.interpretationMode}
             onChange={(event) =>
               setDraftSettings((prev) => ({
@@ -302,7 +322,7 @@ export default function HomePage() {
           <label className="text-sm">
             Safety factor
             <input
-              className="mt-1 w-full rounded border p-2"
+              className="wx-input"
               type="number"
               step="0.01"
               value={draftSettings.safetyFactor}
@@ -314,7 +334,7 @@ export default function HomePage() {
           <label className="text-sm">
             Efficiency
             <input
-              className="mt-1 w-full rounded border p-2"
+              className="wx-input"
               type="number"
               step="0.01"
               value={draftSettings.efficiency}
@@ -334,14 +354,14 @@ export default function HomePage() {
 
         <div className="flex gap-2">
           <button
-            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            className="wx-btn-primary"
             onClick={handleAnalyze}
             disabled={!canAnalyze || isAnalyzing}
           >
             {isAnalyzing ? 'Analyzing...' : 'Analyze'}
           </button>
           <button
-            className="rounded border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:opacity-60"
+            className="wx-btn-secondary"
             onClick={resetDraft}
             disabled={!hasPendingChanges}
           >
@@ -404,8 +424,8 @@ export default function HomePage() {
             compliance={appliedSettings?.compliance ?? draftSettings.compliance}
           />
 
-          <div className="rounded-lg border bg-white p-4">
-            <h3 className="font-semibold">Recommendation</h3>
+          <div className="wx-card">
+            <h3 className="wx-title">Recommendation</h3>
             <p>
               Recommended:{' '}
               {analysisResult.sizing.recommendedProduct
@@ -423,7 +443,7 @@ export default function HomePage() {
               Sizing for peak shaving; final engineering validation required.
             </p>
             <button
-              className="mt-3 rounded bg-emerald-600 px-4 py-2 font-semibold text-white disabled:opacity-60"
+              className="wx-btn-primary mt-3"
               onClick={downloadReport}
               disabled={!analysisResult}
             >
@@ -432,7 +452,7 @@ export default function HomePage() {
           </div>
         </>
       ) : (
-        <div className="rounded-lg border bg-white p-4 text-sm text-slate-600 shadow-sm">
+        <div className="wx-card text-sm text-slate-600">
           Upload data and click Analyze to generate results.
         </div>
       )}
