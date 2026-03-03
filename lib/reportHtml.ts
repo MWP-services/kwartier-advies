@@ -410,8 +410,12 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
     <!-- Logo wordt automatisch ingeladen uit .next/assets/wattsnext-logo.png of public/assets/wattsnext-logo.png -->
     <section class="header">
       <div class="logoWrap">
-        <img src="${embeddedLogoSrc ?? 'wattsnext-logo.png'}" alt="WattsNext logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-        <div class="logoFallback" aria-hidden="true"><span>WattsNext</span><span class="plus">+</span></div>
+        ${
+          embeddedLogoSrc
+            ? `<img src="${embeddedLogoSrc}" alt="WattsNext logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+               <div class="logoFallback" aria-hidden="true"><span>WattsNext</span><span class="plus">+</span></div>`
+            : `<div class="logoFallback" style="display:flex;" aria-hidden="true"><span>WattsNext</span><span class="plus">+</span></div>`
+        }
       </div>
       <div class="brand">
         <h1>Peak Shaving Report</h1>
