@@ -235,7 +235,7 @@ export default function HomePage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'wattsnext-peak-shaving-report.html';
+    a.download = `wattsnext-peak-shaving-report-${Date.now()}.html`;
     a.click();
     URL.revokeObjectURL(url);
     } catch (err) {
