@@ -258,6 +258,11 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       display: flex;
       align-items: center;
       justify-content: flex-start;
+      padding: 6px 8px;
+      border: 1px solid #d9e4d4;
+      border-radius: 10px;
+      background:
+        linear-gradient(135deg, #f3f8f1 0%, #ffffff 55%, #eef7ea 100%);
     }
     .logoWrap img {
       max-width: 150px;
@@ -266,6 +271,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       height: auto;
       object-fit: contain;
       display: block;
+      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
     }
     .logoFallback {
       display: none;
