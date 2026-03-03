@@ -695,7 +695,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
         x: peakIndices,
         y: peakValues,
         customdata: peakTimes,
-        marker: {color: '#F97316', size: 10, symbol: 'diamond'},
+        marker: {color: '#F97316', size: 6, symbol: 'diamond'},
         hovertemplate: '%{customdata}<br>Peak moment: %{y:.2f} kW<extra></extra>'
       }
     ], {
