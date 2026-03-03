@@ -185,27 +185,51 @@ export default function HomePage() {
 
   const downloadReport = async () => {
     if (!analysisResult || !appliedSettings) return;
+    const reportScenarios = analysisResult.scenarios.map((scenario) => ({
+      optionLabel: scenario.optionLabel,
+      capacityKwh: scenario.capacityKwh,
+      exceedanceIntervalsBefore: scenario.exceedanceIntervalsBefore,
+      exceedanceIntervalsAfter: scenario.exceedanceIntervalsAfter,
+      exceedanceEnergyKwhBefore: scenario.exceedanceEnergyKwhBefore,
+      exceedanceEnergyKwhAfter: scenario.exceedanceEnergyKwhAfter,
+      achievedComplianceDataset: scenario.achievedComplianceDataset,
+      achievedComplianceDailyAverage: scenario.achievedComplianceDailyAverage,
+      achievedCompliance: scenario.achievedCompliance,
+      maxRemainingExcessKw: scenario.maxRemainingExcessKw,
+      maxChargeKw: scenario.maxChargeKw,
+      maxDischargeKw: scenario.maxDischargeKw,
+      endingSocKwh: scenario.endingSocKwh,
+      // Excluded on purpose to keep report payload small for large datasets.
+      shavedSeries: []
+    }));
+
+    const reportPayload = {
+      contractedPowerKw: appliedSettings.contractedPowerKw,
+      maxObservedKw: analysisResult.maxObservedKw,
+      maxObservedTimestamp: analysisResult.maxObservedTimestamp,
+      exceedanceCount: analysisResult.exceedanceIntervals,
+      compliance: appliedSettings.compliance,
+      method: appliedSettings.method,
+      efficiency: appliedSettings.efficiency,
+      safetyFactor: appliedSettings.safetyFactor,
+      sizing: analysisResult.sizing,
+      quality: analysisResult.quality,
+      topEvents: analysisResult.events,
+      peakMoments: analysisResult.peakMoments,
+      intervals: analysisResult.intervals,
+      highestPeakDay: analysisResult.highestPeakDay,
+      scenarios: reportScenarios
+    };
+
+    try {
     const response = await fetch('/api/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contractedPowerKw: appliedSettings.contractedPowerKw,
-        maxObservedKw: analysisResult.maxObservedKw,
-        maxObservedTimestamp: analysisResult.maxObservedTimestamp,
-        exceedanceCount: analysisResult.exceedanceIntervals,
-        compliance: appliedSettings.compliance,
-        method: appliedSettings.method,
-        efficiency: appliedSettings.efficiency,
-        safetyFactor: appliedSettings.safetyFactor,
-        sizing: analysisResult.sizing,
-        quality: analysisResult.quality,
-        topEvents: analysisResult.events,
-        peakMoments: analysisResult.peakMoments,
-        intervals: analysisResult.intervals,
-        highestPeakDay: analysisResult.highestPeakDay,
-        scenarios: analysisResult.scenarios
-      })
+      body: JSON.stringify(reportPayload)
     });
+    if (!response.ok) {
+      throw new Error(`Rapport download mislukt (${response.status})`);
+    }
 
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -214,6 +238,9 @@ export default function HomePage() {
     a.download = 'wattsnext-peak-shaving-report.html';
     a.click();
     URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download van rapport mislukt');
+    }
   };
 
   return (
