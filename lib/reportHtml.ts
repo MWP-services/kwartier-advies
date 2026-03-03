@@ -137,7 +137,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       }))
     : [];
 
-  const bins = 20;
+  const bins = 12;
   const maxKw = Math.max(1, ...intervals.map((item) => item.consumptionKw ?? 0));
   const binSize = maxKw / bins;
   const histogram = Array.from({ length: bins }, (_, i) => {
@@ -155,6 +155,8 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       color: ratio > 1 ? '#dc2626' : ratio > 0.9 ? '#d28a00' : '#43a047'
     };
   });
+  const moments250Plus = intervals.filter((item) => (item.consumptionKw ?? 0) >= 250).length;
+  const momentsAboveContract = intervals.filter((item) => (item.consumptionKw ?? 0) > payload.contractedPowerKw).length;
 
   const peakMomentsTable = peakMoments.map((moment) => ({
     timestamp: formatTimestamp(moment.timestamp),
@@ -514,6 +516,9 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       <div class="card">
         <h3>Verbruikshistogram</h3>
         <div id="histogram-chart" class="plot"></div>
+        <div class="muted" style="margin-top:6px;">
+          Kwartieren ≥ 250 kW: <strong>${moments250Plus}</strong> | Kwartieren boven contract: <strong>${momentsAboveContract}</strong>
+        </div>
         <div class="muted">Verdeling van kwartierverbruik. Groen = ruim onder contract, oranje = dichtbij contract, rood = boven contract.</div>
       </div>
     </section>
@@ -728,11 +733,17 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       type: 'bar',
       x: histogram.map(d => d.label),
       y: histogram.map(d => d.count),
-      marker: {color: histogram.map(d => d.color)}
+      marker: {color: histogram.map(d => d.color)},
+      text: histogram.map(d => d.count),
+      textposition: 'outside',
+      cliponaxis: false,
+      hovertemplate: 'Bereik: %{x}<br>Aantal kwartieren: %{y}<extra></extra>'
     }], {
       ...wattsTheme,
-      xaxis: {tickangle: -35},
-      yaxis: {title: 'Aantal kwartieren'}
+      bargap: 0.08,
+      xaxis: {tickangle: -25, automargin: true},
+      yaxis: {title: 'Aantal kwartieren', rangemode: 'tozero'},
+      margin: {t: 18, r: 12, b: 82, l: 55}
     }, {responsive: true, displaylogo: false});
 
     const tbody = document.getElementById('peak-moments-body');
