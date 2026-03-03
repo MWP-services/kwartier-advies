@@ -211,7 +211,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       content: "";
       position: absolute;
       top: 16px;
-      right: 24px;
+      right: 20px;
       width: 190px;
       height: 120px;
       pointer-events: none;
@@ -237,7 +237,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       border-radius: 14px;
       padding: 14px 18px 12px;
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: 230px 1fr auto;
       gap: 14px;
       align-items: center;
       box-shadow: 0 6px 18px rgba(0,0,0,0.05);
@@ -253,12 +253,13 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       border-bottom-right-radius: 14px;
     }
     .logoWrap {
-      width: 150px;
+      width: 220px;
       min-height: 52px;
       display: flex;
       align-items: center;
-      justify-content: flex-start;
+      justify-content: center;
       padding: 6px 8px;
+      margin-left: -6px;
       border: 1px solid #5f8e52;
       border-radius: 10px;
       background:
@@ -266,7 +267,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
     }
     .logoWrap img {
-      max-width: 150px;
+      max-width: 204px;
       max-height: 52px;
       width: auto;
       height: auto;
@@ -418,7 +419,8 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       .grid.two { grid-template-columns: 1fr; }
       .header { grid-template-columns: auto 1fr; }
       .stamp { grid-column: 1 / -1; text-align: left; }
-      .logoWrap { width: 120px; }
+      .logoWrap { width: 170px; }
+      .logoWrap img { max-width: 154px; }
     }
     @media print {
       body { background: #fff; }
