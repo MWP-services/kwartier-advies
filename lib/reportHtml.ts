@@ -489,6 +489,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       <div class="card">
         <h3>Exceedance Energy Before/After (Dataset Simulation)</h3>
         <div id="exceedance-chart" class="plot"></div>
+        <div id="exceedance-baseline-note" class="muted" style="margin-top:6px;"></div>
         <div class="callout">
           <p class="callout-title">Uitleg</p>
           <p class="callout-body">Per batterijoptie zie je overschrijdingsenergie vóór en na inzet, inclusief reductie in kWh en procenten.</p>
@@ -587,8 +588,6 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
 
     const reductionKwh = scenarioData.map(d => Math.max(0, d.before - d.after));
     const reductionPct = scenarioData.map(d => (d.before > 0 ? ((d.before - d.after) / d.before) * 100 : 0));
-    const reductionLabels = reductionPct.map((pct, i) => '-' + reductionKwh[i].toFixed(2) + ' kWh (' + pct.toFixed(1) + '%)');
-
     Plotly.newPlot('exceedance-chart', [
       {
         type: 'bar',
@@ -607,18 +606,6 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
         customdata: reductionPct.map((pct, i) => [reductionKwh[i], pct]),
         hovertemplate:
           '%{x}<br>After: %{y:.2f} kWh<br>Reduction: %{customdata[0]:.2f} kWh (%{customdata[1]:.1f}%)<extra></extra>'
-      },
-      {
-        type: 'scatter',
-        mode: 'text',
-        name: 'Reduction',
-        showlegend: false,
-        x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => d.after),
-        text: reductionLabels,
-        textposition: 'top center',
-        textfont: {size: 10, color: '#334155'},
-        hoverinfo: 'skip'
       }
     ], {
       ...wattsTheme,
@@ -628,6 +615,18 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       yaxis: {title: 'kWh', rangemode: 'tozero'},
       margin: {t: 30, r: 12, b: 90, l: 55}
     }, {responsive: true, displaylogo: false});
+
+    const beforeBaseline = scenarioData.length > 0 ? scenarioData[0].before : 0;
+    const exceedanceIntervalsCount = peakMoments.length;
+    const baselineNote = document.getElementById('exceedance-baseline-note');
+    if (baselineNote) {
+      baselineNote.textContent =
+        'Before is opgebouwd uit ' +
+        exceedanceIntervalsCount +
+        ' overschrijdingsintervallen: totaal ' +
+        beforeBaseline.toFixed(2) +
+        ' kWh.';
+    }
 
     Plotly.newPlot('sizing-chart', [{
       type: 'bar',
