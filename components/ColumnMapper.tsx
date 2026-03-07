@@ -18,8 +18,8 @@ export function ColumnMapper({ headers, mapping, onChange }: ColumnMapperProps) 
       <h2 className="wx-title">Kolomkoppeling</h2>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         {[
-          ['timestamp', 'timestamp'],
-          ['consumptionKwh', 'consumption_kwh'],
+          ['timestamp', 'timestamp (vul hier de datum/tijd in)'],
+          ['consumptionKwh', 'consumption_kwh (vul hier het verbruik in kWh in)'],
           ['exportKwh', 'export_kwh (optioneel)'],
           ['pvKwh', 'pv_kwh (optioneel)']
         ].map(([key, label]) => (
