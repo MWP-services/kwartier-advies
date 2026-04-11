@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
-import { generateReportPdf, type PdfPayload } from '@/lib/pdf';
+import type { PdfPayload } from '@/lib/pdf';
+import { generateInteractiveReportHtml } from '@/lib/reportHtml';
 
 export async function POST(request: Request) {
   const payload = (await request.json()) as PdfPayload;
-  const bytes = await generateReportPdf(payload);
+  const html = generateInteractiveReportHtml(payload);
 
-  return new NextResponse(Buffer.from(bytes), {
+  return new NextResponse(html, {
     headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': 'attachment; filename="peak-shaving-report.pdf"'
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="wattsnext-peak-shaving-report.html"'
     }
   });
 }

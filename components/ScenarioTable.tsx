@@ -2,30 +2,30 @@ import type { ScenarioResult } from '@/lib/simulation';
 
 interface ScenarioTableProps {
   scenarios: ScenarioResult[];
-  recommendedCapacityKwh: number;
+  recommendedCapacityKwh: number | null;
 }
 
 export function ScenarioTable({ scenarios, recommendedCapacityKwh }: ScenarioTableProps) {
   return (
-    <div className="rounded-lg border bg-white p-4">
-      <h3 className="mb-2 font-semibold">Multi-battery scenario comparison</h3>
+    <div className="wx-card">
+      <h3 className="wx-title">Vergelijking batterijscenario&apos;s</h3>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="wx-table min-w-full text-sm">
           <thead>
             <tr className="border-b text-left">
-              <th className="p-2">Option</th>
-              <th className="p-2">Before kWh</th>
-              <th className="p-2">After kWh</th>
-              <th className="p-2">Dataset compliance</th>
-              <th className="p-2">Daily avg compliance</th>
-              <th className="p-2">Remaining max kW</th>
+              <th className="p-2">Optie</th>
+              <th className="p-2">Voor kWh</th>
+              <th className="p-2">Na kWh</th>
+              <th className="p-2">Compliance dataset</th>
+              <th className="p-2">Gem. dagcompliance</th>
+              <th className="p-2">Resterende max kW</th>
             </tr>
           </thead>
           <tbody>
             {scenarios.map((scenario) => (
               <tr
                 key={scenario.capacityKwh}
-                className={`border-b ${scenario.capacityKwh === recommendedCapacityKwh ? 'bg-emerald-50' : ''}`}
+                className={`border-b ${recommendedCapacityKwh != null && scenario.capacityKwh === recommendedCapacityKwh ? 'bg-emerald-50' : ''}`}
               >
                 <td className="p-2">{scenario.optionLabel}</td>
                 <td className="p-2">{scenario.exceedanceEnergyKwhBefore.toFixed(2)}</td>

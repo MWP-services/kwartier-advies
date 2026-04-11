@@ -1,4 +1,4 @@
-import { parseTimestamp } from './datetime';
+import { getLocalDayIso, getLocalHourMinute, parseTimestamp } from './datetime';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 
@@ -23,6 +23,13 @@ export interface PeakEvent {
   intervalIndexes: number[];
 }
 
+export interface PeakMoment {
+  timestamp: string;
+  consumptionKw: number;
+  excessKw: number;
+  excessKwh: number;
+}
+
 export interface DataQualityReport {
   rows: number;
   startDate: string | null;
@@ -38,13 +45,30 @@ export interface SizingResult {
   kWNeededRaw: number;
   kWhNeeded: number;
   kWNeeded: number;
-  recommendedProduct: BatteryProduct;
+  recommendedProduct: BatteryProduct | null;
   alternativeProduct: BatteryProduct | null;
+  noFeasibleBatteryByPower: boolean;
 }
 
 export interface BatteryProduct {
   label: string;
   capacityKwh: number;
+  powerKw: number;
+  modular?: boolean;
+  unitPriceEur?: number;
+  unitCapacityKwh?: number;
+  unitPowerKw?: number;
+  count?: number;
+  totalPriceEur?: number;
+  breakdown?: BatteryBreakdown[];
+}
+
+export interface BatteryBreakdown {
+  type: string;
+  count: number;
+  unitCapacityKwh: number;
+  unitPriceEur: number;
+  totalPriceEur: number;
 }
 
 export interface ExceededInterval {
@@ -53,21 +77,189 @@ export interface ExceededInterval {
   excess_kW: number;
 }
 
+export interface DayProfilePoint {
+  timestampLabel: string;
+  timestampIso: string;
+  observedKw: number;
+}
+
+export interface DayKwSeriesPoint {
+  timeLabel: string;
+  timestampIso: string;
+  consumptionKw: number;
+}
+
 export const BATTERY_OPTIONS: BatteryProduct[] = [
-  { label: 'WattsNext ESS Cabinet 64 kWh', capacityKwh: 64 },
-  { label: 'WattsNext ESS Cabinet 96 kWh', capacityKwh: 96 },
-  { label: 'ESS All-in-one Cabinet 261 kWh', capacityKwh: 261 },
-  { label: 'WattsNext All-in-one Container 2.09 MWh', capacityKwh: 2090 },
-  { label: 'WattsNext All in-one Container 5.01 MWh', capacityKwh: 5010 }
+  {
+    label: 'WattsNext ESS Cabinet 64 kWh',
+    capacityKwh: 64,
+    powerKw: 30,
+    modular: true,
+    unitPriceEur: 15689.33
+  },
+  {
+    label: 'WattsNext ESS Cabinet 96 kWh',
+    capacityKwh: 96,
+    powerKw: 48,
+    modular: true,
+    unitPriceEur: 22225.98
+  },
+  {
+    label: 'ESS All-in-one Cabinet 261 kWh',
+    capacityKwh: 261,
+    powerKw: 125,
+    modular: true,
+    unitPriceEur: 43995.96
+  },
+  {
+    label: 'WattsNext All-in-one Container 2.09 MWh',
+    capacityKwh: 2090,
+    powerKw: 1000,
+    modular: false,
+    unitPriceEur: 318658.06
+  },
+  {
+    label: 'WattsNext All in-one Container 5.015 MWh',
+    capacityKwh: 5015,
+    powerKw: 2580,
+    modular: false,
+    unitPriceEur: 675052.49
+  }
 ];
+
+interface BatteryConfigurationCandidate {
+  label: string;
+  totalCapacityKwh: number;
+  totalPowerKw: number;
+  totalPriceEur: number;
+  overCapacityKwh: number;
+  overPowerKw: number;
+  count: number;
+  unitCapacityKwh: number;
+  unitPowerKw: number;
+  unitPriceEur: number;
+}
+
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function toBatteryProduct(candidate: BatteryConfigurationCandidate): BatteryProduct {
+  const totalPriceEur = roundCurrency(candidate.totalPriceEur);
+  return {
+    label: candidate.label,
+    capacityKwh: candidate.totalCapacityKwh,
+    powerKw: candidate.totalPowerKw,
+    unitCapacityKwh: candidate.unitCapacityKwh,
+    unitPowerKw: candidate.unitPowerKw,
+    count: candidate.count,
+    unitPriceEur: roundCurrency(candidate.unitPriceEur),
+    totalPriceEur,
+    breakdown: [
+      {
+        type: `${candidate.unitCapacityKwh} kWh`,
+        count: candidate.count,
+        unitCapacityKwh: candidate.unitCapacityKwh,
+        unitPriceEur: roundCurrency(candidate.unitPriceEur),
+        totalPriceEur
+      }
+    ]
+  };
+}
+
+export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw = 0): {
+  recommendedProduct: BatteryProduct | null;
+  alternativeProduct: BatteryProduct | null;
+  noFeasibleBatteryByPower: boolean;
+} {
+  const normalizedRequiredKwh = Math.max(0, requiredKwh);
+  const normalizedRequiredKw = Math.max(0, requiredKw);
+  const candidates: BatteryConfigurationCandidate[] = [];
+
+  BATTERY_OPTIONS.forEach((option) => {
+    const unitPriceEur = option.unitPriceEur ?? 0;
+    if (option.modular) {
+      const minCountByKwh = Math.ceil(normalizedRequiredKwh / option.capacityKwh);
+      const minCountByKw = Math.ceil(normalizedRequiredKw / option.powerKw);
+      const requiredCount = Math.max(1, minCountByKwh, minCountByKw);
+      const maxCount = requiredCount;
+      for (let count = 1; count <= maxCount; count += 1) {
+        const totalCapacityKwh = count * option.capacityKwh;
+        const totalPowerKw = count * option.powerKw;
+        if (totalCapacityKwh < normalizedRequiredKwh || totalPowerKw < normalizedRequiredKw) continue;
+        const totalPriceEur = count * unitPriceEur;
+        candidates.push({
+          label: `${count}x ${option.capacityKwh} kWh (modulair)`,
+          totalCapacityKwh,
+          totalPowerKw,
+          totalPriceEur,
+          overCapacityKwh: totalCapacityKwh - normalizedRequiredKwh,
+          overPowerKw: totalPowerKw - normalizedRequiredKw,
+          count,
+          unitCapacityKwh: option.capacityKwh,
+          unitPowerKw: option.powerKw,
+          unitPriceEur
+        });
+      }
+      return;
+    }
+
+    if (option.capacityKwh >= normalizedRequiredKwh && option.powerKw >= normalizedRequiredKw) {
+      candidates.push({
+        label: option.label,
+        totalCapacityKwh: option.capacityKwh,
+        totalPowerKw: option.powerKw,
+        totalPriceEur: unitPriceEur,
+        overCapacityKwh: option.capacityKwh - normalizedRequiredKwh,
+        overPowerKw: option.powerKw - normalizedRequiredKw,
+        count: 1,
+        unitCapacityKwh: option.capacityKwh,
+        unitPowerKw: option.powerKw,
+        unitPriceEur
+      });
+    }
+  });
+
+  const sorted = candidates.sort(
+    (a, b) =>
+      a.totalPriceEur - b.totalPriceEur ||
+      a.overCapacityKwh - b.overCapacityKwh ||
+      a.overPowerKw - b.overPowerKw ||
+      a.totalCapacityKwh - b.totalCapacityKwh
+  );
+
+  if (sorted.length === 0) {
+    return {
+      recommendedProduct: null,
+      alternativeProduct: null,
+      noFeasibleBatteryByPower: normalizedRequiredKw > 0
+    };
+  }
+
+  const recommendedProduct = toBatteryProduct(sorted[0]);
+  const alternativeProduct = sorted[1] ? toBatteryProduct(sorted[1]) : null;
+
+  return {
+    recommendedProduct,
+    alternativeProduct,
+    noFeasibleBatteryByPower: false
+  };
+}
 
 export function processIntervals(
   rows: IntervalRecord[],
   contractedPowerKw: number
 ): ProcessedInterval[] {
   return rows.map((row) => {
-    const timestamp = parseTimestamp(row.timestamp);
-    const normalizedTimestamp = Number.isNaN(timestamp.getTime()) ? row.timestamp : timestamp.toISOString();
+    const rawTimestamp = row.timestamp;
+    // Fast path: normalized pipeline already uses ISO UTC timestamps.
+    const normalizedTimestamp =
+      typeof rawTimestamp === 'string' && /^\d{4}-\d{2}-\d{2}T.*Z$/.test(rawTimestamp)
+        ? rawTimestamp
+        : (() => {
+            const timestamp = parseTimestamp(rawTimestamp);
+            return Number.isNaN(timestamp.getTime()) ? String(rawTimestamp) : timestamp.toISOString();
+          })();
     const consumptionKw = row.consumptionKwh / 0.25;
     const excessKw = Math.max(0, consumptionKw - contractedPowerKw);
     return {
@@ -116,6 +308,17 @@ export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
   }
 
   return events;
+}
+
+export function listPeakMoments(intervals: ProcessedInterval[]): PeakMoment[] {
+  return intervals
+    .filter((interval) => interval.excessKw > 0)
+    .map((interval) => ({
+      timestamp: interval.timestamp,
+      consumptionKw: interval.consumptionKw,
+      excessKw: interval.excessKw,
+      excessKwh: interval.excessKwh
+    }));
 }
 
 function percentile(values: number[], p: number): number {
@@ -199,12 +402,10 @@ export function computeSizing(params: {
   const kWhNeeded = (kWhNeededRaw / efficiency) * safetyFactor;
   const kWNeeded = kWNeededRaw * safetyFactor;
 
-  const recommendedProduct = BATTERY_OPTIONS.find((option) => kWhNeeded <= option.capacityKwh) ??
-    BATTERY_OPTIONS[BATTERY_OPTIONS.length - 1];
-  const recommendedIndex = BATTERY_OPTIONS.findIndex(
-    (option) => option.capacityKwh === recommendedProduct.capacityKwh
+  const { recommendedProduct, alternativeProduct, noFeasibleBatteryByPower } = selectMinimumCostBatteryOptions(
+    kWhNeeded,
+    kWNeeded
   );
-  const alternativeProduct = BATTERY_OPTIONS[recommendedIndex + 1] ?? null;
 
   return {
     kWhNeededRaw,
@@ -212,7 +413,8 @@ export function computeSizing(params: {
     kWhNeeded,
     kWNeeded,
     recommendedProduct,
-    alternativeProduct
+    alternativeProduct,
+    noFeasibleBatteryByPower
   };
 }
 
@@ -237,12 +439,13 @@ export function buildDataQualityReport(intervals: IntervalRecord[]): DataQuality
   const duplicateCount = timestamps.length - new Set(timestamps.map((d) => d.toISOString())).size;
   let non15MinIntervals = 0;
   let missingIntervalsCount = 0;
+  const EPS = 0.01;
 
   for (let i = 1; i < timestamps.length; i += 1) {
     const diffMinutes = (timestamps[i].getTime() - timestamps[i - 1].getTime()) / 60000;
-    if (diffMinutes !== 15) {
+    if (Math.abs(diffMinutes - 15) > EPS) {
       non15MinIntervals += 1;
-      if (diffMinutes > 15) {
+      if (diffMinutes > 15 + EPS) {
         missingIntervalsCount += Math.max(0, Math.round(diffMinutes / 15) - 1);
       }
     }
@@ -303,7 +506,7 @@ export function selectTopExceededIntervals(
   limit = 20
 ): ExceededInterval[] {
   return intervals
-    .filter((interval) => interval.timestamp.slice(0, 10) === day && interval.excessKw > 0)
+    .filter((interval) => getLocalDayIso(interval.timestamp) === day && interval.excessKw > 0)
     .sort((a, b) => b.excessKw - a.excessKw || a.timestamp.localeCompare(b.timestamp))
     .slice(0, limit)
     .map((interval) => ({
@@ -311,4 +514,69 @@ export function selectTopExceededIntervals(
       consumption_kW: interval.consumptionKw,
       excess_kW: interval.excessKw
     }));
+}
+
+export function buildDayProfile(
+  intervals: ProcessedInterval[],
+  dayIso: string,
+  intervalMinutes = 15,
+  timeZone = 'Europe/Amsterdam'
+): DayProfilePoint[] {
+  const fullDaySeries = buildDayKwSeries(
+    intervals.map((interval) => ({
+      timestamp: interval.timestamp,
+      consumptionKw: interval.consumptionKw
+    })),
+    dayIso,
+    intervalMinutes,
+    timeZone
+  );
+
+  return fullDaySeries.map((slot) => ({
+    timestampLabel: slot.timeLabel,
+    timestampIso: slot.timestampIso,
+    observedKw: slot.consumptionKw
+  }));
+}
+
+export function buildDayKwSeries(
+  intervals: { timestamp: string; consumptionKw: number }[],
+  dayIso: string,
+  intervalMinutes = 15,
+  timeZone = 'Europe/Amsterdam'
+): DayKwSeriesPoint[] {
+  if (!dayIso || intervalMinutes <= 0) return [];
+
+  const [year, month, day] = dayIso.split('-').map(Number);
+  const dayStartLocal = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (Number.isNaN(dayStartLocal.getTime())) return [];
+
+  const slotsPerDay = Math.floor((24 * 60) / intervalMinutes);
+  const profile = Array.from({ length: slotsPerDay }, (_, index): DayKwSeriesPoint => {
+    const minutes = index * intervalMinutes;
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    return {
+      timeLabel: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+      timestampIso: new Date(dayStartLocal.getTime() + minutes * 60_000).toISOString(),
+      consumptionKw: 0
+    };
+  });
+
+  intervals.forEach((interval) => {
+    if (getLocalDayIso(interval.timestamp, timeZone) !== dayIso) return;
+
+    const dt = parseTimestamp(interval.timestamp);
+    if (Number.isNaN(dt.getTime())) return;
+    const { hour, minute } = getLocalHourMinute(dt, timeZone);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
+
+    const minuteOfDay = hour * 60 + minute;
+    const slotIndex = Math.floor(minuteOfDay / intervalMinutes);
+    if (slotIndex < 0 || slotIndex >= slotsPerDay) return;
+
+    profile[slotIndex].consumptionKw = Math.max(profile[slotIndex].consumptionKw, interval.consumptionKw);
+  });
+
+  return profile;
 }

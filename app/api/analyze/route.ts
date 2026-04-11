@@ -14,7 +14,9 @@ export async function POST(request: Request) {
     safetyFactor: body.safetyFactor,
     efficiency: body.efficiency
   });
-  const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded);
+  const scenarios = simulateAllScenarios(intervals, sizing.kWNeeded, sizing.recommendedProduct?.capacityKwh ?? 0, {
+    dischargeEfficiency: body.efficiency
+  });
   const quality = buildDataQualityReport(body.rows);
 
   return NextResponse.json({ intervals, events, sizing, scenarios, quality });

@@ -12,23 +12,40 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
-import type { ExceededInterval, PeakEvent, ProcessedInterval } from '@/lib/calculations';
-import { formatTimestamp } from '@/lib/datetime';
+import { buildDayProfile, type ExceededInterval, type PeakMoment, type ProcessedInterval } from '@/lib/calculations';
+import { formatTimestamp, getLocalDayIso, getLocalHourMinute } from '@/lib/datetime';
 
 interface ChartsProps {
   intervals: ProcessedInterval[];
   contractKw: number;
-  topEvents: PeakEvent[];
+  peakMoments: PeakMoment[];
   highestPeakDay: string | null;
   topExceededIntervals: ExceededInterval[];
 }
 
-export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topExceededIntervals }: ChartsProps) {
-  const selectedDay = highestPeakDay ?? intervals[0]?.timestamp.slice(0, 10);
-  const markerSet = new Set(topExceededIntervals.map((interval) => interval.timestamp));
-  const daySeries = intervals
-    .filter((interval) => interval.timestamp.slice(0, 10) === selectedDay)
-    .map((i) => ({ ...i, contractKw, isTopExceeded: markerSet.has(i.timestamp) }));
+export function Charts({ intervals, contractKw, peakMoments, highestPeakDay, topExceededIntervals }: ChartsProps) {
+  const timeZone = 'Europe/Amsterdam';
+  const selectedDay = highestPeakDay ?? (intervals.length ? getLocalDayIso(intervals[0].timestamp, timeZone) : null);
+  const markerSet = new Set(
+    topExceededIntervals
+      .filter((interval) => getLocalDayIso(interval.timestamp, timeZone) === selectedDay)
+      .map((interval) => {
+        const { hour, minute } = getLocalHourMinute(interval.timestamp, timeZone);
+        return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      })
+  );
+  const daySeries = selectedDay
+    ? buildDayProfile(intervals, selectedDay, 15, timeZone).map((point) => ({
+        timestampLabel: point.timestampLabel,
+        timestampIso: point.timestampIso,
+        consumptionKw: point.observedKw,
+        contractKw,
+        isTopExceeded: markerSet.has(point.timestampLabel)
+      }))
+    : [];
+  const maxDayKw = Math.max(0, ...daySeries.map((point) => point.consumptionKw ?? 0));
+  const yMaxBase = Math.max(contractKw, maxDayKw);
+  const yMax = (yMaxBase > 0 ? yMaxBase : 60) * 1.1;
 
   const bins = 20;
   const maxKw = Math.max(1, ...intervals.map((item) => item.consumptionKw));
@@ -49,23 +66,26 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-lg border bg-white p-4">
-        <h3 className="mb-2 font-semibold">Highest Peak Day Profile</h3>
+      <div className="wx-card">
+        <h3 className="wx-title">Profiel hoogste piekdag</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={daySeries}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="timestamp" hide />
-              <YAxis />
-              <Tooltip />
+              <XAxis
+                dataKey="timestampLabel"
+                minTickGap={24}
+              />
+              <YAxis domain={[0, yMax]} />
+              <Tooltip labelFormatter={(value) => (typeof value === 'string' ? value : String(value))} />
               <Bar dataKey="consumptionKw" fill="#3b82f6" />
               <Line type="monotone" dataKey="contractKw" stroke="#ef4444" dot={false} />
               {daySeries
                 .filter((interval) => interval.isTopExceeded)
                 .map((interval) => (
                   <ReferenceDot
-                    key={interval.timestamp}
-                    x={interval.timestamp}
+                    key={interval.timestampIso}
+                    x={interval.timestampLabel}
                     y={interval.consumptionKw}
                     r={4}
                     fill="#ef4444"
@@ -76,12 +96,12 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
           </ResponsiveContainer>
         </div>
         <div className="mt-3 max-h-40 overflow-y-auto rounded border">
-          <table className="min-w-full text-xs">
+          <table className="wx-table min-w-full text-xs">
             <thead className="sticky top-0 bg-slate-50">
               <tr className="border-b text-left">
-                <th className="p-2">Timestamp</th>
-                <th className="p-2">Consumption kW</th>
-                <th className="p-2">Excess kW</th>
+                <th className="p-2">Tijdstip</th>
+                <th className="p-2">Verbruik kW</th>
+                <th className="p-2">Overschrijding kW</th>
               </tr>
             </thead>
             <tbody>
@@ -97,8 +117,8 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
         </div>
       </div>
 
-      <div className="rounded-lg border bg-white p-4">
-        <h3 className="mb-2 font-semibold">Consumption Histogram</h3>
+      <div className="wx-card">
+        <h3 className="wx-title">Verbruikshistogram</h3>
         <div className="h-64">
           <ResponsiveContainer>
             <ComposedChart data={hist}>
@@ -125,25 +145,25 @@ export function Charts({ intervals, contractKw, topEvents, highestPeakDay, topEx
         </div>
       </div>
 
-      <div className="rounded-lg border bg-white p-4 lg:col-span-2">
-        <h3 className="mb-2 font-semibold">Top 10 Peak Events</h3>
+      <div className="wx-card lg:col-span-2">
+        <h3 className="wx-title">Alle piekmomenten</h3>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="wx-table min-w-full text-sm">
             <thead>
               <tr className="border-b text-left">
-                <th className="p-2">Peak timestamp</th>
-                <th className="p-2">Duration</th>
-                <th className="p-2">Max excess kW</th>
-                <th className="p-2">Total excess kWh</th>
+                <th className="p-2">Piektijdstip</th>
+                <th className="p-2">Verbruik kW</th>
+                <th className="p-2">Overschrijding kW</th>
+                <th className="p-2">Overschrijding kWh</th>
               </tr>
             </thead>
             <tbody>
-              {topEvents.slice(0, 10).map((event) => (
-                <tr key={`${event.peakTimestamp}-${event.durationIntervals}`} className="border-b">
-                  <td className="p-2">{formatTimestamp(event.peakTimestamp)}</td>
-                  <td className="p-2">{event.durationIntervals}</td>
-                  <td className="p-2">{event.maxExcessKw.toFixed(2)}</td>
-                  <td className="p-2">{event.totalExcessKwh.toFixed(2)}</td>
+              {peakMoments.map((moment) => (
+                <tr key={moment.timestamp} className="border-b">
+                  <td className="p-2">{formatTimestamp(moment.timestamp)}</td>
+                  <td className="p-2">{moment.consumptionKw.toFixed(2)}</td>
+                  <td className="p-2">{moment.excessKw.toFixed(2)}</td>
+                  <td className="p-2">{moment.excessKwh.toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>

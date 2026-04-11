@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import type { DataQualityReport, PeakEvent, SizingResult } from './calculations';
+import type { DataQualityReport, PeakEvent, PeakMoment, ProcessedInterval, SizingResult } from './calculations';
 import { formatTimestamp } from './datetime';
 import type { ScenarioResult } from './simulation';
 
@@ -15,6 +15,9 @@ export interface PdfPayload {
   sizing: SizingResult;
   quality: DataQualityReport;
   topEvents: PeakEvent[];
+  peakMoments?: PeakMoment[];
+  intervals?: ProcessedInterval[];
+  highestPeakDay?: string | null;
   scenarios: ScenarioResult[];
 }
 
@@ -24,6 +27,14 @@ export async function generateReportPdf(payload: PdfPayload): Promise<Uint8Array
 
   const page1 = pdfDoc.addPage([595, 842]);
   const { height } = page1.getSize();
+
+  const gridAfterComplianceKwh = payload.sizing.kWhNeededRaw;
+  const gridBeforeComplianceKwh =
+    payload.compliance > 0 ? gridAfterComplianceKwh / payload.compliance : gridAfterComplianceKwh;
+  const batteryBeforeSafetyKwh =
+    payload.efficiency > 0 ? gridAfterComplianceKwh / payload.efficiency : payload.sizing.kWhNeeded;
+  const efficiencyUpliftKwh = Math.max(0, batteryBeforeSafetyKwh - gridAfterComplianceKwh);
+  const safetyBufferKwh = Math.max(0, payload.sizing.kWhNeeded - batteryBeforeSafetyKwh);
 
   const lines: string[] = [
     'Peak Shaving Report (MVP)',
@@ -35,8 +46,15 @@ export async function generateReportPdf(payload: PdfPayload): Promise<Uint8Array
     }`,
     `Exceedance intervals: ${payload.exceedanceCount}`,
     `Compliance target: ${(payload.compliance * 100).toFixed(0)}%`,
-    `Recommended product: ${payload.sizing.recommendedProduct.label}`,
+    `Recommended product: ${payload.sizing.recommendedProduct?.label ?? 'No feasible battery by kW + kWh'}`,
     `Sizing requirement: ${payload.sizing.kWhNeeded.toFixed(2)} kWh / ${payload.sizing.kWNeeded.toFixed(2)} kW`,
+    '',
+    'Sizing breakdown (kWh)',
+    `Grid basis before compliance: ${gridBeforeComplianceKwh.toFixed(2)}`,
+    `After compliance target: ${gridAfterComplianceKwh.toFixed(2)}`,
+    `Efficiency uplift to battery-side: +${efficiencyUpliftKwh.toFixed(2)}`,
+    `Safety buffer uplift: +${safetyBufferKwh.toFixed(2)}`,
+    `Final battery-side kWh needed: ${payload.sizing.kWhNeeded.toFixed(2)}`,
     '',
     'Data quality',
     `Rows: ${payload.quality.rows}`,
