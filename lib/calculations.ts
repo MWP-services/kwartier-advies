@@ -50,6 +50,12 @@ export interface SizingResult {
   noFeasibleBatteryByPower: boolean;
 }
 
+export interface PvSizingSettings {
+  compliance: number;
+  safetyFactor: number;
+  efficiency: number;
+}
+
 export interface BatteryProduct {
   label: string;
   capacityKwh: number;
@@ -87,6 +93,13 @@ export interface DayKwSeriesPoint {
   timeLabel: string;
   timestampIso: string;
   consumptionKw: number;
+}
+
+export interface PvIntervalFlow {
+  directSelfConsumptionKwh: number;
+  surplusKwh: number;
+  loadDeficitKwh: number;
+  mismatchKw: number;
 }
 
 export const BATTERY_OPTIONS: BatteryProduct[] = [
@@ -272,6 +285,23 @@ export function processIntervals(
   });
 }
 
+export function derivePvIntervalFlow(interval: IntervalRecord | ProcessedInterval): PvIntervalFlow {
+  const consumptionKwh = Math.max(0, interval.consumptionKwh ?? 0);
+  const pvKwh = Math.max(0, interval.pvKwh ?? 0);
+  const directSelfConsumptionKwh = Math.min(consumptionKwh, pvKwh);
+  const measuredExportKwh = interval.exportKwh == null ? null : Math.max(0, interval.exportKwh);
+  const surplusKwh = Math.max(0, measuredExportKwh ?? pvKwh - directSelfConsumptionKwh);
+  const loadDeficitKwh = Math.max(0, consumptionKwh - directSelfConsumptionKwh);
+  const mismatchKw = Math.max(surplusKwh, loadDeficitKwh) / 0.25;
+
+  return {
+    directSelfConsumptionKwh,
+    surplusKwh,
+    loadDeficitKwh,
+    mismatchKw
+  };
+}
+
 export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
   const events: PeakEvent[] = [];
   let current: PeakEvent | null = null;
@@ -401,6 +431,75 @@ export function computeSizing(params: {
 
   const kWhNeeded = (kWhNeededRaw / efficiency) * safetyFactor;
   const kWNeeded = kWNeededRaw * safetyFactor;
+
+  const { recommendedProduct, alternativeProduct, noFeasibleBatteryByPower } = selectMinimumCostBatteryOptions(
+    kWhNeeded,
+    kWNeeded
+  );
+
+  return {
+    kWhNeededRaw,
+    kWNeededRaw,
+    kWhNeeded,
+    kWNeeded,
+    recommendedProduct,
+    alternativeProduct,
+    noFeasibleBatteryByPower
+  };
+}
+
+export function computePvSizing(params: {
+  intervals: ProcessedInterval[];
+  settings: PvSizingSettings;
+}): SizingResult {
+  const { intervals, settings } = params;
+
+  const intervalsByDay = new Map<string, ProcessedInterval[]>();
+  intervals
+    .slice()
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    .forEach((interval) => {
+      const dayIso = getLocalDayIso(interval.timestamp) || interval.timestamp.slice(0, 10);
+      const dayIntervals = intervalsByDay.get(dayIso) ?? [];
+      dayIntervals.push(interval);
+      intervalsByDay.set(dayIso, dayIntervals);
+    });
+
+  let kWhNeededRaw = 0;
+  let kWNeededRaw = 0;
+
+  intervalsByDay.forEach((dayIntervals) => {
+    let rollingStoredKwh = 0;
+    let maxStoredKwh = 0;
+
+    dayIntervals.forEach((interval) => {
+      const flow = derivePvIntervalFlow(interval);
+      kWNeededRaw = Math.max(kWNeededRaw, flow.mismatchKw);
+      rollingStoredKwh += flow.surplusKwh;
+      maxStoredKwh = Math.max(maxStoredKwh, rollingStoredKwh);
+      rollingStoredKwh = Math.max(0, rollingStoredKwh - flow.loadDeficitKwh);
+    });
+
+    kWhNeededRaw = Math.max(kWhNeededRaw, maxStoredKwh);
+  });
+
+  kWhNeededRaw *= settings.compliance;
+  kWNeededRaw *= settings.compliance;
+
+  const kWhNeeded = settings.efficiency > 0 ? (kWhNeededRaw / settings.efficiency) * settings.safetyFactor : 0;
+  const kWNeeded = kWNeededRaw * settings.safetyFactor;
+
+  if (kWhNeeded <= 0 && kWNeeded <= 0) {
+    return {
+      kWhNeededRaw,
+      kWNeededRaw,
+      kWhNeeded,
+      kWNeeded,
+      recommendedProduct: null,
+      alternativeProduct: null,
+      noFeasibleBatteryByPower: false
+    };
+  }
 
   const { recommendedProduct, alternativeProduct, noFeasibleBatteryByPower } = selectMinimumCostBatteryOptions(
     kWhNeeded,

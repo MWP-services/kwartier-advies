@@ -7,11 +7,13 @@ import type {
   SizingResult
 } from './calculations';
 import type { NormalizationDiagnostics, InterpretationMode } from './normalization';
-import type { ScenarioResult } from './simulation';
+import type { PvSummary, ScenarioResult } from './simulation';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
+export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
 
 export interface AnalysisSettings {
+  analysisType: AnalysisType;
   contractedPowerKw: number;
   method: Method;
   compliance: number;
@@ -24,6 +26,7 @@ export interface AnalysisSettings {
 }
 
 export interface AnalysisResult {
+  analysisType: AnalysisType;
   intervals: ProcessedInterval[];
   events: PeakEvent[];
   peakMoments: PeakMoment[];
@@ -36,9 +39,11 @@ export interface AnalysisResult {
   topExceededIntervals: ExceededInterval[];
   normalizationDiagnostics: NormalizationDiagnostics;
   quality: DataQualityReport;
+  pvSummary: PvSummary | null;
 }
 
 export const defaultAnalysisSettings: AnalysisSettings = {
+  analysisType: 'PEAK_SHAVING',
   contractedPowerKw: 500,
   method: 'MAX_PEAK',
   compliance: 0.95,
@@ -52,6 +57,7 @@ export const defaultAnalysisSettings: AnalysisSettings = {
 
 export function analysisSettingsEqual(a: AnalysisSettings, b: AnalysisSettings): boolean {
   return (
+    a.analysisType === b.analysisType &&
     a.contractedPowerKw === b.contractedPowerKw &&
     a.method === b.method &&
     a.compliance === b.compliance &&

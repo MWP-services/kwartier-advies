@@ -14,7 +14,9 @@ import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
 import {
   buildDataQualityReport,
+  computePvSizing,
   computeSizing,
+  derivePvIntervalFlow,
   findMaxObserved,
   groupPeakEvents,
   listPeakMoments,
@@ -23,7 +25,7 @@ import {
 } from '@/lib/calculations';
 import { autoDetectColumns, mapRows, parseCsv, parseXlsx, type ColumnMapping } from '@/lib/parsing';
 import { normalizeConsumptionSeries } from '@/lib/normalization';
-import { findHighestPeakDay, simulateAllScenarios } from '@/lib/simulation';
+import { buildPvSummaryFromScenario, findHighestPeakDay, simulateAllPvScenarios, simulateAllScenarios } from '@/lib/simulation';
 
 const OUTLIER_KW_THRESHOLD = 5000;
 
@@ -54,6 +56,46 @@ function runAnalysis(
   if (normalized.normalizedRows.length === 0) return null;
 
   const intervals = processIntervals(normalized.normalizedRows, settings.contractedPowerKw);
+  const quality = buildDataQualityReport(normalized.normalizedRows);
+  const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
+
+  if (settings.analysisType === 'PV_SELF_CONSUMPTION') {
+    const sizing = computePvSizing({
+      intervals,
+      settings: {
+        compliance: settings.compliance,
+        safetyFactor: settings.safetyFactor,
+        efficiency: settings.efficiency
+      }
+    });
+    const targetCapacityKwh = sizing.recommendedProduct?.capacityKwh ?? Math.max(64, sizing.kWhNeeded);
+    const scenarios = simulateAllPvScenarios(intervals, targetCapacityKwh, {
+      dischargeEfficiency: settings.efficiency,
+      initialSocRatio: 0
+    });
+    const recommendedScenario =
+      scenarios.find((scenario) => scenario.capacityKwh === sizing.recommendedProduct?.capacityKwh) ?? scenarios[0] ?? null;
+    const pvSummary = buildPvSummaryFromScenario(recommendedScenario);
+    const exportIntervals = intervals.filter((interval) => derivePvIntervalFlow(interval).surplusKwh > 0).length;
+
+    return {
+      analysisType: settings.analysisType,
+      intervals,
+      events: [],
+      peakMoments: [],
+      sizing,
+      scenarios,
+      highestPeakDay: null,
+      maxObservedKw,
+      maxObservedTimestamp,
+      topExceededIntervals: [],
+      normalizationDiagnostics: normalized.diagnostics,
+      quality,
+      exceedanceIntervals: exportIntervals,
+      pvSummary
+    };
+  }
+
   const events = groupPeakEvents(intervals);
   const peakMoments = listPeakMoments(intervals);
   const sizing = computeSizing({
@@ -70,13 +112,12 @@ function runAnalysis(
     sizing.recommendedProduct?.capacityKwh ?? 0,
     { dischargeEfficiency: settings.efficiency }
   );
-  const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
   const highestPeakDay = findHighestPeakDay(intervals);
   const topExceededIntervals = highestPeakDay ? selectTopExceededIntervals(intervals, highestPeakDay, 20) : [];
-  const quality = buildDataQualityReport(normalized.normalizedRows);
   const exceedanceIntervals = peakMoments.length;
 
   return {
+    analysisType: settings.analysisType,
     intervals,
     events,
     peakMoments,
@@ -88,7 +129,8 @@ function runAnalysis(
     topExceededIntervals,
     normalizationDiagnostics: normalized.diagnostics,
     quality,
-    exceedanceIntervals
+    exceedanceIntervals,
+    pvSummary: null
   };
 }
 
@@ -104,6 +146,7 @@ export default function HomePage() {
   const [selectedScenario, setSelectedScenario] = useState(64);
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
 
   const canAnalyze =
     rawRows.length > 0 &&
@@ -112,7 +155,8 @@ export default function HomePage() {
     draftSettings.contractedPowerKw > 0 &&
     draftSettings.efficiency > 0 &&
     draftSettings.compliance >= 0.7 &&
-    draftSettings.compliance <= 1;
+    draftSettings.compliance <= 1 &&
+    (draftSettings.analysisType === 'PEAK_SHAVING' || hasPvInputs);
 
   const hasPendingChanges =
     !!appliedSettings &&
@@ -153,6 +197,10 @@ export default function HomePage() {
       setError('Selecteer eerst timestamp- en consumption-kolommen.');
       return;
     }
+    if (draftSettings.analysisType === 'PV_SELF_CONSUMPTION' && !hasPvInputs) {
+      setError('Voor PV-analyse is een pv_kwh- of export_kwh-kolom nodig.');
+      return;
+    }
     if (!canAnalyze) {
       setError('Controleer instellingen en data voordat je analyseert.');
       return;
@@ -172,6 +220,7 @@ export default function HomePage() {
       setAppliedSettings({ ...draftSettings });
       setAppliedMapping({ ...draftMapping });
       setAnalysisResult(result);
+      setSelectedScenario(result.sizing.recommendedProduct?.capacityKwh ?? result.scenarios[0]?.capacityKwh ?? 64);
       setAnalyzedAt(new Date().toISOString());
     } finally {
       setIsAnalyzing(false);
@@ -200,11 +249,23 @@ export default function HomePage() {
       maxChargeKw: scenario.maxChargeKw,
       maxDischargeKw: scenario.maxDischargeKw,
       endingSocKwh: scenario.endingSocKwh,
+      totalPvKwh: scenario.totalPvKwh,
+      totalConsumptionKwh: scenario.totalConsumptionKwh,
+      selfConsumptionBeforeKwh: scenario.selfConsumptionBeforeKwh,
+      selfConsumptionAfterKwh: scenario.selfConsumptionAfterKwh,
+      importedEnergyBeforeKwh: scenario.importedEnergyBeforeKwh,
+      importedEnergyAfterKwh: scenario.importedEnergyAfterKwh,
+      exportedEnergyBeforeKwh: scenario.exportedEnergyBeforeKwh,
+      exportedEnergyAfterKwh: scenario.exportedEnergyAfterKwh,
+      achievedSelfConsumption: scenario.achievedSelfConsumption,
+      selfSufficiency: scenario.selfSufficiency,
+      exportReduction: scenario.exportReduction,
       // Excluded on purpose to keep report payload small for large datasets.
       shavedSeries: []
     }));
 
     const reportPayload = {
+      analysisType: appliedSettings.analysisType,
       contractedPowerKw: appliedSettings.contractedPowerKw,
       maxObservedKw: analysisResult.maxObservedKw,
       maxObservedTimestamp: analysisResult.maxObservedTimestamp,
@@ -219,6 +280,7 @@ export default function HomePage() {
       peakMoments: analysisResult.peakMoments,
       intervals: analysisResult.intervals,
       highestPeakDay: analysisResult.highestPeakDay,
+      pvSummary: analysisResult.pvSummary,
       scenarios: reportScenarios
     };
 
@@ -236,7 +298,7 @@ export default function HomePage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `wattsnext-peak-shaving-report-${Date.now()}.html`;
+    a.download = `${appliedSettings.analysisType === 'PV_SELF_CONSUMPTION' ? 'wattsnext-pv-report' : 'wattsnext-peak-shaving-report'}-${Date.now()}.html`;
     a.click();
     URL.revokeObjectURL(url);
     } catch (err) {
@@ -258,7 +320,9 @@ export default function HomePage() {
               priority
             />
             <div>
-              <h1 className="text-2xl font-bold md:text-3xl">Peak Shaving Adviseur</h1>
+              <h1 className="text-2xl font-bold md:text-3xl">
+                {draftSettings.analysisType === 'PV_SELF_CONSUMPTION' ? 'PV Self Consumption Adviseur' : 'Peak Shaving Adviseur'}
+              </h1>
               <p className="text-sm text-slate-600">Snelle batterij-analyse in WattsNext-stijl</p>
             </div>
           </div>
@@ -273,6 +337,23 @@ export default function HomePage() {
       {headers.length > 0 && <ColumnMapper headers={headers} mapping={draftMapping} onChange={setDraftMapping} />}
 
       <div className="wx-card grid gap-4 lg:grid-cols-3">
+        <label className="text-sm">
+          Analysemodus
+          <select
+            className="wx-input"
+            value={draftSettings.analysisType}
+            onChange={(event) =>
+              setDraftSettings((prev) => ({
+                ...prev,
+                analysisType: event.target.value as AnalysisSettings['analysisType']
+              }))
+            }
+          >
+            <option value="PEAK_SHAVING">Peak Shaving</option>
+            <option value="PV_SELF_CONSUMPTION">PV Self Consumption</option>
+          </select>
+        </label>
+
         <label className="text-sm">
           Gecontracteerd vermogen (kW)
           <input
@@ -378,7 +459,7 @@ export default function HomePage() {
 
       {analysisResult ? (
         <>
-          {analysisResult.maxObservedKw > OUTLIER_KW_THRESHOLD * 2 && (
+          {analysisResult.analysisType === 'PEAK_SHAVING' && analysisResult.maxObservedKw > OUTLIER_KW_THRESHOLD * 2 && (
             <p className="rounded border border-amber-300 bg-amber-50 p-3 text-amber-800">
               Onrealistisch vermogen gedetecteerd - controleer kolomkeuze
             </p>
@@ -390,10 +471,12 @@ export default function HomePage() {
           )}
 
           <KpiCards
+            analysisType={analysisResult.analysisType}
             maxObservedKw={analysisResult.maxObservedKw}
             maxObservedTimestamp={analysisResult.maxObservedTimestamp}
             exceedanceIntervals={analysisResult.exceedanceIntervals}
             sizing={analysisResult.sizing}
+            pvSummary={analysisResult.pvSummary}
           />
 
           <DataQualityPanel
@@ -401,20 +484,37 @@ export default function HomePage() {
             quality={analysisResult.quality}
           />
 
-          <Charts
-            intervals={analysisResult.intervals}
-            contractKw={appliedSettings?.contractedPowerKw ?? draftSettings.contractedPowerKw}
-            peakMoments={analysisResult.peakMoments}
-            highestPeakDay={analysisResult.highestPeakDay}
-            topExceededIntervals={analysisResult.topExceededIntervals}
-          />
+          {analysisResult.analysisType === 'PEAK_SHAVING' ? (
+            <Charts
+              intervals={analysisResult.intervals}
+              contractKw={appliedSettings?.contractedPowerKw ?? draftSettings.contractedPowerKw}
+              peakMoments={analysisResult.peakMoments}
+              highestPeakDay={analysisResult.highestPeakDay}
+              topExceededIntervals={analysisResult.topExceededIntervals}
+            />
+          ) : (
+            <div className="wx-card text-sm text-slate-700">
+              <h3 className="wx-title">PV-analyse samenvatting</h3>
+              <p>
+                Totale PV-opwek: {(analysisResult.pvSummary?.totalPvKwh ?? 0).toFixed(2)} kWh. Zelfconsumptie na batterij:
+                {' '}
+                {(((analysisResult.pvSummary?.selfConsumptionRatio ?? 0) * 100)).toFixed(1)}%.
+              </p>
+              <p>
+                Export voor/na batterij: {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh /{' '}
+                {(analysisResult.pvSummary?.exportAfter ?? 0).toFixed(2)} kWh.
+              </p>
+            </div>
+          )}
 
           <ScenarioTable
+            analysisType={analysisResult.analysisType}
             scenarios={analysisResult.scenarios}
             recommendedCapacityKwh={analysisResult.sizing.recommendedProduct?.capacityKwh ?? null}
           />
 
           <ScenarioCharts
+            analysisType={analysisResult.analysisType}
             scenarios={analysisResult.scenarios}
             selectedScenarioCapacity={selectedScenario}
             onSelectScenario={setSelectedScenario}
@@ -440,7 +540,9 @@ export default function HomePage() {
             </p>
             {analyzedAt && <p className="mt-1 text-xs text-slate-500">Laatst geanalyseerd: {analyzedAt}</p>}
             <p className="mt-2 text-xs text-slate-500">
-              Dimensionering voor peak shaving; finale engineeringvalidatie blijft vereist.
+              {analysisResult.analysisType === 'PV_SELF_CONSUMPTION'
+                ? 'PV-dimensionering gebruikt PV-surplus, laad/ontlaadlimieten en zelfconsumptiesimulatie; finale engineeringvalidatie blijft vereist.'
+                : 'Dimensionering voor peak shaving; finale engineeringvalidatie blijft vereist.'}
             </p>
             <button
               className="wx-btn-primary mt-3"

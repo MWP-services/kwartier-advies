@@ -76,7 +76,336 @@ function getRecommendedBrochureInfo(payload: PdfPayload): { key: string; dataUri
   return asset ? { key: baseKey, dataUri: asset.dataUri } : null;
 }
 
+function generatePvInteractiveReportHtml(payload: PdfPayload): string {
+  const embeddedLogoSrc = getEmbeddedLogoSrc();
+  const brochure = getRecommendedBrochureInfo(payload);
+  const pvSummary = payload.pvSummary ?? {
+    totalPvKwh: 0,
+    totalConsumptionKwh: 0,
+    selfConsumptionBeforeKwh: 0,
+    selfConsumptionAfterKwh: 0,
+    importedBefore: 0,
+    importedAfter: 0,
+    exportBefore: 0,
+    exportAfter: 0,
+    selfConsumptionRatio: 0,
+    selfSufficiency: 0,
+    exportReduction: 0
+  };
+  const scenarioChartData = payload.scenarios.map((scenario) => ({
+    optionLabel: scenario.optionLabel,
+    exportBefore: scenario.exportedEnergyBeforeKwh ?? 0,
+    exportAfter: scenario.exportedEnergyAfterKwh ?? 0,
+    selfConsumption: (scenario.achievedSelfConsumption ?? 0) * 100,
+    selfSufficiency: (scenario.selfSufficiency ?? 0) * 100
+  }));
+  const kpiCards = [
+    ['Totale PV-opwek', `${pvSummary.totalPvKwh.toFixed(2)} kWh`],
+    ['Zelfconsumptie', `${(pvSummary.selfConsumptionRatio * 100).toFixed(1)}%`],
+    ['Zelfvoorziening', `${(pvSummary.selfSufficiency * 100).toFixed(1)}%`],
+    ['Export voor batterij', `${pvSummary.exportBefore.toFixed(2)} kWh`],
+    ['Export na batterij', `${pvSummary.exportAfter.toFixed(2)} kWh`]
+  ];
+
+  return `<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WattsNext PV Self Consumption Rapport</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root {
+      --bg: #FFFFFF;
+      --text: #232323;
+      --muted: #8D8D8D;
+      --green: #4E8D3E;
+      --green-dark: #3B812B;
+      --green-lime: #9AB826;
+      --dot-warm: #E28E11;
+      --dot-yellow: #F1D23A;
+      --border: #E6E6E6;
+      --header-row: #EEF7EA;
+      --callout: #F7F9F7;
+      --zebra: #FAFAFA;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, Calibri, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.45;
+    }
+    .page {
+      position: relative;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+      background: var(--bg);
+    }
+    .header, .card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.05);
+    }
+    .header {
+      padding: 14px 18px 12px;
+      display: grid;
+      grid-template-columns: 230px 1fr auto;
+      gap: 14px;
+      align-items: center;
+      position: relative;
+    }
+    .header::after {
+      content: "";
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 2px;
+      background: var(--green);
+      border-bottom-left-radius: 14px;
+      border-bottom-right-radius: 14px;
+    }
+    .logoWrap {
+      width: 220px;
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 8px;
+      border: 1px solid #5f8e52;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #2f5f33 0%, #3b7a3c 58%, #5a9b4a 100%);
+    }
+    .logoWrap img { max-width: 204px; max-height: 52px; }
+    .logoFallback { display: none; color: #fff; font-weight: 700; }
+    .brand h1, .card h3 { margin: 0; }
+    .brand p { margin: 6px 0 0; color: var(--muted); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+    .pill {
+      display: inline-block; padding: 5px 9px; border-radius: 999px;
+      background: rgba(78,141,62,.16); color: var(--green-dark); font-weight: 700; font-size: 9.5px;
+    }
+    .grid { display: grid; gap: 16px; margin-top: 16px; }
+    .grid.kpis { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .grid.two { grid-template-columns: 1.2fr 1fr; }
+    .card { padding: 14px; }
+    .kpi-label { color: var(--muted); font-size: 9.5px; }
+    .kpi-value { margin-top: 4px; font-weight: 700; font-size: 12px; color: var(--text); }
+    .plot { width: 100%; height: 320px; }
+    .brochureFrame { width: 100%; height: 420px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 11px;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    th, td { border-bottom: 1px solid var(--border); padding: 9px 10px; text-align: left; }
+    th { background: var(--header-row); font-weight: 600; border-bottom: 1px solid var(--green); }
+    tbody tr:nth-child(even) td { background: var(--zebra); }
+    tbody tr:last-child td { border-bottom: none; }
+    .muted { color: var(--muted); font-size: 9.5px; line-height: 1.35; }
+    .callout {
+      background: var(--callout);
+      border-left: 5px solid var(--green);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 10px;
+    }
+    .footer {
+      margin-top: 18px;
+      padding-top: 8px;
+      border-top: 1px solid #EDEDED;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 9px;
+    }
+    @media (max-width: 900px) {
+      .grid.two { grid-template-columns: 1fr; }
+      .header { grid-template-columns: auto 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="header">
+      <div class="logoWrap">
+        ${
+          embeddedLogoSrc
+            ? `<img src="${embeddedLogoSrc}" alt="WattsNext logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+               <div class="logoFallback">WattsNext</div>`
+            : `<div class="logoFallback" style="display:block;">WattsNext</div>`
+        }
+      </div>
+      <div class="brand">
+        <h1>PV Self Consumption Rapport</h1>
+        <p>ENERGIEOPLOSSINGEN</p>
+      </div>
+      <div>
+        <div class="pill">PV analyse</div>
+        <div class="muted" style="margin-top:8px;">Self-consumption doel: ${(payload.compliance * 100).toFixed(0)}%</div>
+      </div>
+    </section>
+
+    <section class="grid kpis">
+      ${kpiCards
+        .map(
+          ([label, value]) => `
+        <div class="card">
+          <div class="kpi-label">${label}</div>
+          <div class="kpi-value">${value}</div>
+        </div>`
+        )
+        .join('')}
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h3>Aanbevolen batterijadvies</h3>
+        <table>
+          <tbody>
+            <tr><th>Aanbevolen configuratie</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
+            <tr><th>Benodigde capaciteit</th><td>${payload.sizing.kWhNeeded.toFixed(2)} kWh</td></tr>
+            <tr><th>Benodigd vermogen</th><td>${payload.sizing.kWNeeded.toFixed(2)} kW</td></tr>
+            <tr><th>Export voor/na batterij</th><td>${pvSummary.exportBefore.toFixed(2)} / ${pvSummary.exportAfter.toFixed(2)} kWh</td></tr>
+            <tr><th>Zelfconsumptie ratio</th><td>${(pvSummary.selfConsumptionRatio * 100).toFixed(1)}%</td></tr>
+            <tr><th>Zelfvoorziening</th><td>${(pvSummary.selfSufficiency * 100).toFixed(1)}%</td></tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          De PV-batterij wordt gedimensioneerd op basis van PV-surplus, piekmismatch tussen opwek en load, en batterijverliezen.
+        </div>
+      </div>
+      <div class="card">
+        <h3>Productsheet aanbevolen batterij</h3>
+        ${
+          brochure
+            ? brochure.dataUri.startsWith('data:application/pdf')
+              ? `<object class="brochureFrame" data="${brochure.dataUri}#page=1&zoom=page-width" type="application/pdf"></object>`
+              : `<img class="brochureFrame" src="${brochure.dataUri}" alt="Productsheet batterij ${brochure.key}" style="object-fit:contain;" />`
+            : `<div class="callout">Productsheet niet gevonden in assets-map.</div>`
+        }
+        ${brochure ? `<div class="muted" style="margin-top:8px;">Gekoppelde brochure: ${brochure.key}</div>` : ''}
+      </div>
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h3>PV export voor/na batterij</h3>
+        <div id="pv-export-chart" class="plot"></div>
+      </div>
+      <div class="card">
+        <h3>Self-consumption per scenario</h3>
+        <div id="pv-self-chart" class="plot"></div>
+      </div>
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h3>PV kernmetrics</h3>
+        <table>
+          <tbody>
+            <tr><th>Totale PV-opwek</th><td>${pvSummary.totalPvKwh.toFixed(2)} kWh</td></tr>
+            <tr><th>Totale load</th><td>${pvSummary.totalConsumptionKwh.toFixed(2)} kWh</td></tr>
+            <tr><th>Self-consumed voor batterij</th><td>${pvSummary.selfConsumptionBeforeKwh.toFixed(2)} kWh</td></tr>
+            <tr><th>Self-consumed na batterij</th><td>${pvSummary.selfConsumptionAfterKwh.toFixed(2)} kWh</td></tr>
+            <tr><th>Import voor/na batterij</th><td>${pvSummary.importedBefore.toFixed(2)} / ${pvSummary.importedAfter.toFixed(2)} kWh</td></tr>
+            <tr><th>Export reductie</th><td>${(pvSummary.exportReduction * 100).toFixed(1)}%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Datakwaliteit</h3>
+        <table>
+          <tbody>
+            <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
+            <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
+            <tr><th>Ontbrekende intervallen</th><td>${payload.quality.missingIntervalsCount}</td></tr>
+            <tr><th>Duplicaten</th><td>${payload.quality.duplicateCount}</td></tr>
+            <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div>WattsNext Energieoplossingen</div>
+      <div>PV self-consumption rapport</div>
+    </footer>
+  </div>
+
+  <script>
+    const scenarioData = ${safeJson(scenarioChartData)};
+    const wattsTheme = {
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: '#FFFFFF',
+      font: {family: 'Inter, Arial, Calibri, sans-serif', color: '#232323'},
+      margin: {t: 12, r: 12, b: 70, l: 55}
+    };
+
+    Plotly.newPlot('pv-export-chart', [
+      {
+        type: 'bar',
+        name: 'Voor',
+        x: scenarioData.map(d => d.optionLabel),
+        y: scenarioData.map(d => d.exportBefore),
+        marker: {color: '#F59E0B'}
+      },
+      {
+        type: 'bar',
+        name: 'Na',
+        x: scenarioData.map(d => d.optionLabel),
+        y: scenarioData.map(d => d.exportAfter),
+        marker: {color: '#22C55E'}
+      }
+    ], {
+      ...wattsTheme,
+      barmode: 'group',
+      hovermode: 'x unified',
+      xaxis: {tickangle: -20},
+      yaxis: {title: 'kWh', rangemode: 'tozero'},
+      margin: {t: 30, r: 12, b: 90, l: 55}
+    }, {responsive: true, displaylogo: false});
+
+    Plotly.newPlot('pv-self-chart', [
+      {
+        type: 'bar',
+        name: 'Zelfconsumptie',
+        x: scenarioData.map(d => d.optionLabel),
+        y: scenarioData.map(d => d.selfConsumption),
+        marker: {color: '#2563EB'}
+      },
+      {
+        type: 'bar',
+        name: 'Zelfvoorziening',
+        x: scenarioData.map(d => d.optionLabel),
+        y: scenarioData.map(d => d.selfSufficiency),
+        marker: {color: '#7C3AED'}
+      }
+    ], {
+      ...wattsTheme,
+      barmode: 'group',
+      hovermode: 'x unified',
+      xaxis: {tickangle: -20},
+      yaxis: {title: '%', rangemode: 'tozero'},
+      margin: {t: 30, r: 12, b: 90, l: 55}
+    }, {responsive: true, displaylogo: false});
+  </script>
+</body>
+</html>`;
+}
+
 export function generateInteractiveReportHtml(payload: PdfPayload): string {
+  if (payload.analysisType === 'PV_SELF_CONSUMPTION') {
+    return generatePvInteractiveReportHtml(payload);
+  }
+
   const embeddedLogoSrc = getEmbeddedLogoSrc();
   const brochure = getRecommendedBrochureInfo(payload);
   const gridAfterComplianceKwh = payload.sizing.kWhNeededRaw;

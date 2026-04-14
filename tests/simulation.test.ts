@@ -3,6 +3,8 @@ import { processIntervals } from '@/lib/calculations';
 import {
   generateScenarioOptions,
   simulateAllScenarios,
+  simulateAllPvScenarios,
+  simulatePvScenario,
   simulateSingleScenario
 } from '@/lib/simulation';
 
@@ -162,5 +164,33 @@ describe('simulation', () => {
 
     expect(result.exceedanceEnergyKwhBefore).toBeCloseTo(beforeExcessKwh, 6);
     expect(result.exceedanceEnergyKwhAfter).toBeLessThan(1e-6);
+  });
+
+  it('simulates PV charging first and then discharging to cover load', () => {
+    const pvRows = [
+      { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 5, pvKwh: 25 },
+      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 20, pvKwh: 5 }
+    ];
+    const intervals = processIntervals(pvRows, 500);
+    const result = simulatePvScenario(intervals, 64, { initialSocRatio: 0, dischargeEfficiency: 1 });
+
+    expect(result.exportedEnergyAfterKwh).toBeLessThan(result.exportedEnergyBeforeKwh ?? Infinity);
+    expect(result.importedEnergyAfterKwh).toBeLessThan(result.importedEnergyBeforeKwh ?? Infinity);
+    expect(result.selfConsumptionAfterKwh).toBeGreaterThan(result.selfConsumptionBeforeKwh ?? 0);
+    expect(result.achievedSelfConsumption).toBeGreaterThan(0);
+    expect(result.socSeries?.length).toBe(intervals.length);
+  });
+
+  it('returns PV scenario sets that include fixed large-capacity options', () => {
+    const pvRows = Array.from({ length: 8 }, (_, idx) => ({
+      timestamp: new Date(Date.UTC(2024, 0, 1, 8, idx * 15)).toISOString(),
+      consumptionKwh: 5,
+      pvKwh: 20
+    }));
+    const intervals = processIntervals(pvRows, 500);
+    const scenarios = simulateAllPvScenarios(intervals, 200);
+
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 2090)).toBeTruthy();
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 5015)).toBeTruthy();
   });
 });
