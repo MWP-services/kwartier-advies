@@ -9,6 +9,7 @@ interface ScenarioTableProps {
 
 export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh }: ScenarioTableProps) {
   const pvMode = scenarios[0]?.pvAnalysisMode ?? null;
+  const pvStrategy = scenarios[0]?.pvStrategy ?? 'SELF_CONSUMPTION_ONLY';
 
   return (
     <div className="wx-card">
@@ -19,7 +20,15 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
             <tr className="border-b text-left">
               <th className="p-2">Optie</th>
               {analysisType === 'PV_SELF_CONSUMPTION' ? (
-                pvMode === 'FULL_PV' ? (
+                pvStrategy === 'PV_WITH_TRADING' ? (
+                  <>
+                    <th className="p-2">Opgeslagen PV</th>
+                    <th className="p-2">Later geëxporteerd</th>
+                    <th className="p-2">Importreductie</th>
+                    <th className="p-2">Nuttige ontlading</th>
+                    <th className="p-2">Economische waarde</th>
+                  </>
+                ) : pvMode === 'FULL_PV' ? (
                   <>
                     <th className="p-2">Zelfconsumptie</th>
                     <th className="p-2">Zelfvoorziening</th>
@@ -55,7 +64,17 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
               >
                 <td className="p-2">{scenario.optionLabel}</td>
                 {analysisType === 'PV_SELF_CONSUMPTION' ? (
-                  scenario.pvAnalysisMode === 'FULL_PV' ? (
+                  scenario.pvStrategy === 'PV_WITH_TRADING' ? (
+                    <>
+                      <td className="p-2">{(scenario.capturedExportEnergyKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{(scenario.shiftedExportedLaterKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{(scenario.importReductionKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{(scenario.totalUsefulDischargedEnergyKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">
+                        {scenario.totalEconomicValueEur != null ? `EUR ${scenario.totalEconomicValueEur.toFixed(2)}` : '-'}
+                      </td>
+                    </>
+                  ) : scenario.pvAnalysisMode === 'FULL_PV' ? (
                     <>
                       <td className="p-2">{((scenario.achievedSelfConsumption ?? 0) * 100).toFixed(1)}%</td>
                       <td className="p-2">{((scenario.selfSufficiency ?? 0) * 100).toFixed(1)}%</td>

@@ -1,11 +1,18 @@
 import { BATTERY_OPTIONS, type ProcessedInterval } from './calculations';
-import { getBatterySpecForCapacity } from './batterySpecs';
+import {
+  getInitialSocKwh,
+  getMaxChargeIntervalKwh,
+  getMaxDischargeIntervalKwh,
+  resolveBatteryPhysics
+} from './batteryPhysics';
 import { getLocalDayIso } from './datetime';
 import {
+  buildDefaultTradingConfig,
   generateScenarioOptions,
   simulatePvBattery,
   type PvAnalysisMode,
   type PvSimulationConfig,
+  type PvStrategy
 } from './pvSimulation';
 
 export { generateNearbyModularOptions, generateScenarioOptions } from './pvSimulation';
@@ -23,6 +30,7 @@ export interface ScenarioResult {
   optionLabel: string;
   capacityKwh: number;
   pvAnalysisMode?: PvAnalysisMode;
+  pvStrategy?: PvStrategy;
   limitations?: string[];
   exceedanceIntervalsBefore: number;
   exceedanceIntervalsAfter: number;
@@ -44,16 +52,25 @@ export interface ScenarioResult {
   importedEnergyAfterKwh?: number;
   exportedEnergyBeforeKwh?: number;
   exportedEnergyAfterKwh?: number;
+  immediateExportedKwh?: number;
   capturedExportEnergyKwh?: number;
+  shiftedExportedLaterKwh?: number;
+  storedPvUsedOnsiteKwh?: number;
+  totalUsefulDischargedEnergyKwh?: number;
   batteryUtilizationAgainstExport?: number;
   achievedSelfConsumption?: number | null;
   selfSufficiency?: number | null;
+  importReductionKwh?: number;
   exportReduction?: number;
+  avoidedImportValueEur?: number | null;
+  tradingExportValueEur?: number | null;
+  totalEconomicValueEur?: number | null;
   socSeries?: { timestamp: string; socKwh: number }[];
 }
 
 export interface PvSummary {
   mode: PvAnalysisMode;
+  strategy: PvStrategy;
   warnings: string[];
   totalPvKwh: number | null;
   totalConsumptionKwh: number;
@@ -63,11 +80,19 @@ export interface PvSummary {
   importedAfter: number;
   exportBefore: number;
   exportAfter: number;
+  immediateExportedKwh: number;
   capturedExportEnergyKwh: number;
+  shiftedExportedLaterKwh: number;
+  storedPvUsedOnsiteKwh: number;
+  totalUsefulDischargedEnergyKwh: number;
   batteryUtilizationAgainstExport: number;
   selfConsumptionRatio: number | null;
   selfSufficiency: number | null;
+  importReductionKwh: number;
   exportReduction: number;
+  avoidedImportValueEur: number | null;
+  tradingExportValueEur: number | null;
+  totalEconomicValueEur: number | null;
 }
 
 export function simulateSingleScenario(
@@ -79,21 +104,17 @@ export function simulateSingleScenario(
   optionLabel?: string
 ): ScenarioResult {
   const initialSocRatio = config?.initialSocRatio ?? 0.5;
-  const spec = getBatterySpecForCapacity(batteryCapacityKwh);
-  const hasDischargeEfficiencyOverride = config?.dischargeEfficiency != null;
-  const dischargeEff = hasDischargeEfficiencyOverride
-    ? Math.max(0, Math.min(1, config?.dischargeEfficiency ?? 1))
-    : Math.sqrt(spec.roundTripEfficiency);
-  const chargeEff = hasDischargeEfficiencyOverride ? 1 : Math.sqrt(spec.roundTripEfficiency);
+  const { spec, chargeEfficiency: chargeEff, dischargeEfficiency: dischargeEff, minSocKwh, maxSocKwh } =
+    resolveBatteryPhysics(batteryCapacityKwh, config);
   const maxChargeKw = spec.maxChargeKw;
   const maxDischargeKw = spec.maxDischargeKw;
   // By default simulate each scenario with its own physical power capability.
   // A global powerCapKw can still be provided explicitly through config when needed.
   const powerCapKw = config?.powerCapKw ?? Math.min(maxExcessKw, maxDischargeKw);
-  const batteryCapacityLimitKwh = spec.capacityKwh;
+  const batteryCapacityLimitKwh = maxSocKwh;
   const contractKw = Math.max(0, ...intervals.map((interval) => interval.consumptionKw - interval.excessKw));
 
-  let soc = batteryCapacityLimitKwh * initialSocRatio;
+  let soc = getInitialSocKwh(batteryCapacityKwh, initialSocRatio, config);
   let exceedanceIntervalsBefore = 0;
   let exceedanceIntervalsAfter = 0;
   let exceedanceEnergyKwhBefore = 0;
@@ -108,8 +129,11 @@ export function simulateSingleScenario(
 
     const headroomKw = Math.max(0, contractKw - interval.consumptionKw);
     const actualChargeKw = Math.min(headroomKw, maxChargeKw);
-    const chargeKwh = actualChargeKw * 0.25 * chargeEff;
-    soc = Math.min(batteryCapacityLimitKwh, soc + chargeKwh);
+    const chargeInputKwh = Math.min(
+      getMaxChargeIntervalKwh(actualChargeKw),
+      chargeEff > 0 ? Math.max(0, batteryCapacityLimitKwh - soc) / chargeEff : 0
+    );
+    soc = Math.min(batteryCapacityLimitKwh, soc + chargeInputKwh * chargeEff);
     // Show the actual post-battery grid load in overlays: charging increases grid load, discharge reduces it.
     let postBatteryGridKw = interval.consumptionKw + actualChargeKw;
 
@@ -120,9 +144,11 @@ export function simulateSingleScenario(
 
       const dischargeLimitKw = Math.min(maxDischargeKw, powerCapKw);
       const dischargeNeedKwh = Math.min(interval.excessKw, dischargeLimitKw) * 0.25;
-      const deliveredFromSocKwh = Math.min(dischargeNeedKwh / dischargeEff, soc);
-      soc -= deliveredFromSocKwh;
-      const deliveredToLoadKwh = deliveredFromSocKwh * dischargeEff;
+      const deliverableFromSocKwh = Math.max(0, soc - minSocKwh) * dischargeEff;
+      const deliveredToLoadKwh = Math.min(dischargeNeedKwh, getMaxDischargeIntervalKwh(dischargeLimitKw), deliverableFromSocKwh);
+      if (dischargeEff > 0) {
+        soc = Math.max(minSocKwh, soc - deliveredToLoadKwh / dischargeEff);
+      }
       const dischargeKw = deliveredToLoadKwh / 0.25;
 
       const remainingExcessKw = Math.max(0, interval.excessKw - dischargeKw);
@@ -224,13 +250,20 @@ export function simulatePvScenario(
   config?: PvSimulationConfig,
   optionLabel?: string
 ): ScenarioResult {
-  const metrics = simulatePvBattery(intervals, batteryCapacityKwh, config);
+  const effectiveConfig: PvSimulationConfig = {
+    ...config,
+    strategy: config?.strategy ?? 'SELF_CONSUMPTION_ONLY',
+    trading: config?.trading ?? buildDefaultTradingConfig(config?.strategy ?? 'SELF_CONSUMPTION_ONLY'),
+    captureSocSeries: config?.captureSocSeries ?? true
+  };
+  const metrics = simulatePvBattery(intervals, batteryCapacityKwh, effectiveConfig);
 
   return {
     optionLabel:
       optionLabel ?? BATTERY_OPTIONS.find((b) => b.capacityKwh === batteryCapacityKwh)?.label ?? `${batteryCapacityKwh} kWh`,
     capacityKwh: batteryCapacityKwh,
     pvAnalysisMode: metrics.mode,
+    pvStrategy: metrics.strategy,
     limitations: metrics.limitations,
     exceedanceIntervalsBefore: metrics.exportIntervalsBefore,
     exceedanceIntervalsAfter: metrics.exportIntervalsAfter,
@@ -261,11 +294,19 @@ export function simulatePvScenario(
     importedEnergyAfterKwh: metrics.importedEnergyAfterKwh,
     exportedEnergyBeforeKwh: metrics.exportedEnergyBeforeKwh,
     exportedEnergyAfterKwh: metrics.exportedEnergyAfterKwh,
+    immediateExportedKwh: metrics.immediateExportedKwh,
     capturedExportEnergyKwh: metrics.capturedExportEnergyKwh,
+    shiftedExportedLaterKwh: metrics.shiftedExportedLaterKwh,
+    storedPvUsedOnsiteKwh: metrics.storedPvUsedOnsiteKwh,
+    totalUsefulDischargedEnergyKwh: metrics.totalUsefulDischargedEnergyKwh,
     batteryUtilizationAgainstExport: metrics.batteryUtilizationAgainstExport,
     achievedSelfConsumption: metrics.selfConsumptionRatio,
     selfSufficiency: metrics.selfSufficiency,
+    importReductionKwh: metrics.importReductionKwh,
     exportReduction: metrics.exportReduction,
+    avoidedImportValueEur: metrics.avoidedImportValueEur,
+    tradingExportValueEur: metrics.tradingExportValueEur,
+    totalEconomicValueEur: metrics.totalEconomicValueEur,
     socSeries: metrics.socSeries
   };
 }
@@ -290,6 +331,7 @@ export function buildPvSummaryFromScenario(scenario: ScenarioResult | null): PvS
 
   return {
     mode: scenario.pvAnalysisMode ?? 'EXPORT_ONLY',
+    strategy: scenario.pvStrategy ?? 'SELF_CONSUMPTION_ONLY',
     warnings: scenario.limitations ?? [],
     totalPvKwh: scenario.totalPvKwh ?? null,
     totalConsumptionKwh: scenario.totalConsumptionKwh ?? 0,
@@ -299,11 +341,19 @@ export function buildPvSummaryFromScenario(scenario: ScenarioResult | null): PvS
     importedAfter: scenario.importedEnergyAfterKwh ?? 0,
     exportBefore: scenario.exportedEnergyBeforeKwh ?? 0,
     exportAfter: scenario.exportedEnergyAfterKwh ?? 0,
+    immediateExportedKwh: scenario.immediateExportedKwh ?? 0,
     capturedExportEnergyKwh: scenario.capturedExportEnergyKwh ?? 0,
+    shiftedExportedLaterKwh: scenario.shiftedExportedLaterKwh ?? 0,
+    storedPvUsedOnsiteKwh: scenario.storedPvUsedOnsiteKwh ?? 0,
+    totalUsefulDischargedEnergyKwh: scenario.totalUsefulDischargedEnergyKwh ?? 0,
     batteryUtilizationAgainstExport: scenario.batteryUtilizationAgainstExport ?? 0,
     selfConsumptionRatio: scenario.achievedSelfConsumption ?? null,
     selfSufficiency: scenario.selfSufficiency ?? null,
-    exportReduction: scenario.exportReduction ?? 0
+    importReductionKwh: scenario.importReductionKwh ?? 0,
+    exportReduction: scenario.exportReduction ?? 0,
+    avoidedImportValueEur: scenario.avoidedImportValueEur ?? null,
+    tradingExportValueEur: scenario.tradingExportValueEur ?? null,
+    totalEconomicValueEur: scenario.totalEconomicValueEur ?? null
   };
 }
 

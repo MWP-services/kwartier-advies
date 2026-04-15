@@ -1,12 +1,16 @@
 import { getLocalDayIso, getLocalHourMinute, parseTimestamp } from './datetime';
 import {
+  buildDefaultTradingConfig,
   derivePvIntervalFlow as derivePvIntervalFlowBase,
   generateScenarioOptions,
   scorePvScenarioForRecommendation,
   simulatePvBattery,
-  type PvAnalysisMode
+  type PvAnalysisMode,
+  type PvStrategy,
+  type PvTradingConfig
 } from './pvSimulation';
 import { getBatterySpecForCapacity } from './batterySpecs';
+import type { ScenarioResult } from './simulation';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 
@@ -62,6 +66,8 @@ export interface PvSizingSettings {
   compliance: number;
   safetyFactor: number;
   efficiency: number;
+  strategy: PvStrategy;
+  trading?: PvTradingConfig;
 }
 
 export interface BatteryProduct {
@@ -375,6 +381,35 @@ function selectRecommendedScenarioOptions(
   return { recommended, alternative };
 }
 
+function scorePvScenarioResultForRecommendation(scenario: ScenarioResult): {
+  primary: number;
+  secondary: number;
+  score: number;
+} {
+  let primary = 0;
+  let secondary = 0;
+
+  if (scenario.pvStrategy === 'PV_WITH_TRADING') {
+    primary = scenario.totalEconomicValueEur ?? scenario.totalUsefulDischargedEnergyKwh ?? 0;
+    secondary = (scenario.shiftedExportedLaterKwh ?? 0) + (scenario.importReductionKwh ?? 0);
+  } else if (scenario.pvAnalysisMode === 'FULL_PV') {
+    primary = scenario.achievedSelfConsumption ?? scenario.importReductionKwh ?? 0;
+    secondary = scenario.exportReduction ?? 0;
+  } else {
+    primary = (scenario.importReductionKwh ?? 0) + (scenario.capturedExportEnergyKwh ?? 0);
+    secondary = scenario.exportReduction ?? 0;
+  }
+
+  const score =
+    scenario.pvStrategy === 'PV_WITH_TRADING'
+      ? primary * 0.75 + secondary * 0.25
+      : scenario.pvAnalysisMode === 'FULL_PV'
+        ? primary * 0.7 + secondary * 0.3
+        : primary * 0.8 + secondary * 0.2;
+
+  return { primary, secondary, score };
+}
+
 export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
   const events: PeakEvent[] = [];
   let current: PeakEvent | null = null;
@@ -534,12 +569,17 @@ export function computePvSizing(params: {
   const scoredOptions = options.map((option) => {
     const metrics = simulatePvBattery(intervals, option.capacityKwh, {
       initialSocRatio: 0,
-      dischargeEfficiency: settings.efficiency
+      dischargeEfficiency: settings.efficiency,
+      strategy: settings.strategy,
+      trading: settings.trading ?? buildDefaultTradingConfig(settings.strategy)
     });
     const scoreParts = scorePvScenarioForRecommendation(metrics);
-    const score = metrics.mode === 'FULL_PV'
-      ? scoreParts.primary * 0.7 + scoreParts.secondary * 0.3
-      : scoreParts.primary * 0.8 + scoreParts.secondary * 0.2;
+    const score =
+      metrics.strategy === 'PV_WITH_TRADING'
+        ? scoreParts.primary * 0.75 + scoreParts.secondary * 0.25
+        : metrics.mode === 'FULL_PV'
+          ? scoreParts.primary * 0.7 + scoreParts.secondary * 0.3
+          : scoreParts.primary * 0.8 + scoreParts.secondary * 0.2;
 
     return {
       option,
@@ -560,10 +600,80 @@ export function computePvSizing(params: {
   const kWNeededRaw =
     recommendedMetrics != null
       ? Math.min(
-          recommendedMetrics.maxChargeKw,
-          Math.max(0, ...fallbackFlow.map((flow) => flow.surplusKwh / 0.25))
+          Math.max(recommendedMetrics.maxChargeKw, recommendedMetrics.maxDischargeKw),
+          Math.max(
+            0,
+            ...fallbackFlow.map((flow) =>
+              settings.strategy === 'PV_WITH_TRADING'
+                ? Math.max(flow.surplusKwh, flow.loadDeficitKwh) / 0.25
+                : flow.surplusKwh / 0.25
+            )
+          )
         )
-      : Math.max(0, ...fallbackFlow.map((flow) => flow.surplusKwh / 0.25));
+      : Math.max(
+          0,
+          ...fallbackFlow.map((flow) =>
+            settings.strategy === 'PV_WITH_TRADING'
+              ? Math.max(flow.surplusKwh, flow.loadDeficitKwh) / 0.25
+              : flow.surplusKwh / 0.25
+          )
+        );
+  const kWhNeeded =
+    recommendedSpec?.capacityKwh ??
+    (settings.efficiency > 0 ? (kWhNeededRaw / settings.efficiency) * settings.safetyFactor : 0);
+  const kWNeeded = recommendedSpec?.maxDischargeKw ?? (kWNeededRaw * settings.safetyFactor);
+  const recommendedProduct = recommended ? buildBatteryProductFromScenarioOption(recommended) : null;
+  const alternativeProduct = alternative ? buildBatteryProductFromScenarioOption(alternative) : null;
+
+  return {
+    kWhNeededRaw,
+    kWNeededRaw,
+    kWhNeeded,
+    kWNeeded,
+    recommendedProduct,
+    alternativeProduct,
+    noFeasibleBatteryByPower: false
+  };
+}
+
+export function computePvSizingFromScenarioResults(
+  intervals: ProcessedInterval[],
+  scenarios: ScenarioResult[],
+  settings: PvSizingSettings
+): SizingResult {
+  const scoredOptions = scenarios.map((scenario) => ({
+    option: { capacityKwh: scenario.capacityKwh, label: scenario.optionLabel },
+    ...scorePvScenarioResultForRecommendation(scenario)
+  }));
+  const { recommended, alternative } = selectRecommendedScenarioOptions(scoredOptions);
+  const recommendedScenario =
+    scenarios.find((scenario) => scenario.capacityKwh === recommended?.capacityKwh) ?? null;
+  const recommendedSpec = recommended ? getBatterySpecForCapacity(recommended.capacityKwh) : null;
+  const fallbackFlow = intervals.map((interval) => derivePvIntervalFlow(interval));
+  const kWhNeededRaw =
+    recommendedScenario?.capturedExportEnergyKwh ??
+    Math.max(0, ...fallbackFlow.map((flow) => flow.surplusKwh));
+  const kWNeededRaw =
+    recommendedScenario != null
+      ? Math.min(
+          Math.max(recommendedScenario.maxChargeKw, recommendedScenario.maxDischargeKw),
+          Math.max(
+            0,
+            ...fallbackFlow.map((flow) =>
+              settings.strategy === 'PV_WITH_TRADING'
+                ? Math.max(flow.surplusKwh, flow.loadDeficitKwh) / 0.25
+                : flow.surplusKwh / 0.25
+            )
+          )
+        )
+      : Math.max(
+          0,
+          ...fallbackFlow.map((flow) =>
+            settings.strategy === 'PV_WITH_TRADING'
+              ? Math.max(flow.surplusKwh, flow.loadDeficitKwh) / 0.25
+              : flow.surplusKwh / 0.25
+          )
+        );
   const kWhNeeded =
     recommendedSpec?.capacityKwh ??
     (settings.efficiency > 0 ? (kWhNeededRaw / settings.efficiency) * settings.safetyFactor : 0);

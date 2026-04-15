@@ -8,7 +8,7 @@ import type {
 } from './calculations';
 import type { NormalizationDiagnostics, InterpretationMode } from './normalization';
 import type { PvSummary, ScenarioResult } from './simulation';
-import type { PvAnalysisMode } from './pvSimulation';
+import type { PvAnalysisMode, PvStrategy } from './pvSimulation';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
@@ -21,6 +21,7 @@ export interface AnalysisSettings {
   safetyFactor: number;
   efficiency: number;
   interpretationMode: InterpretationMode;
+  pvStrategy: PvStrategy;
   includeHistogram?: boolean;
   includePeakEventsTable?: boolean;
   includeScenarioSection?: boolean;
@@ -53,6 +54,7 @@ export const defaultAnalysisSettings: AnalysisSettings = {
   safetyFactor: 1.2,
   efficiency: 0.9,
   interpretationMode: 'AUTO',
+  pvStrategy: 'SELF_CONSUMPTION_ONLY',
   includeHistogram: true,
   includePeakEventsTable: true,
   includeScenarioSection: true
@@ -67,6 +69,7 @@ export function analysisSettingsEqual(a: AnalysisSettings, b: AnalysisSettings):
     a.safetyFactor === b.safetyFactor &&
     a.efficiency === b.efficiency &&
     a.interpretationMode === b.interpretationMode &&
+    a.pvStrategy === b.pvStrategy &&
     (a.includeHistogram ?? true) === (b.includeHistogram ?? true) &&
     (a.includePeakEventsTable ?? true) === (b.includePeakEventsTable ?? true) &&
     (a.includeScenarioSection ?? true) === (b.includeScenarioSection ?? true)

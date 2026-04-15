@@ -36,6 +36,7 @@ export function ScenarioCharts({
 }: ScenarioChartsProps) {
   const selected = scenarios.find((scenario) => scenario.capacityKwh === selectedScenarioCapacity) ?? scenarios[0];
   const pvMode = scenarios[0]?.pvAnalysisMode ?? null;
+  const pvStrategy = scenarios[0]?.pvStrategy ?? 'SELF_CONSUMPTION_ONLY';
   const gridAfterComplianceKwh = sizing.kWhNeededRaw;
   const gridBeforeComplianceKwh = compliance > 0 ? gridAfterComplianceKwh / compliance : gridAfterComplianceKwh;
   const batteryBeforeSafetyKwh = efficiency > 0 ? gridAfterComplianceKwh / efficiency : 0;
@@ -48,12 +49,24 @@ export function ScenarioCharts({
   ];
   const comparisonTitle =
     analysisType === 'PV_SELF_CONSUMPTION'
-      ? pvMode === 'FULL_PV'
+      ? pvStrategy === 'PV_WITH_TRADING'
+        ? 'Directe vs verschoven PV-export'
+        : pvMode === 'FULL_PV'
         ? 'PV-export voor/na batterij'
         : 'Teruglevering voor/na batterij'
       : 'Overschrijdingsenergie voor/na (datasetsimulatie)';
-  const beforeKey = analysisType === 'PV_SELF_CONSUMPTION' ? 'exportedEnergyBeforeKwh' : 'exceedanceEnergyKwhBefore';
-  const afterKey = analysisType === 'PV_SELF_CONSUMPTION' ? 'exportedEnergyAfterKwh' : 'exceedanceEnergyKwhAfter';
+  const beforeKey =
+    analysisType === 'PV_SELF_CONSUMPTION'
+      ? pvStrategy === 'PV_WITH_TRADING'
+        ? 'immediateExportedKwh'
+        : 'exportedEnergyBeforeKwh'
+      : 'exceedanceEnergyKwhBefore';
+  const afterKey =
+    analysisType === 'PV_SELF_CONSUMPTION'
+      ? pvStrategy === 'PV_WITH_TRADING'
+        ? 'shiftedExportedLaterKwh'
+        : 'exportedEnergyAfterKwh'
+      : 'exceedanceEnergyKwhAfter';
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -66,8 +79,8 @@ export function ScenarioCharts({
               <XAxis dataKey="optionLabel" interval={0} angle={-20} textAnchor="end" height={60} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey={beforeKey} fill="#f97316" name="Voor" />
-              <Bar dataKey={afterKey} fill="#3b82f6" name="Na" />
+              <Bar dataKey={beforeKey} fill="#f97316" name={pvStrategy === 'PV_WITH_TRADING' ? 'Direct export' : 'Voor'} />
+              <Bar dataKey={afterKey} fill="#3b82f6" name={pvStrategy === 'PV_WITH_TRADING' ? 'Later uit batterij' : 'Na'} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -105,12 +118,21 @@ export function ScenarioCharts({
           </p>
         )}
         <div className="mt-2 grid gap-1 text-xs text-slate-600 md:grid-cols-2">
-          <div>{analysisType === 'PV_SELF_CONSUMPTION' ? 'Self-consumption-doel' : 'Compliance-doel'}: {(compliance * 100).toFixed(0)}%</div>
+          <div>
+            {analysisType === 'PV_SELF_CONSUMPTION'
+              ? pvStrategy === 'PV_WITH_TRADING'
+                ? 'Referentiedoel'
+                : 'Self-consumption-doel'
+              : 'Compliance-doel'}
+            : {(compliance * 100).toFixed(0)}%
+          </div>
           <div>Efficientie: {(efficiency * 100).toFixed(0)}%</div>
           <div>Veiligheidsfactor: {safetyFactor.toFixed(2)}x</div>
           <div>
             {analysisType === 'PV_SELF_CONSUMPTION'
-              ? pvMode === 'FULL_PV'
+              ? pvStrategy === 'PV_WITH_TRADING'
+                ? 'Trading-modus mag opgeslagen PV later terugleveren binnen dezelfde batterij-kW- en SOC-limieten.'
+                : pvMode === 'FULL_PV'
                 ? 'Sizing is gebaseerd op dezelfde 15-minuten PV-surplus simulatie als de scenariovergelijking.'
                 : 'Sizing is gebaseerd op dezelfde 15-minuten terugleversimulatie als de scenariovergelijking.'
               : 'Buffer + verliezen zijn verwerkt in de uiteindelijke benodigde kWh'}

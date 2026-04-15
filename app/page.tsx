@@ -14,7 +14,7 @@ import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
 import {
   buildDataQualityReport,
-  computePvSizing,
+  computePvSizingFromScenarioResults,
   computeSizing,
   derivePvIntervalFlow,
   findMaxObserved,
@@ -26,7 +26,7 @@ import {
 import { autoDetectColumns, mapRows, parseCsv, parseXlsx, type ColumnMapping } from '@/lib/parsing';
 import { normalizeConsumptionSeries } from '@/lib/normalization';
 import { buildPvSummaryFromScenario, findHighestPeakDay, simulateAllPvScenarios, simulateAllScenarios } from '@/lib/simulation';
-import { determinePvAnalysisMode } from '@/lib/pvSimulation';
+import { buildDefaultTradingConfig, determinePvAnalysisMode } from '@/lib/pvSimulation';
 
 const OUTLIER_KW_THRESHOLD = 5000;
 
@@ -63,19 +63,25 @@ function runAnalysis(
   if (settings.analysisType === 'PV_SELF_CONSUMPTION') {
     const pvAnalysisMode = determinePvAnalysisMode(normalized.normalizedRows);
     if (!pvAnalysisMode) return null;
-    const sizing = computePvSizing({
-      intervals,
-      settings: {
-        compliance: settings.compliance,
-        safetyFactor: settings.safetyFactor,
-        efficiency: settings.efficiency
-      }
-    });
-    const targetCapacityKwh = sizing.recommendedProduct?.capacityKwh ?? Math.max(64, sizing.kWhNeeded);
-    const scenarios = simulateAllPvScenarios(intervals, targetCapacityKwh, {
+    const pvSizingSettings = {
+      compliance: settings.compliance,
+      safetyFactor: settings.safetyFactor,
+      efficiency: settings.efficiency,
+      strategy: settings.pvStrategy,
+      trading: buildDefaultTradingConfig(settings.pvStrategy)
+    };
+    const scenarioTargetCapacityKwh = Math.max(
+      64,
+      ...intervals.map((interval) => Math.max(0, interval.exportKwh ?? interval.pvKwh ?? 0) * 4)
+    );
+    const scenarios = simulateAllPvScenarios(intervals, scenarioTargetCapacityKwh, {
       dischargeEfficiency: settings.efficiency,
-      initialSocRatio: 0
+      initialSocRatio: 0,
+      strategy: settings.pvStrategy,
+      trading: buildDefaultTradingConfig(settings.pvStrategy),
+      captureSocSeries: false
     });
+    const sizing = computePvSizingFromScenarioResults(intervals, scenarios, pvSizingSettings);
     const recommendedScenario =
       scenarios.find((scenario) => scenario.capacityKwh === sizing.recommendedProduct?.capacityKwh) ?? scenarios[0] ?? null;
     const pvSummary = buildPvSummaryFromScenario(recommendedScenario);
@@ -153,16 +159,16 @@ export default function HomePage() {
   const [selectedScenario, setSelectedScenario] = useState(64);
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const isPvMode = draftSettings.analysisType === 'PV_SELF_CONSUMPTION';
   const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
 
   const canAnalyze =
     rawRows.length > 0 &&
     !!draftMapping.timestamp &&
     !!draftMapping.consumptionKwh &&
-    draftSettings.contractedPowerKw > 0 &&
     draftSettings.efficiency > 0 &&
-    draftSettings.compliance >= 0.7 &&
-    draftSettings.compliance <= 1 &&
+    (isPvMode || draftSettings.contractedPowerKw > 0) &&
+    (isPvMode || (draftSettings.compliance >= 0.7 && draftSettings.compliance <= 1)) &&
     (draftSettings.analysisType === 'PEAK_SHAVING' || hasPvInputs);
 
   const hasPendingChanges =
@@ -264,9 +270,17 @@ export default function HomePage() {
       importedEnergyAfterKwh: scenario.importedEnergyAfterKwh,
       exportedEnergyBeforeKwh: scenario.exportedEnergyBeforeKwh,
       exportedEnergyAfterKwh: scenario.exportedEnergyAfterKwh,
+      immediateExportedKwh: scenario.immediateExportedKwh,
+      capturedExportEnergyKwh: scenario.capturedExportEnergyKwh,
+      shiftedExportedLaterKwh: scenario.shiftedExportedLaterKwh,
+      storedPvUsedOnsiteKwh: scenario.storedPvUsedOnsiteKwh,
+      totalUsefulDischargedEnergyKwh: scenario.totalUsefulDischargedEnergyKwh,
+      importReductionKwh: scenario.importReductionKwh,
       achievedSelfConsumption: scenario.achievedSelfConsumption,
       selfSufficiency: scenario.selfSufficiency,
       exportReduction: scenario.exportReduction,
+      totalEconomicValueEur: scenario.totalEconomicValueEur,
+      pvStrategy: scenario.pvStrategy,
       // Excluded on purpose to keep report payload small for large datasets.
       shavedSeries: []
     }));
@@ -281,6 +295,7 @@ export default function HomePage() {
       method: appliedSettings.method,
       efficiency: appliedSettings.efficiency,
       safetyFactor: appliedSettings.safetyFactor,
+      pvStrategy: appliedSettings.pvStrategy,
       sizing: analysisResult.sizing,
       quality: analysisResult.quality,
       topEvents: analysisResult.events,
@@ -361,32 +376,55 @@ export default function HomePage() {
           </select>
         </label>
 
-        <label className="text-sm">
-          Gecontracteerd vermogen (kW)
-          <input
-            className="wx-input"
-            type="number"
-            value={draftSettings.contractedPowerKw}
-            onChange={(event) =>
-              setDraftSettings((prev) => ({ ...prev, contractedPowerKw: Number(event.target.value) }))
-            }
-          />
-        </label>
+        {!isPvMode && (
+          <>
+            <label className="text-sm">
+              Gecontracteerd vermogen (kW)
+              <input
+                className="wx-input"
+                type="number"
+                value={draftSettings.contractedPowerKw}
+                onChange={(event) =>
+                  setDraftSettings((prev) => ({ ...prev, contractedPowerKw: Number(event.target.value) }))
+                }
+              />
+            </label>
 
-        <label className="text-sm">
-          Methode
-          <select
-            className="wx-input"
-            value={draftSettings.method}
-            onChange={(event) =>
-              setDraftSettings((prev) => ({ ...prev, method: event.target.value as AnalysisSettings['method'] }))
-            }
-          >
-            <option value="MAX_PEAK">MAX_PEAK</option>
-            <option value="P95">P95</option>
-            <option value="FULL_COVERAGE">FULL_COVERAGE</option>
-          </select>
-        </label>
+            <label className="text-sm">
+              Methode
+              <select
+                className="wx-input"
+                value={draftSettings.method}
+                onChange={(event) =>
+                  setDraftSettings((prev) => ({ ...prev, method: event.target.value as AnalysisSettings['method'] }))
+                }
+              >
+                <option value="MAX_PEAK">MAX_PEAK</option>
+                <option value="P95">P95</option>
+                <option value="FULL_COVERAGE">FULL_COVERAGE</option>
+              </select>
+            </label>
+          </>
+        )}
+
+        {isPvMode && (
+          <label className="text-sm">
+            PV batterijmodus
+            <select
+              className="wx-input"
+              value={draftSettings.pvStrategy}
+              onChange={(event) =>
+                setDraftSettings((prev) => ({
+                  ...prev,
+                  pvStrategy: event.target.value as AnalysisSettings['pvStrategy']
+                }))
+              }
+            >
+              <option value="SELF_CONSUMPTION_ONLY">Self-consumption only</option>
+              <option value="PV_WITH_TRADING">PV + trading</option>
+            </select>
+          </label>
+        )}
 
         <label className="text-sm">
           Interpretatie
@@ -407,18 +445,20 @@ export default function HomePage() {
         </label>
 
         <div className="grid grid-cols-2 gap-2">
-          <label className="text-sm">
-            Veiligheidsfactor
-            <input
-              className="wx-input"
-              type="number"
-              step="0.01"
-              value={draftSettings.safetyFactor}
-              onChange={(event) =>
-                setDraftSettings((prev) => ({ ...prev, safetyFactor: Number(event.target.value) }))
-              }
-            />
-          </label>
+          {!isPvMode && (
+            <label className="text-sm">
+              Veiligheidsfactor
+              <input
+                className="wx-input"
+                type="number"
+                step="0.01"
+                value={draftSettings.safetyFactor}
+                onChange={(event) =>
+                  setDraftSettings((prev) => ({ ...prev, safetyFactor: Number(event.target.value) }))
+                }
+              />
+            </label>
+          )}
           <label className="text-sm">
             Efficiëntie
             <input
@@ -433,12 +473,20 @@ export default function HomePage() {
           </label>
         </div>
 
-        <div className="lg:col-span-3">
-          <ComplianceSlider
-            compliance={draftSettings.compliance}
-            onChange={(value) => setDraftSettings((prev) => ({ ...prev, compliance: value }))}
-          />
-        </div>
+        {isPvMode && (
+          <div className="rounded-lg border border-lime-200 bg-lime-50 px-3 py-3 text-sm text-lime-900 lg:col-span-3">
+            In PV-modus zijn alleen de instellingen zichtbaar die direct nodig zijn voor de batterijsimulatie.
+          </div>
+        )}
+
+        {!isPvMode && (
+          <div className="lg:col-span-3">
+            <ComplianceSlider
+              compliance={draftSettings.compliance}
+              onChange={(value) => setDraftSettings((prev) => ({ ...prev, compliance: value }))}
+            />
+          </div>
+        )}
 
         <div className="flex gap-2">
           <button
@@ -509,9 +557,19 @@ export default function HomePage() {
             <div className="wx-card text-sm text-slate-700">
               <h3 className="wx-title">PV-analyse samenvatting</h3>
               <p>
+                Batterijmodus: {analysisResult.pvSummary?.strategy === 'PV_WITH_TRADING' ? 'PV + trading' : 'Self-consumption only'}.
+              </p>
+              <p>
                 Export voor/na batterij: {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh /{' '}
                 {(analysisResult.pvSummary?.exportAfter ?? 0).toFixed(2)} kWh.
               </p>
+              {analysisResult.pvSummary?.strategy === 'PV_WITH_TRADING' && (
+                <p>
+                  Directe export: {(analysisResult.pvSummary?.immediateExportedKwh ?? 0).toFixed(2)} kWh. Later uit batterij verkocht:
+                  {' '}
+                  {(analysisResult.pvSummary?.shiftedExportedLaterKwh ?? 0).toFixed(2)} kWh.
+                </p>
+              )}
               {analysisResult.pvSummary?.mode === 'FULL_PV' ? (
                 <>
                   <p>
@@ -571,9 +629,11 @@ export default function HomePage() {
             {analyzedAt && <p className="mt-1 text-xs text-slate-500">Laatst geanalyseerd: {analyzedAt}</p>}
             <p className="mt-2 text-xs text-slate-500">
               {analysisResult.analysisType === 'PV_SELF_CONSUMPTION'
-                ? analysisResult.pvSummary?.mode === 'FULL_PV'
-                  ? 'PV-dimensionering gebruikt een 15-minuten simulatie met PV-surplus, laad/ontlaadlimieten en batterijverliezen; finale engineeringvalidatie blijft vereist.'
-                  : 'Export-only advies gebruikt een 15-minuten simulatie op terugleveroverschot en batterijbeperkingen; totale PV-opwek blijft onbekend zonder pv_kwh.'
+                ? analysisResult.pvSummary?.strategy === 'PV_WITH_TRADING'
+                  ? 'PV + trading gebruikt dezelfde batterij-fysica als peak shaving en laat opgeslagen PV later naar het net ontladen binnen kW-, kWh- en SOC-limieten.'
+                  : analysisResult.pvSummary?.mode === 'FULL_PV'
+                    ? 'PV-dimensionering gebruikt een 15-minuten simulatie met PV-surplus, laad/ontlaadlimieten en batterijverliezen; finale engineeringvalidatie blijft vereist.'
+                    : 'Export-only advies gebruikt een 15-minuten simulatie op terugleveroverschot en batterijbeperkingen; totale PV-opwek blijft onbekend zonder pv_kwh.'
                 : 'Dimensionering voor peak shaving; finale engineeringvalidatie blijft vereist.'}
             </p>
             <button

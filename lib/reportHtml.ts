@@ -81,6 +81,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
   const brochure = getRecommendedBrochureInfo(payload);
   const pvSummary = payload.pvSummary ?? {
     mode: 'EXPORT_ONLY',
+    strategy: payload.pvStrategy ?? 'SELF_CONSUMPTION_ONLY',
     warnings: ['PV total and self-consumption ratio cannot be calculated without pv_kwh input.'],
     totalPvKwh: 0,
     totalConsumptionKwh: 0,
@@ -90,22 +91,43 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
     importedAfter: 0,
     exportBefore: 0,
     exportAfter: 0,
+    immediateExportedKwh: 0,
     capturedExportEnergyKwh: 0,
+    shiftedExportedLaterKwh: 0,
+    storedPvUsedOnsiteKwh: 0,
+    totalUsefulDischargedEnergyKwh: 0,
     batteryUtilizationAgainstExport: 0,
     selfConsumptionRatio: null,
     selfSufficiency: null,
-    exportReduction: 0
+    importReductionKwh: 0,
+    exportReduction: 0,
+    avoidedImportValueEur: null,
+    tradingExportValueEur: null,
+    totalEconomicValueEur: null
   };
   const scenarioChartData = payload.scenarios.map((scenario) => ({
     optionLabel: scenario.optionLabel,
     exportBefore: scenario.exportedEnergyBeforeKwh ?? 0,
     exportAfter: scenario.exportedEnergyAfterKwh ?? 0,
+    immediateExport: scenario.immediateExportedKwh ?? 0,
+    shiftedExport: scenario.shiftedExportedLaterKwh ?? 0,
     selfConsumption: ((scenario.achievedSelfConsumption ?? 0) * 100),
     selfSufficiency: ((scenario.selfSufficiency ?? 0) * 100),
-    captureUtilization: ((scenario.batteryUtilizationAgainstExport ?? 0) * 100)
+    captureUtilization: ((scenario.batteryUtilizationAgainstExport ?? 0) * 100),
+    totalUsefulDischarged: scenario.totalUsefulDischargedEnergyKwh ?? 0,
+    importReduction: scenario.importReductionKwh ?? 0,
+    economicValue: scenario.totalEconomicValueEur ?? null
   }));
   const kpiCards =
-    pvSummary.mode === 'FULL_PV'
+    pvSummary.strategy === 'PV_WITH_TRADING'
+      ? [
+          ['Opgeslagen PV', `${pvSummary.capturedExportEnergyKwh.toFixed(2)} kWh`],
+          ['Later geëxporteerd', `${pvSummary.shiftedExportedLaterKwh.toFixed(2)} kWh`],
+          ['Importreductie', `${pvSummary.importReductionKwh.toFixed(2)} kWh`],
+          ['Nuttige ontlading', `${pvSummary.totalUsefulDischargedEnergyKwh.toFixed(2)} kWh`],
+          ['Economische waarde', pvSummary.totalEconomicValueEur != null ? `EUR ${pvSummary.totalEconomicValueEur.toFixed(2)}` : 'Niet berekend']
+        ]
+      : pvSummary.mode === 'FULL_PV'
       ? [
           ['Totale PV-opwek', `${(pvSummary.totalPvKwh ?? 0).toFixed(2)} kWh`],
           ['Zelfconsumptie', `${(((pvSummary.selfConsumptionRatio ?? 0) * 100)).toFixed(1)}%`],
@@ -126,7 +148,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WattsNext PV Self Consumption Rapport</title>
+  <title>WattsNext PV Opslag Rapport</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
     :root {
@@ -258,12 +280,12 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
         }
       </div>
       <div class="brand">
-        <h1>PV Self Consumption Rapport</h1>
+        <h1>${pvSummary.strategy === 'PV_WITH_TRADING' ? 'PV + Trading Rapport' : 'PV Self Consumption Rapport'}</h1>
         <p>ENERGIEOPLOSSINGEN</p>
       </div>
       <div>
-        <div class="pill">PV analyse</div>
-        <div class="muted" style="margin-top:8px;">Self-consumption doel: ${(payload.compliance * 100).toFixed(0)}%</div>
+        <div class="pill">${pvSummary.strategy === 'PV_WITH_TRADING' ? 'PV + trading' : 'PV analyse'}</div>
+        <div class="muted" style="margin-top:8px;">${pvSummary.strategy === 'PV_WITH_TRADING' ? 'Trading van opgeslagen PV toegestaan' : `Self-consumption doel: ${(payload.compliance * 100).toFixed(0)}%`}</div>
       </div>
     </section>
 
@@ -289,7 +311,10 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
             <tr><th>Benodigd vermogen</th><td>${payload.sizing.kWNeeded.toFixed(2)} kW</td></tr>
             <tr><th>Export voor/na batterij</th><td>${pvSummary.exportBefore.toFixed(2)} / ${pvSummary.exportAfter.toFixed(2)} kWh</td></tr>
             ${
-              pvSummary.mode === 'FULL_PV'
+              pvSummary.strategy === 'PV_WITH_TRADING'
+                ? `<tr><th>Later geëxporteerd uit batterij</th><td>${pvSummary.shiftedExportedLaterKwh.toFixed(2)} kWh</td></tr>
+                   <tr><th>Importreductie</th><td>${pvSummary.importReductionKwh.toFixed(2)} kWh</td></tr>`
+                : pvSummary.mode === 'FULL_PV'
                 ? `<tr><th>Zelfconsumptie ratio</th><td>${(((pvSummary.selfConsumptionRatio ?? 0) * 100)).toFixed(1)}%</td></tr>
                    <tr><th>Zelfvoorziening</th><td>${(((pvSummary.selfSufficiency ?? 0) * 100)).toFixed(1)}%</td></tr>`
                 : `<tr><th>Opgeslagen export</th><td>${pvSummary.capturedExportEnergyKwh.toFixed(2)} kWh</td></tr>
@@ -299,7 +324,9 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
         </table>
         <div class="callout">
           ${
-            pvSummary.mode === 'FULL_PV'
+            pvSummary.strategy === 'PV_WITH_TRADING'
+              ? 'De batterij mag opgeslagen PV later terugleveren aan het net binnen dezelfde kW-, efficiency- en SOC-limieten als elders in de app.'
+              : pvSummary.mode === 'FULL_PV'
               ? 'De PV-batterij wordt gedimensioneerd op basis van PV-surplus, piekmismatch tussen opwek en load, en batterijverliezen.'
               : 'De batterij wordt hier gedimensioneerd op basis van gemeten terugleveroverschot en batterijbeperkingen; totale PV-opwek blijft onbekend zonder pv_kwh.'
           }
@@ -320,11 +347,11 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>PV export voor/na batterij</h3>
+        <h3>${pvSummary.strategy === 'PV_WITH_TRADING' ? 'Directe vs verschoven PV-export' : 'PV export voor/na batterij'}</h3>
         <div id="pv-export-chart" class="plot"></div>
       </div>
       <div class="card">
-        <h3>${pvSummary.mode === 'FULL_PV' ? 'Self-consumption per scenario' : 'Benutting exportoverschot per scenario'}</h3>
+        <h3>${pvSummary.strategy === 'PV_WITH_TRADING' ? 'Trading- en batterijbenutting per scenario' : pvSummary.mode === 'FULL_PV' ? 'Self-consumption per scenario' : 'Benutting exportoverschot per scenario'}</h3>
         <div id="pv-self-chart" class="plot"></div>
       </div>
     </section>
@@ -338,7 +365,12 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
             <tr><th>Import voor/na batterij</th><td>${pvSummary.importedBefore.toFixed(2)} / ${pvSummary.importedAfter.toFixed(2)} kWh</td></tr>
             <tr><th>Export reductie</th><td>${(pvSummary.exportReduction * 100).toFixed(1)}%</td></tr>
             ${
-              pvSummary.mode === 'FULL_PV'
+              pvSummary.strategy === 'PV_WITH_TRADING'
+                ? `<tr><th>Direct geëxporteerd</th><td>${pvSummary.immediateExportedKwh.toFixed(2)} kWh</td></tr>
+                   <tr><th>Later geëxporteerd uit batterij</th><td>${pvSummary.shiftedExportedLaterKwh.toFixed(2)} kWh</td></tr>
+                   <tr><th>Opgeslagen PV gebruikt op site</th><td>${pvSummary.storedPvUsedOnsiteKwh.toFixed(2)} kWh</td></tr>
+                   <tr><th>Totale nuttige ontlading</th><td>${pvSummary.totalUsefulDischargedEnergyKwh.toFixed(2)} kWh</td></tr>`
+                : pvSummary.mode === 'FULL_PV'
                 ? `<tr><th>Totale PV-opwek</th><td>${(pvSummary.totalPvKwh ?? 0).toFixed(2)} kWh</td></tr>
                    <tr><th>Self-consumed voor batterij</th><td>${(pvSummary.selfConsumptionBeforeKwh ?? 0).toFixed(2)} kWh</td></tr>
                    <tr><th>Self-consumed na batterij</th><td>${(pvSummary.selfConsumptionAfterKwh ?? 0).toFixed(2)} kWh</td></tr>`
@@ -365,7 +397,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
 
     <footer class="footer">
       <div>WattsNext Energieoplossingen</div>
-      <div>PV self-consumption rapport</div>
+      <div>${pvSummary.strategy === 'PV_WITH_TRADING' ? 'PV + trading rapport' : 'PV self-consumption rapport'}</div>
     </footer>
   </div>
 
@@ -381,16 +413,16 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
     Plotly.newPlot('pv-export-chart', [
       {
         type: 'bar',
-        name: 'Voor',
+        name: '${pvSummary.strategy === 'PV_WITH_TRADING' ? 'Direct export' : 'Voor'}',
         x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => d.exportBefore),
+        y: scenarioData.map(d => ${pvSummary.strategy === 'PV_WITH_TRADING' ? 'd.immediateExport' : 'd.exportBefore'}),
         marker: {color: '#F59E0B'}
       },
       {
         type: 'bar',
-        name: 'Na',
+        name: '${pvSummary.strategy === 'PV_WITH_TRADING' ? 'Later uit batterij' : 'Na'}',
         x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => d.exportAfter),
+        y: scenarioData.map(d => ${pvSummary.strategy === 'PV_WITH_TRADING' ? 'd.shiftedExport' : 'd.exportAfter'}),
         marker: {color: '#22C55E'}
       }
     ], {
@@ -405,16 +437,16 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
     Plotly.newPlot('pv-self-chart', [
       {
         type: 'bar',
-        name: '${pvSummary.mode === 'FULL_PV' ? 'Zelfconsumptie' : 'Benutting surplus'}',
+        name: '${pvSummary.strategy === 'PV_WITH_TRADING' ? 'Totale nuttige ontlading' : pvSummary.mode === 'FULL_PV' ? 'Zelfconsumptie' : 'Benutting surplus'}',
         x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => ${pvSummary.mode === 'FULL_PV' ? 'd.selfConsumption' : 'd.captureUtilization'}),
+        y: scenarioData.map(d => ${pvSummary.strategy === 'PV_WITH_TRADING' ? 'd.totalUsefulDischarged' : pvSummary.mode === 'FULL_PV' ? 'd.selfConsumption' : 'd.captureUtilization'}),
         marker: {color: '#2563EB'}
       },
       {
         type: 'bar',
-        name: '${pvSummary.mode === 'FULL_PV' ? 'Zelfvoorziening' : 'Exportreductie'}',
+        name: '${pvSummary.strategy === 'PV_WITH_TRADING' ? 'Importreductie' : pvSummary.mode === 'FULL_PV' ? 'Zelfvoorziening' : 'Exportreductie'}',
         x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => ${pvSummary.mode === 'FULL_PV' ? 'd.selfSufficiency' : '((d.exportBefore > 0 ? ((d.exportBefore - d.exportAfter) / d.exportBefore) * 100 : 0))'}),
+        y: scenarioData.map(d => ${pvSummary.strategy === 'PV_WITH_TRADING' ? 'd.importReduction' : pvSummary.mode === 'FULL_PV' ? 'd.selfSufficiency' : '((d.exportBefore > 0 ? ((d.exportBefore - d.exportAfter) / d.exportBefore) * 100 : 0))'}),
         marker: {color: '#7C3AED'}
       }
     ], {

@@ -223,4 +223,44 @@ describe('simulation', () => {
     expect(scenarios.find((scenario) => scenario.capacityKwh === 2090)).toBeTruthy();
     expect(scenarios.find((scenario) => scenario.capacityKwh === 5015)).toBeTruthy();
   });
+
+  it('allows later battery-to-grid export in PV_WITH_TRADING mode within discharge limits', () => {
+    const pvRows = [
+      { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 0, pvKwh: 24 },
+      { timestamp: '2024-01-01T17:00:00.000Z', consumptionKwh: 0, pvKwh: 0 }
+    ];
+    const intervals = processIntervals(pvRows, 500);
+    const result = simulatePvScenario(intervals, 64, {
+      initialSocRatio: 0,
+      dischargeEfficiency: 1,
+      strategy: 'PV_WITH_TRADING',
+      trading: {
+        intervalSignals: {
+          '2024-01-01T17:00:00.000Z': { sellNow: true }
+        },
+        prioritizeLoadBeforeGrid: true
+      }
+    });
+
+    expect(result.pvStrategy).toBe('PV_WITH_TRADING');
+    expect(result.shiftedExportedLaterKwh).toBeGreaterThan(0);
+    expect(result.shiftedExportedLaterKwh).toBeLessThanOrEqual(7.5); // 30 kW max discharge for 15 minutes
+    expect(result.totalUsefulDischargedEnergyKwh).toBeCloseTo(result.shiftedExportedLaterKwh ?? 0, 5);
+  });
+
+  it('does not export stored energy later in SELF_CONSUMPTION_ONLY mode', () => {
+    const pvRows = [
+      { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 0, pvKwh: 24 },
+      { timestamp: '2024-01-01T17:00:00.000Z', consumptionKwh: 0, pvKwh: 0 }
+    ];
+    const intervals = processIntervals(pvRows, 500);
+    const result = simulatePvScenario(intervals, 64, {
+      initialSocRatio: 0,
+      dischargeEfficiency: 1,
+      strategy: 'SELF_CONSUMPTION_ONLY'
+    });
+
+    expect(result.pvStrategy).toBe('SELF_CONSUMPTION_ONLY');
+    expect(result.shiftedExportedLaterKwh ?? 0).toBe(0);
+  });
 });

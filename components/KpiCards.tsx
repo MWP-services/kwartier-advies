@@ -22,7 +22,30 @@ export function KpiCards({
 }: KpiCardsProps) {
   const cards =
     analysisType === 'PV_SELF_CONSUMPTION'
-      ? pvSummary?.mode === 'FULL_PV'
+      ? pvSummary?.strategy === 'PV_WITH_TRADING'
+        ? [
+            {
+              label: 'Opgeslagen PV',
+              value: `${(pvSummary?.capturedExportEnergyKwh ?? 0).toFixed(2)} kWh`
+            },
+            {
+              label: 'Later geëxporteerd',
+              value: `${(pvSummary?.shiftedExportedLaterKwh ?? 0).toFixed(2)} kWh`
+            },
+            {
+              label: 'Importreductie',
+              value: `${(pvSummary?.importReductionKwh ?? 0).toFixed(2)} kWh`
+            },
+            {
+              label: 'Totale nuttige ontlading',
+              value: `${(pvSummary?.totalUsefulDischargedEnergyKwh ?? 0).toFixed(2)} kWh`
+            },
+            {
+              label: 'Aanbevolen',
+              value: sizing.recommendedProduct ? `${sizing.recommendedProduct.capacityKwh} kWh` : 'Geen haalbare optie'
+            }
+          ]
+        : pvSummary?.mode === 'FULL_PV'
         ? [
             {
               label: 'Totale PV kWh',

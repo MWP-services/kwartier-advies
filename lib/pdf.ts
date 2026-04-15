@@ -3,6 +3,7 @@ import type { AnalysisType } from './analysis';
 import type { DataQualityReport, PeakEvent, PeakMoment, ProcessedInterval, SizingResult } from './calculations';
 import { formatTimestamp } from './datetime';
 import type { PvSummary, ScenarioResult } from './simulation';
+import type { PvStrategy } from './pvSimulation';
 
 export interface PdfPayload {
   analysisType?: AnalysisType;
@@ -14,6 +15,7 @@ export interface PdfPayload {
   method: string;
   efficiency: number;
   safetyFactor: number;
+  pvStrategy?: PvStrategy;
   sizing: SizingResult;
   quality: DataQualityReport;
   topEvents: PeakEvent[];

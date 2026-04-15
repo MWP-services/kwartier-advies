@@ -1,13 +1,35 @@
-import type { BatteryProduct, IntervalRecord, ProcessedInterval } from './calculations';
-import { getBatterySpecForCapacity } from './batterySpecs';
+import type { IntervalRecord, ProcessedInterval } from './calculations';
+import {
+  getInitialSocKwh,
+  getMaxChargeIntervalKwh,
+  getMaxDischargeIntervalKwh,
+  resolveBatteryPhysics,
+  type BatteryPhysicsConfig
+} from './batteryPhysics';
+import { getLocalHourMinute } from './datetime';
 
 export type PvAnalysisMode = 'FULL_PV' | 'EXPORT_ONLY';
+export type PvStrategy = 'SELF_CONSUMPTION_ONLY' | 'PV_WITH_TRADING';
 
-export interface PvSimulationConfig {
+export interface PvTradingSignal {
+  sellNow?: boolean;
+  priceEurPerKwh?: number;
+}
+
+export interface PvTradingConfig {
+  intervalSignals?: Record<string, PvTradingSignal>;
+  priceThresholdEurPerKwh?: number;
+  peakPriceHours?: number[];
+  importPriceEurPerKwh?: number;
+  exportPriceEurPerKwh?: number;
+  prioritizeLoadBeforeGrid?: boolean;
+}
+
+export interface PvSimulationConfig extends BatteryPhysicsConfig {
   initialSocRatio?: number;
-  dischargeEfficiency?: number;
-  reserveEnergyForTradingKwh?: number;
-  reserveEmptyCapacityForTradingKwh?: number;
+  strategy?: PvStrategy;
+  trading?: PvTradingConfig;
+  captureSocSeries?: boolean;
 }
 
 export interface PvIntervalFlow {
@@ -22,6 +44,7 @@ export interface PvIntervalFlow {
 
 export interface PvScenarioMetrics {
   mode: PvAnalysisMode;
+  strategy: PvStrategy;
   exportIntervalsBefore: number;
   exportIntervalsAfter: number;
   totalConsumptionKwh: number;
@@ -32,27 +55,25 @@ export interface PvScenarioMetrics {
   importedEnergyAfterKwh: number;
   exportedEnergyBeforeKwh: number;
   exportedEnergyAfterKwh: number;
+  immediateExportedKwh: number;
   capturedExportEnergyKwh: number;
+  shiftedExportedLaterKwh: number;
+  storedPvUsedOnsiteKwh: number;
+  totalUsefulDischargedEnergyKwh: number;
   batteryUtilizationAgainstExport: number;
   selfConsumptionRatio: number | null;
   selfSufficiency: number | null;
+  importReductionKwh: number;
   exportReduction: number;
+  avoidedImportValueEur: number | null;
+  tradingExportValueEur: number | null;
+  totalEconomicValueEur: number | null;
   maxRemainingExportKw: number;
   maxChargeKw: number;
   maxDischargeKw: number;
   endingSocKwh: number;
   socSeries: { timestamp: string; socKwh: number }[];
   limitations: string[];
-}
-
-export interface PvSizingEvaluation {
-  recommendedProduct: BatteryProduct | null;
-  alternativeProduct: BatteryProduct | null;
-  kWhNeededRaw: number;
-  kWNeededRaw: number;
-  kWhNeeded: number;
-  kWNeeded: number;
-  noFeasibleBatteryByPower: boolean;
 }
 
 export interface ScenarioOption {
@@ -66,6 +87,8 @@ export interface ScenarioOption {
 
 const EXPORT_ONLY_LIMITATION = 'PV total and self-consumption ratio cannot be calculated without pv_kwh input.';
 const NO_PV_DATA_LIMITATION = 'Geen bruikbare PV- of exportdata gevonden voor de PV-analyse.';
+const TRADING_LIMITATION = 'Trading mode allows stored PV energy to be exported later within the battery power and SOC limits.';
+const DEFAULT_PEAK_PRICE_HOURS = [17, 18, 19, 20];
 const INTERVAL_HOURS = 0.25;
 const MODULAR_BASE_SIZES = [64, 96, 261];
 const FIXED_SCENARIO_OPTIONS: ScenarioOption[] = [
@@ -86,10 +109,12 @@ export function determinePvAnalysisMode(intervals: Array<IntervalRecord | Proces
   return null;
 }
 
-export function getPvAnalysisLimitations(mode: PvAnalysisMode | null): string[] {
-  if (mode === 'EXPORT_ONLY') return [EXPORT_ONLY_LIMITATION];
-  if (mode == null) return [NO_PV_DATA_LIMITATION];
-  return [];
+export function getPvAnalysisLimitations(mode: PvAnalysisMode | null, strategy?: PvStrategy): string[] {
+  const warnings: string[] = [];
+  if (mode === 'EXPORT_ONLY') warnings.push(EXPORT_ONLY_LIMITATION);
+  if (mode == null) warnings.push(NO_PV_DATA_LIMITATION);
+  if (strategy === 'PV_WITH_TRADING') warnings.push(TRADING_LIMITATION);
+  return warnings;
 }
 
 export function derivePvIntervalFlow(
@@ -128,15 +153,17 @@ export function derivePvIntervalFlow(
   };
 }
 
-function getUsableSocBounds(capacityKwh: number, config?: PvSimulationConfig): {
-  minSocKwh: number;
-  maxSocKwh: number;
-} {
-  const reserveEnergy = Math.max(0, config?.reserveEnergyForTradingKwh ?? 0);
-  const reserveEmpty = Math.max(0, config?.reserveEmptyCapacityForTradingKwh ?? 0);
-  const minSocKwh = Math.min(capacityKwh, reserveEnergy);
-  const maxSocKwh = Math.max(minSocKwh, capacityKwh - reserveEmpty);
-  return { minSocKwh, maxSocKwh };
+function shouldSellNow(timestamp: string, trading?: PvTradingConfig): boolean {
+  const signal = trading?.intervalSignals?.[timestamp];
+  if (signal?.sellNow != null) return signal.sellNow;
+
+  if (signal?.priceEurPerKwh != null && trading?.priceThresholdEurPerKwh != null) {
+    return signal.priceEurPerKwh >= trading.priceThresholdEurPerKwh;
+  }
+
+  const peakHours = trading?.peakPriceHours ?? DEFAULT_PEAK_PRICE_HOURS;
+  const { hour } = getLocalHourMinute(timestamp, 'Europe/Amsterdam');
+  return peakHours.includes(hour);
 }
 
 export function simulatePvBattery(
@@ -145,16 +172,14 @@ export function simulatePvBattery(
   config?: PvSimulationConfig
 ): PvScenarioMetrics {
   const mode = determinePvAnalysisMode(intervals);
-  const spec = getBatterySpecForCapacity(batteryCapacityKwh);
-  const hasDischargeEfficiencyOverride = config?.dischargeEfficiency != null;
-  const dischargeEfficiency = hasDischargeEfficiencyOverride
-    ? Math.max(0, Math.min(1, config?.dischargeEfficiency ?? 1))
-    : Math.sqrt(spec.roundTripEfficiency);
-  const chargeEfficiency = hasDischargeEfficiencyOverride ? 1 : Math.sqrt(spec.roundTripEfficiency);
-  const { minSocKwh, maxSocKwh } = getUsableSocBounds(spec.capacityKwh, config);
-  const usableCapacityKwh = Math.max(0, maxSocKwh - minSocKwh);
-  const initialSocRatio = Math.max(0, Math.min(1, config?.initialSocRatio ?? 0));
-  let socKwh = minSocKwh + usableCapacityKwh * initialSocRatio;
+  const strategy = config?.strategy ?? 'SELF_CONSUMPTION_ONLY';
+  const { spec, chargeEfficiency, dischargeEfficiency, minSocKwh, maxSocKwh } = resolveBatteryPhysics(
+    batteryCapacityKwh,
+    config
+  );
+  const maxChargeIntervalKwh = getMaxChargeIntervalKwh(spec.maxChargeKw, INTERVAL_HOURS);
+  const maxDischargeIntervalKwh = getMaxDischargeIntervalKwh(spec.maxDischargeKw, INTERVAL_HOURS);
+  let socKwh = getInitialSocKwh(batteryCapacityKwh, config?.initialSocRatio ?? 0, config);
 
   let totalConsumptionKwh = 0;
   let totalPvKwh = 0;
@@ -164,33 +189,55 @@ export function simulatePvBattery(
   let importedEnergyAfterKwh = 0;
   let exportedEnergyBeforeKwh = 0;
   let exportedEnergyAfterKwh = 0;
+  let immediateExportedKwh = 0;
   let capturedExportEnergyKwh = 0;
-  let maxRemainingExportKw = 0;
+  let shiftedExportedLaterKwh = 0;
+  let storedPvUsedOnsiteKwh = 0;
+  let totalUsefulDischargedEnergyKwh = 0;
   let exportIntervalsBefore = 0;
   let exportIntervalsAfter = 0;
+  let maxRemainingExportKw = 0;
+  let avoidedImportValueEur = 0;
+  let tradingExportValueEur = 0;
   const socSeries: { timestamp: string; socKwh: number }[] = [];
+  const captureSocSeries = config?.captureSocSeries ?? false;
 
   intervals.forEach((interval) => {
     const flow = derivePvIntervalFlow(interval, mode ?? 'EXPORT_ONLY');
-    const maxChargeIntervalKwh = spec.maxChargeKw * INTERVAL_HOURS;
-    const maxDischargeIntervalKwh = spec.maxDischargeKw * INTERVAL_HOURS;
     const storableInputLimitKwh = chargeEfficiency > 0 ? Math.max(0, maxSocKwh - socKwh) / chargeEfficiency : 0;
-
     const chargeInputKwh = Math.min(flow.surplusKwh, maxChargeIntervalKwh, storableInputLimitKwh);
     socKwh = Math.min(maxSocKwh, socKwh + chargeInputKwh * chargeEfficiency);
+    const exportedImmediateKwh = Math.max(flow.surplusKwh - chargeInputKwh, 0);
 
-    const dischargeToLoadKwh = Math.min(
-      flow.loadDeficitKwh,
+    const availableDeliverableKwh = Math.min(
       maxDischargeIntervalKwh,
       Math.max(0, socKwh - minSocKwh) * dischargeEfficiency
     );
+    const prioritizeLoadBeforeGrid = config?.trading?.prioritizeLoadBeforeGrid ?? true;
+    const sellNow = strategy === 'PV_WITH_TRADING' ? shouldSellNow(interval.timestamp, config?.trading) : false;
+
+    let dischargeToLoadKwh = 0;
+    let dischargeToGridKwh = 0;
+
+    if (strategy === 'SELF_CONSUMPTION_ONLY' || prioritizeLoadBeforeGrid) {
+      dischargeToLoadKwh = Math.min(flow.loadDeficitKwh, availableDeliverableKwh);
+      const remainingDeliverableKwh = Math.max(0, availableDeliverableKwh - dischargeToLoadKwh);
+      dischargeToGridKwh = strategy === 'PV_WITH_TRADING' && sellNow ? remainingDeliverableKwh : 0;
+    } else {
+      dischargeToGridKwh = sellNow ? availableDeliverableKwh : 0;
+      const remainingDeliverableKwh = Math.max(0, availableDeliverableKwh - dischargeToGridKwh);
+      dischargeToLoadKwh = Math.min(flow.loadDeficitKwh, remainingDeliverableKwh);
+    }
 
     if (dischargeEfficiency > 0) {
-      socKwh = Math.max(minSocKwh, socKwh - dischargeToLoadKwh / dischargeEfficiency);
+      socKwh = Math.max(
+        minSocKwh,
+        socKwh - (dischargeToLoadKwh + dischargeToGridKwh) / dischargeEfficiency
+      );
     }
 
     const importedAfterKwh = Math.max(flow.loadDeficitKwh - dischargeToLoadKwh, 0);
-    const exportedAfterKwh = Math.max(flow.surplusKwh - chargeInputKwh, 0);
+    const exportedAfterKwh = exportedImmediateKwh + dischargeToGridKwh;
 
     totalConsumptionKwh += flow.consumptionKwh;
     totalPvKwh += flow.pvKwh ?? 0;
@@ -200,30 +247,53 @@ export function simulatePvBattery(
     importedEnergyAfterKwh += importedAfterKwh;
     exportedEnergyBeforeKwh += flow.surplusKwh;
     exportedEnergyAfterKwh += exportedAfterKwh;
+    immediateExportedKwh += exportedImmediateKwh;
     capturedExportEnergyKwh += chargeInputKwh;
+    shiftedExportedLaterKwh += dischargeToGridKwh;
+    storedPvUsedOnsiteKwh += dischargeToLoadKwh;
+    totalUsefulDischargedEnergyKwh += dischargeToLoadKwh + dischargeToGridKwh;
     if (flow.surplusKwh > 0) exportIntervalsBefore += 1;
     if (exportedAfterKwh > 0) exportIntervalsAfter += 1;
     maxRemainingExportKw = Math.max(maxRemainingExportKw, exportedAfterKwh / INTERVAL_HOURS);
-    socSeries.push({ timestamp: interval.timestamp, socKwh });
+    if (captureSocSeries) {
+      socSeries.push({ timestamp: interval.timestamp, socKwh });
+    }
+
+    if (config?.trading?.importPriceEurPerKwh != null) {
+      avoidedImportValueEur += dischargeToLoadKwh * config.trading.importPriceEurPerKwh;
+    }
+    const intervalPrice = config?.trading?.intervalSignals?.[interval.timestamp]?.priceEurPerKwh;
+    const exportPrice = intervalPrice ?? config?.trading?.exportPriceEurPerKwh;
+    if (exportPrice != null) {
+      tradingExportValueEur += dischargeToGridKwh * exportPrice;
+    }
   });
 
-  const limitations = getPvAnalysisLimitations(mode);
   const safeMode = mode ?? 'EXPORT_ONLY';
+  const limitations = getPvAnalysisLimitations(mode, strategy);
   const totalPvKnown = safeMode === 'FULL_PV';
   const totalPvValue = totalPvKnown ? totalPvKwh : null;
   const directSelfValue = totalPvKnown ? directSelfConsumptionBeforeKwh : null;
   const afterSelfValue = totalPvKnown ? selfConsumptionAfterKwh : null;
-  const selfConsumptionRatio =
-    totalPvKnown && totalPvKwh > 0 ? selfConsumptionAfterKwh / totalPvKwh : null;
-  const selfSufficiency =
-    totalPvKnown && totalConsumptionKwh > 0 ? selfConsumptionAfterKwh / totalConsumptionKwh : null;
+  const selfConsumptionRatio = totalPvKnown && totalPvKwh > 0 ? selfConsumptionAfterKwh / totalPvKwh : null;
+  const selfSufficiency = totalPvKnown && totalConsumptionKwh > 0 ? selfConsumptionAfterKwh / totalConsumptionKwh : null;
+  const importReductionKwh = Math.max(0, importedEnergyBeforeKwh - importedEnergyAfterKwh);
   const exportReduction =
     exportedEnergyBeforeKwh > 0 ? (exportedEnergyBeforeKwh - exportedEnergyAfterKwh) / exportedEnergyBeforeKwh : 0;
   const batteryUtilizationAgainstExport =
     exportedEnergyBeforeKwh > 0 ? capturedExportEnergyKwh / exportedEnergyBeforeKwh : 0;
+  const hasEconomicInputs =
+    config?.trading?.importPriceEurPerKwh != null ||
+    config?.trading?.exportPriceEurPerKwh != null ||
+    intervals.some((interval) => config?.trading?.intervalSignals?.[interval.timestamp]?.priceEurPerKwh != null);
+  const avoidedImportValue = hasEconomicInputs ? avoidedImportValueEur : null;
+  const tradingExportValue = hasEconomicInputs ? tradingExportValueEur : null;
+  const totalEconomicValue =
+    hasEconomicInputs ? (avoidedImportValueEur ?? 0) + (tradingExportValueEur ?? 0) : null;
 
   return {
     mode: safeMode,
+    strategy,
     exportIntervalsBefore,
     exportIntervalsAfter,
     totalConsumptionKwh,
@@ -234,11 +304,19 @@ export function simulatePvBattery(
     importedEnergyAfterKwh,
     exportedEnergyBeforeKwh,
     exportedEnergyAfterKwh,
+    immediateExportedKwh,
     capturedExportEnergyKwh,
+    shiftedExportedLaterKwh,
+    storedPvUsedOnsiteKwh,
+    totalUsefulDischargedEnergyKwh,
     batteryUtilizationAgainstExport,
     selfConsumptionRatio,
     selfSufficiency,
+    importReductionKwh,
     exportReduction,
+    avoidedImportValueEur: avoidedImportValue,
+    tradingExportValueEur: tradingExportValue,
+    totalEconomicValueEur: totalEconomicValue,
     maxRemainingExportKw,
     maxChargeKw: spec.maxChargeKw,
     maxDischargeKw: spec.maxDischargeKw,
@@ -251,15 +329,22 @@ export function simulatePvBattery(
 export function scorePvScenarioForRecommendation(
   metrics: PvScenarioMetrics
 ): { primary: number; secondary: number } {
+  if (metrics.strategy === 'PV_WITH_TRADING') {
+    return {
+      primary: metrics.totalEconomicValueEur ?? metrics.totalUsefulDischargedEnergyKwh,
+      secondary: metrics.shiftedExportedLaterKwh + metrics.importReductionKwh
+    };
+  }
+
   if (metrics.mode === 'FULL_PV') {
     return {
-      primary: metrics.exportReduction,
-      secondary: metrics.selfConsumptionRatio ?? 0
+      primary: metrics.selfConsumptionRatio ?? metrics.importReductionKwh,
+      secondary: metrics.exportReduction
     };
   }
 
   return {
-    primary: metrics.batteryUtilizationAgainstExport,
+    primary: metrics.importReductionKwh + metrics.capturedExportEnergyKwh,
     secondary: metrics.exportReduction
   };
 }
@@ -277,14 +362,11 @@ export function generateNearbyModularOptions(params: {
   const uniqueCounts = Array.from(new Set(nCandidates));
 
   return uniqueCounts
-    .map((count) => {
-      const capacityKwh = count * baseSize;
-      return {
-        capacityKwh,
-        label: `${count}x${baseSize} (${capacityKwh} kWh)`,
-        modular: { baseSize, count }
-      };
-    })
+    .map((count) => ({
+      capacityKwh: count * baseSize,
+      label: `${count}x${baseSize} (${count * baseSize} kWh)`,
+      modular: { baseSize, count }
+    }))
     .sort(
       (a, b) =>
         Math.abs(a.capacityKwh - targetKwh) - Math.abs(b.capacityKwh - targetKwh) ||
@@ -323,8 +405,7 @@ export function generateScenarioOptions(params: {
     a.capacityKwh - b.capacityKwh;
 
   const selected = new Map<number, ScenarioOption>();
-  const alwaysIncludeCapacities = [2090, 5015];
-  alwaysIncludeCapacities.forEach((capacity) => {
+  [2090, 5015].forEach((capacity) => {
     const option = allOptions.find((candidate) => candidate.capacityKwh === capacity);
     if (option) selected.set(option.capacityKwh, option);
   });
@@ -333,10 +414,8 @@ export function generateScenarioOptions(params: {
     const optionsForBase = allOptions
       .filter((option) => option.capacityKwh % baseSize === 0)
       .sort((a, b) => a.capacityKwh - b.capacityKwh);
-
     const closestPerBase = [...optionsForBase].sort(relevanceSort)[0];
     if (closestPerBase) selected.set(closestPerBase.capacityKwh, closestPerBase);
-
     const belowTarget = [...optionsForBase].reverse().find((option) => option.capacityKwh < targetKwh);
     const aboveTarget = optionsForBase.find((option) => option.capacityKwh > targetKwh);
     if (belowTarget) selected.set(belowTarget.capacityKwh, belowTarget);
@@ -351,4 +430,12 @@ export function generateScenarioOptions(params: {
   return Array.from(selected.values())
     .slice(0, maxTotalOptions)
     .sort((a, b) => a.capacityKwh - b.capacityKwh);
+}
+
+export function buildDefaultTradingConfig(strategy: PvStrategy): PvTradingConfig | undefined {
+  if (strategy !== 'PV_WITH_TRADING') return undefined;
+  return {
+    peakPriceHours: DEFAULT_PEAK_PRICE_HOURS,
+    prioritizeLoadBeforeGrid: true
+  };
 }

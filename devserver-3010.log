@@ -1,0 +1,54 @@
+
+> kwartier-advies@0.1.0 dev
+> next dev --port 3010
+
+  ▲ Next.js 14.2.33
+  - Local:        http://localhost:3010
+
+ ✓ Starting...
+ ✓ Ready in 2.7s
+ ○ Compiling / ...
+ ✓ Compiled / in 11.4s (1579 modules)
+ GET / 200 in 33ms
+ GET / 200 in 109ms
+ ✓ Compiled in 2s (1581 modules)
+ ✓ Compiled in 865ms (799 modules)
+ ⨯ ./lib/pvSimulation.ts
+Error: Failed to read source code from C:\Users\Micha\Kwartier-data advies peak shaving\kwartier-advies\lib\pvSimulation.ts
+
+Caused by:
+    Het systeem kan het opgegeven bestand niet vinden. (os error 2)
+
+Import trace for requested module:
+./lib/pvSimulation.ts
+./app/page.tsx
+ ⨯ ./lib/pvSimulation.ts
+Error: Failed to read source code from C:\Users\Micha\Kwartier-data advies peak shaving\kwartier-advies\lib\pvSimulation.ts
+
+Caused by:
+    Het systeem kan het opgegeven bestand niet vinden. (os error 2)
+
+Import trace for requested module:
+./lib/pvSimulation.ts
+./app/page.tsx
+ ✓ Compiled in 1534ms (1567 modules)
+ ✓ Compiled in 531ms (1567 modules)
+ ✓ Compiled in 2.3s (1567 modules)
+ ✓ Compiled in 591ms (1567 modules)
+ ✓ Compiled in 6.1s (1567 modules)
+ ✓ Compiled in 1591ms (1581 modules)
+ ✓ Compiled in 921ms (1581 modules)
+ ✓ Compiled in 755ms (1581 modules)
+ ✓ Compiled in 822ms (1581 modules)
+ ✓ Compiled in 1534ms (1581 modules)
+ ✓ Compiled in 5.9s (1581 modules)
+ ✓ Compiled in 2.9s (1581 modules)
+ ✓ Compiled in 1415ms (1567 modules)
+ GET / 200 in 465ms
+ ○ Compiling /_not-found ...
+ ✓ Compiled /_not-found in 2.9s (1570 modules)
+ GET /_next/static/chunks/app-pages-internals.js 404 in 3355ms
+ GET /_next/static/chunks/main-app.js 404 in 3354ms
+ GET /_next/static/css/app/layout.css 404 in 3365ms
+ GET / 200 in 536ms
+ GET / 200 in 148ms
