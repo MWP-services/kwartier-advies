@@ -141,6 +141,38 @@ describe('calculations', () => {
     expect(result.kWNeededRaw).toBeGreaterThan(0);
   });
 
+  it('does not size export-only PV from annual captured throughput', () => {
+    const pvRows = Array.from({ length: 120 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 0, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 10 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 5 },
+        { timestamp: new Date(base + 10.25 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 5 },
+        { timestamp: new Date(base + 10.5 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 5 },
+        { timestamp: new Date(base + 10.75 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 5 },
+        { timestamp: new Date(base + 11 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 5 },
+        { timestamp: new Date(base + 11.25 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 5 },
+        { timestamp: new Date(base + 11.5 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 5 },
+        { timestamp: new Date(base + 11.75 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 5 },
+        { timestamp: new Date(base + 18 * 60 * 60 * 1000).toISOString(), consumptionKwh: 5, exportKwh: 0 },
+        { timestamp: new Date(base + 18.25 * 60 * 60 * 1000).toISOString(), consumptionKwh: 5, exportKwh: 0 },
+        { timestamp: new Date(base + 18.5 * 60 * 60 * 1000).toISOString(), consumptionKwh: 5, exportKwh: 0 },
+        { timestamp: new Date(base + 18.75 * 60 * 60 * 1000).toISOString(), consumptionKwh: 5, exportKwh: 0 },
+        { timestamp: new Date(base + 19 * 60 * 60 * 1000).toISOString(), consumptionKwh: 5, exportKwh: 0 },
+        { timestamp: new Date(base + 19.25 * 60 * 60 * 1000).toISOString(), consumptionKwh: 5, exportKwh: 0 },
+        { timestamp: new Date(base + 19.5 * 60 * 60 * 1000).toISOString(), consumptionKwh: 5, exportKwh: 0 },
+        { timestamp: new Date(base + 19.75 * 60 * 60 * 1000).toISOString(), consumptionKwh: 5, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(pvRows, 500);
+    const result = computePvSizing({
+      intervals,
+      settings: { compliance: 0.95, safetyFactor: 1.2, efficiency: 0.9, strategy: 'SELF_CONSUMPTION_ONLY' }
+    });
+
+    expect(result.kWhNeededRaw).toBeLessThan(64);
+    expect(result.recommendedProduct?.capacityKwh).toBe(64);
+  });
+
   it('selects earliest timestamp when max observed kW ties', () => {
     const tieRows = [
       { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 200 },

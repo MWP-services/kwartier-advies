@@ -102,6 +102,30 @@ function parseNlDateTime(s: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function parseIsoLikeLocalDateTime(s: string): Date | null {
+  // Support local timestamps like "yyyy-mm-dd hh:mm" and "yyyy-mm-ddThh:mm:ss"
+  // without relying on runtime-specific Date parsing.
+  const start = s.includes(' tot ') ? s.split(' tot ')[0].trim() : s;
+  const m = start.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:\s+|T)(\d{2}):(\d{2})(?::(\d{2}))?$/
+  );
+  if (!m) return null;
+
+  const [, yyyy, mm, dd, HH, MM, SS] = m;
+  const d = makeDateInTimeZone(
+    {
+      year: Number(yyyy),
+      month: Number(mm),
+      day: Number(dd),
+      hour: Number(HH),
+      minute: Number(MM),
+      second: SS ? Number(SS) : 0
+    },
+    SOURCE_TIME_ZONE
+  );
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function parseTimestamp(input: unknown): Date {
   if (input instanceof Date) return input;
 
@@ -122,6 +146,10 @@ export function parseTimestamp(input: unknown): Date {
   // NL date-time parsing (fix for "19-11-2024 12:45")
   const nl = parseNlDateTime(asString);
   if (nl) return nl;
+
+  // Local ISO-like parsing (fix for "2025-01-01 00:15")
+  const isoLikeLocal = parseIsoLikeLocalDateTime(asString);
+  if (isoLikeLocal) return isoLikeLocal;
 
   // ISO / other parseable formats
   return new Date(asString);

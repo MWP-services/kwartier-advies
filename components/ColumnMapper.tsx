@@ -1,28 +1,35 @@
 'use client';
 
-import type { ColumnMapping } from '@/lib/parsing';
+import type { AnalysisType } from '@/lib/analysis';
+import { hasLikelyPvHeader, type ColumnMapping } from '@/lib/parsing';
 
 interface ColumnMapperProps {
   headers: string[];
   mapping: ColumnMapping;
+  analysisType?: AnalysisType;
   onChange: (mapping: ColumnMapping) => void;
 }
 
-export function ColumnMapper({ headers, mapping, onChange }: ColumnMapperProps) {
+export function ColumnMapper({ headers, mapping, analysisType, onChange }: ColumnMapperProps) {
   const update = (key: keyof ColumnMapping, value: string) => {
     onChange({ ...mapping, [key]: value });
   };
+  const showPvColumn = analysisType !== 'PV_SELF_CONSUMPTION' || hasLikelyPvHeader(headers);
+  const fields: Array<[keyof ColumnMapping, string]> = [
+    ['timestamp', 'timestamp (vul hier de datum/tijd (tot) in)'],
+    ['consumptionKwh', 'consumption_kwh (vul hier het verbruik in kWh in)'],
+    ['exportKwh', 'export_kwh (optioneel)']
+  ];
+
+  if (showPvColumn) {
+    fields.push(['pvKwh', 'pv_kwh (optioneel)']);
+  }
 
   return (
     <div className="wx-card">
       <h2 className="wx-title">Kolomkoppeling</h2>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-        {[
-          ['timestamp', 'timestamp (vul hier de datum/tijd (tot) in)'],
-          ['consumptionKwh', 'consumption_kwh (vul hier het verbruik in kWh in)'],
-          ['exportKwh', 'export_kwh (optioneel)'],
-          ['pvKwh', 'pv_kwh (optioneel)']
-        ].map(([key, label]) => (
+        {fields.map(([key, label]) => (
           <label key={key} className="text-sm">
             {label}
             <select
@@ -40,6 +47,11 @@ export function ColumnMapper({ headers, mapping, onChange }: ColumnMapperProps) 
           </label>
         ))}
       </div>
+      {!showPvColumn && analysisType === 'PV_SELF_CONSUMPTION' && (
+        <p className="mt-3 text-xs text-slate-500">
+          Geen waarschijnlijke `pv_kwh`-kolom gevonden. Deze analyse gebruikt daarom alleen verbruik + teruglevering.
+        </p>
+      )}
     </div>
   );
 }

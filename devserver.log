@@ -6,21 +6,7 @@
   - Local:        http://localhost:3000
 
  ✓ Starting...
- ✓ Ready in 2.1s
+ ✓ Ready in 2.6s
  ○ Compiling / ...
- ✓ Compiled / in 15.8s (1584 modules)
- ⚠ Fast Refresh had to perform a full reload due to a runtime error.
- GET / 200 in 16197ms
- GET / 200 in 1846ms
- GET /_next/static/webpack/02e0e7a3d04edb41.webpack.hot-update.json 404 in 16517ms
- GET / 200 in 68ms
- GET / 200 in 120ms
- ✓ Compiled in 2.6s (1581 modules)
- ✓ Compiled in 1124ms (1581 modules)
- ✓ Compiled in 1256ms (1581 modules)
- ✓ Compiled in 1145ms (1581 modules)
- ✓ Compiled in 3.5s (1581 modules)
- ✓ Compiled in 975ms (1567 modules)
- ✓ Compiled in 1174ms (1581 modules)
- ✓ Compiled in 1803ms (1581 modules)
- ✓ Compiled in 4.6s (1567 modules)
+ ✓ Compiled / in 10.2s (1581 modules)
+ GET / 200 in 10935ms

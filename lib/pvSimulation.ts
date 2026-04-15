@@ -68,6 +68,7 @@ export interface PvScenarioMetrics {
   avoidedImportValueEur: number | null;
   tradingExportValueEur: number | null;
   totalEconomicValueEur: number | null;
+  peakSocKwh: number;
   maxRemainingExportKw: number;
   maxChargeKw: number;
   maxDischargeKw: number;
@@ -201,12 +202,14 @@ export function simulatePvBattery(
   let tradingExportValueEur = 0;
   const socSeries: { timestamp: string; socKwh: number }[] = [];
   const captureSocSeries = config?.captureSocSeries ?? false;
+  let peakSocKwh = Math.max(0, socKwh - minSocKwh);
 
   intervals.forEach((interval) => {
     const flow = derivePvIntervalFlow(interval, mode ?? 'EXPORT_ONLY');
     const storableInputLimitKwh = chargeEfficiency > 0 ? Math.max(0, maxSocKwh - socKwh) / chargeEfficiency : 0;
     const chargeInputKwh = Math.min(flow.surplusKwh, maxChargeIntervalKwh, storableInputLimitKwh);
     socKwh = Math.min(maxSocKwh, socKwh + chargeInputKwh * chargeEfficiency);
+    peakSocKwh = Math.max(peakSocKwh, Math.max(0, socKwh - minSocKwh));
     const exportedImmediateKwh = Math.max(flow.surplusKwh - chargeInputKwh, 0);
 
     const availableDeliverableKwh = Math.min(
@@ -317,6 +320,7 @@ export function simulatePvBattery(
     avoidedImportValueEur: avoidedImportValue,
     tradingExportValueEur: tradingExportValue,
     totalEconomicValueEur: totalEconomicValue,
+    peakSocKwh,
     maxRemainingExportKw,
     maxChargeKw: spec.maxChargeKw,
     maxDischargeKw: spec.maxDischargeKw,
@@ -344,7 +348,7 @@ export function scorePvScenarioForRecommendation(
   }
 
   return {
-    primary: metrics.importReductionKwh + metrics.capturedExportEnergyKwh,
+    primary: metrics.batteryUtilizationAgainstExport,
     secondary: metrics.exportReduction
   };
 }

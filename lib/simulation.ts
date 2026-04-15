@@ -65,6 +65,7 @@ export interface ScenarioResult {
   avoidedImportValueEur?: number | null;
   tradingExportValueEur?: number | null;
   totalEconomicValueEur?: number | null;
+  peakSocKwh?: number;
   socSeries?: { timestamp: string; socKwh: number }[];
 }
 
@@ -93,6 +94,7 @@ export interface PvSummary {
   avoidedImportValueEur: number | null;
   tradingExportValueEur: number | null;
   totalEconomicValueEur: number | null;
+  peakSocKwh: number;
 }
 
 export function simulateSingleScenario(
@@ -307,6 +309,7 @@ export function simulatePvScenario(
     avoidedImportValueEur: metrics.avoidedImportValueEur,
     tradingExportValueEur: metrics.tradingExportValueEur,
     totalEconomicValueEur: metrics.totalEconomicValueEur,
+    peakSocKwh: metrics.peakSocKwh,
     socSeries: metrics.socSeries
   };
 }
@@ -354,6 +357,8 @@ export function buildPvSummaryFromScenario(scenario: ScenarioResult | null): PvS
     avoidedImportValueEur: scenario.avoidedImportValueEur ?? null,
     tradingExportValueEur: scenario.tradingExportValueEur ?? null,
     totalEconomicValueEur: scenario.totalEconomicValueEur ?? null
+    ,
+    peakSocKwh: scenario.peakSocKwh ?? 0
   };
 }
 

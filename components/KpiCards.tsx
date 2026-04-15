@@ -22,74 +22,28 @@ export function KpiCards({
 }: KpiCardsProps) {
   const cards =
     analysisType === 'PV_SELF_CONSUMPTION'
-      ? pvSummary?.strategy === 'PV_WITH_TRADING'
-        ? [
-            {
-              label: 'Opgeslagen PV',
-              value: `${(pvSummary?.capturedExportEnergyKwh ?? 0).toFixed(2)} kWh`
-            },
-            {
-              label: 'Later geëxporteerd',
-              value: `${(pvSummary?.shiftedExportedLaterKwh ?? 0).toFixed(2)} kWh`
-            },
-            {
-              label: 'Importreductie',
-              value: `${(pvSummary?.importReductionKwh ?? 0).toFixed(2)} kWh`
-            },
-            {
-              label: 'Totale nuttige ontlading',
-              value: `${(pvSummary?.totalUsefulDischargedEnergyKwh ?? 0).toFixed(2)} kWh`
-            },
-            {
-              label: 'Aanbevolen',
-              value: sizing.recommendedProduct ? `${sizing.recommendedProduct.capacityKwh} kWh` : 'Geen haalbare optie'
-            }
-          ]
-        : pvSummary?.mode === 'FULL_PV'
-        ? [
-            {
-              label: 'Totale PV kWh',
-              value: (pvSummary?.totalPvKwh ?? 0).toFixed(2)
-            },
-            {
-              label: 'Zelfconsumptie',
-              value: `${((pvSummary?.selfConsumptionRatio ?? 0) * 100).toFixed(1)}%`
-            },
-            {
-              label: 'Zelfvoorziening',
-              value: `${((pvSummary?.selfSufficiency ?? 0) * 100).toFixed(1)}%`
-            },
-            {
-              label: 'Export na batterij',
-              value: `${(pvSummary?.exportAfter ?? 0).toFixed(2)} kWh`
-            },
-            {
-              label: 'Aanbevolen',
-              value: sizing.recommendedProduct ? `${sizing.recommendedProduct.capacityKwh} kWh` : 'Geen haalbare optie'
-            }
-          ]
-        : [
-            {
-              label: 'Export voor batterij',
-              value: `${(pvSummary?.exportBefore ?? 0).toFixed(2)} kWh`
-            },
-            {
-              label: 'Export na batterij',
-              value: `${(pvSummary?.exportAfter ?? 0).toFixed(2)} kWh`
-            },
-            {
-              label: 'Opgeslagen export',
-              value: `${(pvSummary?.capturedExportEnergyKwh ?? 0).toFixed(2)} kWh`
-            },
-            {
-              label: 'Benutting surplus',
-              value: `${((pvSummary?.batteryUtilizationAgainstExport ?? 0) * 100).toFixed(1)}%`
-            },
-            {
-              label: 'Aanbevolen',
-              value: sizing.recommendedProduct ? `${sizing.recommendedProduct.capacityKwh} kWh` : 'Geen haalbare optie'
-            }
-          ]
+      ? [
+          {
+            label: 'Benodigde opslag (profiel)',
+            value: `${sizing.kWhNeededRaw.toFixed(2)} kWh`
+          },
+          {
+            label: 'Benodigde batterij (advies)',
+            value: `${sizing.kWhNeeded.toFixed(2)} kWh`
+          },
+          {
+            label: 'Export zonder batterij',
+            value: `${(pvSummary?.exportBefore ?? 0).toFixed(2)} kWh`
+          },
+          {
+            label: 'Import zonder batterij',
+            value: `${(pvSummary?.importedBefore ?? 0).toFixed(2)} kWh`
+          },
+          {
+            label: 'Aanbevolen',
+            value: sizing.recommendedProduct ? `${sizing.recommendedProduct.capacityKwh} kWh` : 'Geen haalbare optie'
+          }
+        ]
       : [
           {
             label: 'Maximaal gemeten kW',

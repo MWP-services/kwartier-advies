@@ -13,7 +13,9 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
 
   return (
     <div className="wx-card">
-      <h3 className="wx-title">Vergelijking batterijscenario&apos;s</h3>
+      <h3 className="wx-title">
+        {analysisType === 'PV_SELF_CONSUMPTION' ? 'Simulatie per batterijoptie' : 'Vergelijking batterijscenario&apos;s'}
+      </h3>
       <div className="overflow-x-auto">
         <table className="wx-table min-w-full text-sm">
           <thead>

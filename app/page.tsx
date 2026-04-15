@@ -23,7 +23,15 @@ import {
   processIntervals,
   selectTopExceededIntervals
 } from '@/lib/calculations';
-import { autoDetectColumns, mapRows, parseCsv, parseXlsx, type ColumnMapping } from '@/lib/parsing';
+import {
+  autoDetectColumns,
+  hasLikelyPvHeader,
+  isLikelyPvHeader,
+  mapRows,
+  parseCsv,
+  parseXlsx,
+  type ColumnMapping
+} from '@/lib/parsing';
 import { normalizeConsumptionSeries } from '@/lib/normalization';
 import { buildPvSummaryFromScenario, findHighestPeakDay, simulateAllPvScenarios, simulateAllScenarios } from '@/lib/simulation';
 import { buildDefaultTradingConfig, determinePvAnalysisMode } from '@/lib/pvSimulation';
@@ -42,10 +50,19 @@ function mappingEqual(a: ColumnMapping | null, b: ColumnMapping): boolean {
 
 function runAnalysis(
   rawRows: Record<string, unknown>[],
+  headers: string[],
   mapping: ColumnMapping,
   settings: AnalysisSettings
 ): AnalysisResult | null {
-  const mappedRows = mapRows(rawRows, mapping);
+  const sanitizedMapping: ColumnMapping =
+    settings.analysisType === 'PV_SELF_CONSUMPTION' &&
+    mapping.exportKwh &&
+    mapping.pvKwh &&
+    !hasLikelyPvHeader(headers) &&
+    !isLikelyPvHeader(mapping.pvKwh)
+      ? { ...mapping, pvKwh: undefined }
+      : mapping;
+  const mappedRows = mapRows(rawRows, sanitizedMapping);
   if (mappedRows.length === 0) return null;
 
   const normalized = normalizeConsumptionSeries(mappedRows, {
@@ -224,7 +241,7 @@ export default function HomePage() {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
-      const result = runAnalysis(rawRows, draftMapping, draftSettings);
+      const result = runAnalysis(rawRows, headers, draftMapping, draftSettings);
       if (!result) {
         setError('Geen bruikbare rijen na normalisatie of filtering.');
         return;
@@ -356,7 +373,14 @@ export default function HomePage() {
 
       <Upload onFile={handleFile} />
       {error && <p className="rounded border border-red-200 bg-red-50 p-3 text-red-700">{error}</p>}
-      {headers.length > 0 && <ColumnMapper headers={headers} mapping={draftMapping} onChange={setDraftMapping} />}
+      {headers.length > 0 && (
+        <ColumnMapper
+          headers={headers}
+          mapping={draftMapping}
+          analysisType={draftSettings.analysisType}
+          onChange={setDraftMapping}
+        />
+      )}
 
       <div className="wx-card grid gap-4 lg:grid-cols-3">
         <label className="text-sm">
@@ -555,43 +579,59 @@ export default function HomePage() {
             />
           ) : (
             <div className="wx-card text-sm text-slate-700">
-              <h3 className="wx-title">PV-analyse samenvatting</h3>
+              <h3 className="wx-title">Capaciteitsbepaling</h3>
+              <p>
+                De kwartierdata wordt eerst gelezen als de huidige situatie zonder batterij. Op basis van het verbruiks- en
+                opwekprofiel berekenen we hoeveel opslagcapaciteit nodig is om relevant PV-overschot te verschuiven.
+              </p>
+              <p>
+                Benodigde opslag uit profiel: {analysisResult.sizing.kWhNeededRaw.toFixed(2)} kWh. Benodigde batterijcapaciteit
+                na batterijverliezen: {analysisResult.sizing.kWhNeeded.toFixed(2)} kWh.
+              </p>
               <p>
                 Batterijmodus: {analysisResult.pvSummary?.strategy === 'PV_WITH_TRADING' ? 'PV + trading' : 'Self-consumption only'}.
               </p>
-              <p>
-                Export voor/na batterij: {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh /{' '}
-                {(analysisResult.pvSummary?.exportAfter ?? 0).toFixed(2)} kWh.
-              </p>
               {analysisResult.pvSummary?.strategy === 'PV_WITH_TRADING' && (
                 <p>
-                  Directe export: {(analysisResult.pvSummary?.immediateExportedKwh ?? 0).toFixed(2)} kWh. Later uit batterij verkocht:
-                  {' '}
-                  {(analysisResult.pvSummary?.shiftedExportedLaterKwh ?? 0).toFixed(2)} kWh.
+                  Onderbouwing: export zonder batterij {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh en
+                  import zonder batterij {(analysisResult.pvSummary?.importedBefore ?? 0).toFixed(2)} kWh vormen samen het profiel
+                  waartegen de batterijcapaciteit wordt bepaald.
                 </p>
               )}
               {analysisResult.pvSummary?.mode === 'FULL_PV' ? (
                 <>
                   <p>
-                    Totale PV-opwek: {(analysisResult.pvSummary?.totalPvKwh ?? 0).toFixed(2)} kWh. Zelfconsumptie na batterij:
+                    Totale PV-opwek zonder batterij: {(analysisResult.pvSummary?.totalPvKwh ?? 0).toFixed(2)} kWh. Export zonder
+                    batterij: {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh. Import zonder batterij:
                     {' '}
-                    {(((analysisResult.pvSummary?.selfConsumptionRatio ?? 0) * 100)).toFixed(1)}%.
+                    {(analysisResult.pvSummary?.importedBefore ?? 0).toFixed(2)} kWh.
                   </p>
                   <p>
-                    Zelfvoorziening na batterij: {(((analysisResult.pvSummary?.selfSufficiency ?? 0) * 100)).toFixed(1)}%.
+                    Daarmee is zichtbaar hoeveel opwek direct wordt gebruikt en hoeveel overschot er beschikbaar is om met een
+                    batterij te verschuiven.
                   </p>
                 </>
               ) : (
                 <>
                   <p>
-                    Opgeslagen exportoverschot: {(analysisResult.pvSummary?.capturedExportEnergyKwh ?? 0).toFixed(2)} kWh.
-                    Benutting van exportoverschot: {(((analysisResult.pvSummary?.batteryUtilizationAgainstExport ?? 0) * 100)).toFixed(1)}%.
+                    Export zonder batterij: {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh. Zonder `pv_kwh`
+                    baseren we de benodigde opslag op gemeten teruglevering en resterend verbruik.
                   </p>
                   <p className="text-xs text-slate-500">
                     Totale PV-opwek en zelfconsumptieratio worden niet getoond zonder `pv_kwh`.
                   </p>
                 </>
               )}
+            </div>
+          )}
+
+          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && (
+            <div className="wx-card text-sm text-slate-700">
+              <h3 className="wx-title">Simulatie-impact per batterij</h3>
+              <p>
+                Hieronder zie je pas de simulatiescenario&apos;s. Die laten zien wat de impact zou zijn als er een batterij
+                geplaatst wordt met een bepaalde capaciteit.
+              </p>
             </div>
           )}
 

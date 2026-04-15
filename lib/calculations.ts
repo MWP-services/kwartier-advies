@@ -396,7 +396,7 @@ function scorePvScenarioResultForRecommendation(scenario: ScenarioResult): {
     primary = scenario.achievedSelfConsumption ?? scenario.importReductionKwh ?? 0;
     secondary = scenario.exportReduction ?? 0;
   } else {
-    primary = (scenario.importReductionKwh ?? 0) + (scenario.capturedExportEnergyKwh ?? 0);
+    primary = scenario.batteryUtilizationAgainstExport ?? 0;
     secondary = scenario.exportReduction ?? 0;
   }
 
@@ -595,7 +595,7 @@ export function computePvSizing(params: {
   const recommendedSpec = recommended ? getBatterySpecForCapacity(recommended.capacityKwh) : null;
   const fallbackFlow = intervals.map((interval) => derivePvIntervalFlow(interval));
   const kWhNeededRaw =
-    recommendedMetrics?.capturedExportEnergyKwh ??
+    recommendedMetrics?.peakSocKwh ??
     Math.max(0, ...fallbackFlow.map((flow) => flow.surplusKwh));
   const kWNeededRaw =
     recommendedMetrics != null
@@ -651,7 +651,7 @@ export function computePvSizingFromScenarioResults(
   const recommendedSpec = recommended ? getBatterySpecForCapacity(recommended.capacityKwh) : null;
   const fallbackFlow = intervals.map((interval) => derivePvIntervalFlow(interval));
   const kWhNeededRaw =
-    recommendedScenario?.capturedExportEnergyKwh ??
+    recommendedScenario?.peakSocKwh ??
     Math.max(0, ...fallbackFlow.map((flow) => flow.surplusKwh));
   const kWNeededRaw =
     recommendedScenario != null

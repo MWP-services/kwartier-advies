@@ -46,32 +46,80 @@ function normalizeHeader(header: string): string {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+const TIMESTAMP_HEADER_CANDIDATES = [
+  'timestamp',
+  'datetime',
+  'date',
+  'date time',
+  'date/time',
+  'tijdstip',
+  'tijd',
+  'datum',
+  'datum tijd',
+  'datum tijd tot',
+  'datumtijdtot',
+  'van',
+  'tot',
+  'date_time',
+  'meter_datetime'
+];
+
+const CONSUMPTION_HEADER_CANDIDATES = [
+  'consumption_kwh',
+  'verbruik_kwh',
+  'afname_kwh',
+  'load_kwh',
+  'consumption',
+  'verbruik',
+  'verbruik (kwh)',
+  'import_kwh',
+  'afname',
+  'load'
+];
+
+const EXPORT_HEADER_CANDIDATES = [
+  'export_kwh',
+  'teruglevering_kwh',
+  'injectie_kwh',
+  'export',
+  'teruglever_kwh',
+  'teruglevering',
+  'teruglevering (kwh)',
+  'injectie'
+];
+
+const PV_HEADER_CANDIDATES = [
+  'pv_kwh',
+  'opwek_kwh',
+  'productie_kwh',
+  'solar_kwh',
+  'pv',
+  'generation_kwh',
+  'opbrengst_kwh',
+  'opwek',
+  'productie'
+];
+
+function matchesAnyHeaderCandidate(header: string, candidates: string[]): boolean {
+  const normalized = normalizeHeader(header);
+  return candidates.some((candidate) => normalizeHeader(candidate) === normalized);
+}
+
+export function isLikelyPvHeader(header: string): boolean {
+  return matchesAnyHeaderCandidate(header, PV_HEADER_CANDIDATES);
+}
+
+export function hasLikelyPvHeader(headers: string[]): boolean {
+  return headers.some((header) => isLikelyPvHeader(header));
+}
+
 export function autoDetectColumns(headers: string[]): ColumnMapping | null {
   const lookup = new Map(headers.map((header) => [normalizeHeader(header), header]));
   const findHeader = (candidates: string[]): string | undefined =>
     candidates.map((candidate) => lookup.get(normalizeHeader(candidate))).find((value) => value != null);
 
-  const timestamp = findHeader([
-    'timestamp',
-    'datetime',
-    'date',
-    'tijdstip',
-    'tijd',
-    'datum',
-    'date_time',
-    'meter_datetime'
-  ]);
-  const consumptionKwh = findHeader([
-    'consumption_kwh',
-    'verbruik_kwh',
-    'afname_kwh',
-    'load_kwh',
-    'consumption',
-    'verbruik',
-    'import_kwh',
-    'afname',
-    'load'
-  ]);
+  const timestamp = findHeader(TIMESTAMP_HEADER_CANDIDATES);
+  const consumptionKwh = findHeader(CONSUMPTION_HEADER_CANDIDATES);
 
   if (!timestamp || !consumptionKwh) {
     return null;
@@ -80,26 +128,8 @@ export function autoDetectColumns(headers: string[]): ColumnMapping | null {
   return {
     timestamp,
     consumptionKwh,
-    exportKwh: findHeader([
-      'export_kwh',
-      'teruglevering_kwh',
-      'injectie_kwh',
-      'export',
-      'teruglever_kwh',
-      'teruglevering',
-      'injectie'
-    ]),
-    pvKwh: findHeader([
-      'pv_kwh',
-      'opwek_kwh',
-      'productie_kwh',
-      'solar_kwh',
-      'pv',
-      'generation_kwh',
-      'opbrengst_kwh',
-      'opwek',
-      'productie'
-    ])
+    exportKwh: findHeader(EXPORT_HEADER_CANDIDATES),
+    pvKwh: findHeader(PV_HEADER_CANDIDATES)
   };
 }
 
