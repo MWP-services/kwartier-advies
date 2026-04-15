@@ -454,6 +454,7 @@ export function computePvSizing(params: {
 }): SizingResult {
   const { intervals, settings } = params;
 
+  // Gebruik een meer realistische sizing: simuleer een dag met batterij om opslagbehoefte te bepalen
   const intervalsByDay = new Map<string, ProcessedInterval[]>();
   intervals
     .slice()
@@ -465,29 +466,38 @@ export function computePvSizing(params: {
       intervalsByDay.set(dayIso, dayIntervals);
     });
 
-  let kWhNeededRaw = 0;
-  let kWNeededRaw = 0;
+  let maxStorageNeededKwh = 0;
+  let maxPowerNeededKw = 0;
 
   intervalsByDay.forEach((dayIntervals) => {
-    let rollingStoredKwh = 0;
-    let maxStoredKwh = 0;
+    // Simuleer een eenvoudige batterij voor deze dag om opslagbehoefte te bepalen
+    let virtualSoc = 0;
+    let maxVirtualSoc = 0;
 
     dayIntervals.forEach((interval) => {
       const flow = derivePvIntervalFlow(interval);
-      kWNeededRaw = Math.max(kWNeededRaw, flow.mismatchKw);
-      rollingStoredKwh += flow.surplusKwh;
-      maxStoredKwh = Math.max(maxStoredKwh, rollingStoredKwh);
-      rollingStoredKwh = Math.max(0, rollingStoredKwh - flow.loadDeficitKwh);
+      maxPowerNeededKw = Math.max(maxPowerNeededKw, flow.mismatchKw);
+
+      // Laad virtuele batterij met surplus
+      virtualSoc += flow.surplusKwh;
+      maxVirtualSoc = Math.max(maxVirtualSoc, virtualSoc);
+
+      // Ontlaad voor deficit
+      virtualSoc = Math.max(0, virtualSoc - flow.loadDeficitKwh);
     });
 
-    kWhNeededRaw = Math.max(kWhNeededRaw, maxStoredKwh);
+    maxStorageNeededKwh = Math.max(maxStorageNeededKwh, maxVirtualSoc);
   });
 
-  kWhNeededRaw *= settings.compliance;
-  kWNeededRaw *= settings.compliance;
+  const kWhNeededRaw = maxStorageNeededKwh;
+  const kWNeededRaw = maxPowerNeededKw;
 
-  const kWhNeeded = settings.efficiency > 0 ? (kWhNeededRaw / settings.efficiency) * settings.safetyFactor : 0;
-  const kWNeeded = kWNeededRaw * settings.safetyFactor;
+  // Pas compliance toe (bijv. 80% zelfconsumptie target)
+  const adjustedKwh = kWhNeededRaw * (1 / settings.compliance);
+  const adjustedKw = kWNeededRaw * (1 / settings.compliance);
+
+  const kWhNeeded = settings.efficiency > 0 ? (adjustedKwh / settings.efficiency) * settings.safetyFactor : 0;
+  const kWNeeded = adjustedKw * settings.safetyFactor;
 
   if (kWhNeeded <= 0 && kWNeeded <= 0) {
     return {

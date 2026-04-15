@@ -23,6 +23,8 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
                   <th className="p-2">Import na</th>
                   <th className="p-2">Export na</th>
                   <th className="p-2">Exportreductie</th>
+                  <th className="p-2">LCOE (€/kWh)</th>
+                  <th className="p-2">Terugverdientijd (jaren)</th>
                 </>
               ) : (
                 <>
@@ -49,6 +51,8 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
                     <td className="p-2">{(scenario.importedEnergyAfterKwh ?? 0).toFixed(2)}</td>
                     <td className="p-2">{(scenario.exportedEnergyAfterKwh ?? 0).toFixed(2)}</td>
                     <td className="p-2">{((scenario.exportReduction ?? 0) * 100).toFixed(1)}%</td>
+                    <td className="p-2">{scenario.levelizedCostOfEnergy?.toFixed(3) ?? '-'}</td>
+                    <td className="p-2">{scenario.paybackPeriodYears?.toFixed(1) ?? '-'}</td>
                   </>
                 ) : (
                   <>

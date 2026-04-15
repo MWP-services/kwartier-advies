@@ -36,8 +36,8 @@ export function KpiCards({
             value: `${((pvSummary?.selfSufficiency ?? 0) * 100).toFixed(1)}%`
           },
           {
-            label: 'Export na batterij',
-            value: `${(pvSummary?.exportAfter ?? 0).toFixed(2)} kWh`
+            label: 'LCOE',
+            value: pvSummary?.levelizedCostOfEnergy ? `${pvSummary.levelizedCostOfEnergy.toFixed(3)} €/kWh` : '-'
           },
           {
             label: 'Aanbevolen',

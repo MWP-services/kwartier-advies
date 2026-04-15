@@ -36,6 +36,11 @@ export interface ScenarioResult {
   selfSufficiency?: number;
   exportReduction?: number;
   socSeries?: { timestamp: string; socKwh: number }[];
+  // Nieuwe metrics voor economische analyse
+  levelizedCostOfEnergy?: number; // LCOE in €/kWh
+  paybackPeriodYears?: number; // Terugverdientijd in jaren
+  netPresentValue?: number; // NPV in €
+  internalRateOfReturn?: number; // IRR in %
 }
 
 export interface PvSummary {
@@ -50,6 +55,10 @@ export interface PvSummary {
   selfConsumptionRatio: number;
   selfSufficiency: number;
   exportReduction: number;
+  levelizedCostOfEnergy?: number;
+  paybackPeriodYears?: number;
+  netPresentValue?: number;
+  internalRateOfReturn?: number;
 }
 
 export interface ScenarioOption {
@@ -358,6 +367,35 @@ export function simulatePvScenario(
   const exportReduction =
     exportedEnergyBeforeKwh > 0 ? (exportedEnergyBeforeKwh - exportedEnergyAfterKwh) / exportedEnergyBeforeKwh : 0;
 
+  const economicMetrics = calculateEconomicMetrics({
+    optionLabel: optionLabel ?? BATTERY_OPTIONS.find((b) => b.capacityKwh === batteryCapacityKwh)?.label ?? `${batteryCapacityKwh} kWh`,
+    capacityKwh: batteryCapacityKwh,
+    exceedanceIntervalsBefore: exportIntervalsBefore,
+    exceedanceIntervalsAfter: exportIntervalsAfter,
+    exceedanceEnergyKwhBefore: exportedEnergyBeforeKwh,
+    exceedanceEnergyKwhAfter: exportedEnergyAfterKwh,
+    achievedComplianceDataset: achievedSelfConsumption,
+    achievedComplianceDailyAverage: selfSufficiency,
+    achievedCompliance: achievedSelfConsumption,
+    maxRemainingExcessKw: maxRemainingExportKw,
+    maxChargeKw: spec.maxChargeKw,
+    maxDischargeKw: spec.maxDischargeKw,
+    endingSocKwh: soc,
+    shavedSeries: [],
+    totalPvKwh,
+    totalConsumptionKwh,
+    selfConsumptionBeforeKwh,
+    selfConsumptionAfterKwh,
+    importedEnergyBeforeKwh,
+    importedEnergyAfterKwh,
+    exportedEnergyBeforeKwh,
+    exportedEnergyAfterKwh,
+    achievedSelfConsumption,
+    selfSufficiency,
+    exportReduction,
+    socSeries
+  });
+
   return {
     optionLabel:
       optionLabel ?? BATTERY_OPTIONS.find((b) => b.capacityKwh === batteryCapacityKwh)?.label ?? `${batteryCapacityKwh} kWh`,
@@ -385,7 +423,11 @@ export function simulatePvScenario(
     achievedSelfConsumption,
     selfSufficiency,
     exportReduction,
-    socSeries
+    socSeries,
+    levelizedCostOfEnergy: economicMetrics.levelizedCostOfEnergy,
+    paybackPeriodYears: economicMetrics.paybackPeriodYears,
+    netPresentValue: economicMetrics.netPresentValue,
+    internalRateOfReturn: economicMetrics.internalRateOfReturn
   };
 }
 
@@ -418,26 +460,60 @@ export function buildPvSummaryFromScenario(scenario: ScenarioResult | null): PvS
     exportAfter: scenario.exportedEnergyAfterKwh ?? 0,
     selfConsumptionRatio: scenario.achievedSelfConsumption ?? 0,
     selfSufficiency: scenario.selfSufficiency ?? 0,
-    exportReduction: scenario.exportReduction ?? 0
+    exportReduction: scenario.exportReduction ?? 0,
+    levelizedCostOfEnergy: scenario.levelizedCostOfEnergy,
+    paybackPeriodYears: scenario.paybackPeriodYears,
+    netPresentValue: scenario.netPresentValue,
+    internalRateOfReturn: scenario.internalRateOfReturn
   };
 }
 
-export function findHighestPeakDay(intervals: ProcessedInterval[]): string | null {
-  const totalsByDay = new Map<string, number>();
-  intervals.forEach((interval) => {
-    const day = getLocalDayIso(interval.timestamp);
-    if (!day) return;
-    totalsByDay.set(day, (totalsByDay.get(day) ?? 0) + interval.excessKw);
-  });
+export function calculateEconomicMetrics(
+  scenario: ScenarioResult,
+  electricityPriceEurPerKwh: number = 0.25, // Default €0.25/kWh
+  feedInTariffEurPerKwh: number = 0.10, // Default €0.10/kWh
+  projectLifetimeYears: number = 10,
+  discountRate: number = 0.05
+): {
+  levelizedCostOfEnergy: number;
+  paybackPeriodYears: number;
+  netPresentValue: number;
+  internalRateOfReturn: number;
+} {
+  const batteryProduct = BATTERY_OPTIONS.find(b => b.capacityKwh === scenario.capacityKwh);
+  if (!batteryProduct || !batteryProduct.totalPriceEur) {
+    return {
+      levelizedCostOfEnergy: 0,
+      paybackPeriodYears: 0,
+      netPresentValue: 0,
+      internalRateOfReturn: 0
+    };
+  }
 
-  let highestDay: string | null = null;
-  let maxTotal = -1;
-  totalsByDay.forEach((total, day) => {
-    if (total > maxTotal) {
-      maxTotal = total;
-      highestDay = day;
-    }
-  });
+  const initialInvestment = batteryProduct.totalPriceEur;
+  const annualSavings = (scenario.importedEnergyBeforeKwh ?? 0) - (scenario.importedEnergyAfterKwh ?? 0) * electricityPriceEurPerKwh +
+                       ((scenario.exportedEnergyBeforeKwh ?? 0) - (scenario.exportedEnergyAfterKwh ?? 0)) * feedInTariffEurPerKwh;
 
-  return highestDay;
+  // LCOE = Initial Investment / Total Energy Saved over lifetime
+  const totalEnergySaved = annualSavings * projectLifetimeYears;
+  const levelizedCostOfEnergy = totalEnergySaved > 0 ? initialInvestment / totalEnergySaved : 0;
+
+  // Payback period
+  const paybackPeriodYears = annualSavings > 0 ? initialInvestment / annualSavings : 0;
+
+  // NPV
+  let netPresentValue = -initialInvestment;
+  for (let year = 1; year <= projectLifetimeYears; year++) {
+    netPresentValue += annualSavings / Math.pow(1 + discountRate, year);
+  }
+
+  // IRR (vereenvoudigde berekening)
+  const internalRateOfReturn = annualSavings > 0 ? (annualSavings / initialInvestment) * 100 : 0;
+
+  return {
+    levelizedCostOfEnergy,
+    paybackPeriodYears,
+    netPresentValue,
+    internalRateOfReturn
+  };
 }
