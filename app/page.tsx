@@ -26,6 +26,7 @@ import {
 import { autoDetectColumns, mapRows, parseCsv, parseXlsx, type ColumnMapping } from '@/lib/parsing';
 import { normalizeConsumptionSeries } from '@/lib/normalization';
 import { buildPvSummaryFromScenario, findHighestPeakDay, simulateAllPvScenarios, simulateAllScenarios } from '@/lib/simulation';
+import { determinePvAnalysisMode } from '@/lib/pvSimulation';
 
 const OUTLIER_KW_THRESHOLD = 5000;
 
@@ -60,6 +61,8 @@ function runAnalysis(
   const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
 
   if (settings.analysisType === 'PV_SELF_CONSUMPTION') {
+    const pvAnalysisMode = determinePvAnalysisMode(normalized.normalizedRows);
+    if (!pvAnalysisMode) return null;
     const sizing = computePvSizing({
       intervals,
       settings: {
@@ -76,7 +79,7 @@ function runAnalysis(
     const recommendedScenario =
       scenarios.find((scenario) => scenario.capacityKwh === sizing.recommendedProduct?.capacityKwh) ?? scenarios[0] ?? null;
     const pvSummary = buildPvSummaryFromScenario(recommendedScenario);
-    const exportIntervals = intervals.filter((interval) => derivePvIntervalFlow(interval).surplusKwh > 0).length;
+    const exportIntervals = recommendedScenario?.exceedanceIntervalsBefore ?? intervals.filter((interval) => derivePvIntervalFlow(interval).surplusKwh > 0).length;
 
     return {
       analysisType: settings.analysisType,
@@ -92,7 +95,9 @@ function runAnalysis(
       normalizationDiagnostics: normalized.diagnostics,
       quality,
       exceedanceIntervals: exportIntervals,
-      pvSummary
+      pvSummary,
+      pvAnalysisMode,
+      pvWarnings: pvSummary?.warnings ?? []
     };
   }
 
@@ -130,7 +135,9 @@ function runAnalysis(
     normalizationDiagnostics: normalized.diagnostics,
     quality,
     exceedanceIntervals,
-    pvSummary: null
+    pvSummary: null,
+    pvAnalysisMode: null,
+    pvWarnings: []
   };
 }
 
@@ -459,6 +466,12 @@ export default function HomePage() {
 
       {analysisResult ? (
         <>
+          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' &&
+            (analysisResult.pvWarnings ?? []).map((warning) => (
+              <p key={warning} className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                {warning}
+              </p>
+            ))}
           {analysisResult.analysisType === 'PEAK_SHAVING' && analysisResult.maxObservedKw > OUTLIER_KW_THRESHOLD * 2 && (
             <p className="rounded border border-amber-300 bg-amber-50 p-3 text-amber-800">
               Onrealistisch vermogen gedetecteerd - controleer kolomkeuze
@@ -496,14 +509,31 @@ export default function HomePage() {
             <div className="wx-card text-sm text-slate-700">
               <h3 className="wx-title">PV-analyse samenvatting</h3>
               <p>
-                Totale PV-opwek: {(analysisResult.pvSummary?.totalPvKwh ?? 0).toFixed(2)} kWh. Zelfconsumptie na batterij:
-                {' '}
-                {(((analysisResult.pvSummary?.selfConsumptionRatio ?? 0) * 100)).toFixed(1)}%.
-              </p>
-              <p>
                 Export voor/na batterij: {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh /{' '}
                 {(analysisResult.pvSummary?.exportAfter ?? 0).toFixed(2)} kWh.
               </p>
+              {analysisResult.pvSummary?.mode === 'FULL_PV' ? (
+                <>
+                  <p>
+                    Totale PV-opwek: {(analysisResult.pvSummary?.totalPvKwh ?? 0).toFixed(2)} kWh. Zelfconsumptie na batterij:
+                    {' '}
+                    {(((analysisResult.pvSummary?.selfConsumptionRatio ?? 0) * 100)).toFixed(1)}%.
+                  </p>
+                  <p>
+                    Zelfvoorziening na batterij: {(((analysisResult.pvSummary?.selfSufficiency ?? 0) * 100)).toFixed(1)}%.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Opgeslagen exportoverschot: {(analysisResult.pvSummary?.capturedExportEnergyKwh ?? 0).toFixed(2)} kWh.
+                    Benutting van exportoverschot: {(((analysisResult.pvSummary?.batteryUtilizationAgainstExport ?? 0) * 100)).toFixed(1)}%.
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Totale PV-opwek en zelfconsumptieratio worden niet getoond zonder `pv_kwh`.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -541,7 +571,9 @@ export default function HomePage() {
             {analyzedAt && <p className="mt-1 text-xs text-slate-500">Laatst geanalyseerd: {analyzedAt}</p>}
             <p className="mt-2 text-xs text-slate-500">
               {analysisResult.analysisType === 'PV_SELF_CONSUMPTION'
-                ? 'PV-dimensionering gebruikt PV-surplus, laad/ontlaadlimieten en zelfconsumptiesimulatie; finale engineeringvalidatie blijft vereist.'
+                ? analysisResult.pvSummary?.mode === 'FULL_PV'
+                  ? 'PV-dimensionering gebruikt een 15-minuten simulatie met PV-surplus, laad/ontlaadlimieten en batterijverliezen; finale engineeringvalidatie blijft vereist.'
+                  : 'Export-only advies gebruikt een 15-minuten simulatie op terugleveroverschot en batterijbeperkingen; totale PV-opwek blijft onbekend zonder pv_kwh.'
                 : 'Dimensionering voor peak shaving; finale engineeringvalidatie blijft vereist.'}
             </p>
             <button

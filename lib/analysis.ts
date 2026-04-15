@@ -8,6 +8,7 @@ import type {
 } from './calculations';
 import type { NormalizationDiagnostics, InterpretationMode } from './normalization';
 import type { PvSummary, ScenarioResult } from './simulation';
+import type { PvAnalysisMode } from './pvSimulation';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
@@ -40,6 +41,8 @@ export interface AnalysisResult {
   normalizationDiagnostics: NormalizationDiagnostics;
   quality: DataQualityReport;
   pvSummary: PvSummary | null;
+  pvAnalysisMode?: PvAnalysisMode | null;
+  pvWarnings?: string[];
 }
 
 export const defaultAnalysisSettings: AnalysisSettings = {

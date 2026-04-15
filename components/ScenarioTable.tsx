@@ -8,6 +8,8 @@ interface ScenarioTableProps {
 }
 
 export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh }: ScenarioTableProps) {
+  const pvMode = scenarios[0]?.pvAnalysisMode ?? null;
+
   return (
     <div className="wx-card">
       <h3 className="wx-title">Vergelijking batterijscenario&apos;s</h3>
@@ -17,15 +19,23 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
             <tr className="border-b text-left">
               <th className="p-2">Optie</th>
               {analysisType === 'PV_SELF_CONSUMPTION' ? (
-                <>
-                  <th className="p-2">Zelfconsumptie</th>
-                  <th className="p-2">Zelfvoorziening</th>
-                  <th className="p-2">Import na</th>
-                  <th className="p-2">Export na</th>
-                  <th className="p-2">Exportreductie</th>
-                  <th className="p-2">LCOE (€/kWh)</th>
-                  <th className="p-2">Terugverdientijd (jaren)</th>
-                </>
+                pvMode === 'FULL_PV' ? (
+                  <>
+                    <th className="p-2">Zelfconsumptie</th>
+                    <th className="p-2">Zelfvoorziening</th>
+                    <th className="p-2">Import na</th>
+                    <th className="p-2">Export na</th>
+                    <th className="p-2">Exportreductie</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="p-2">Export voor</th>
+                    <th className="p-2">Export na</th>
+                    <th className="p-2">Opgeslagen export</th>
+                    <th className="p-2">Benutting surplus</th>
+                    <th className="p-2">Import na</th>
+                  </>
+                )
               ) : (
                 <>
                   <th className="p-2">Voor kWh</th>
@@ -45,15 +55,23 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
               >
                 <td className="p-2">{scenario.optionLabel}</td>
                 {analysisType === 'PV_SELF_CONSUMPTION' ? (
-                  <>
-                    <td className="p-2">{((scenario.achievedSelfConsumption ?? 0) * 100).toFixed(1)}%</td>
-                    <td className="p-2">{((scenario.selfSufficiency ?? 0) * 100).toFixed(1)}%</td>
-                    <td className="p-2">{(scenario.importedEnergyAfterKwh ?? 0).toFixed(2)}</td>
-                    <td className="p-2">{(scenario.exportedEnergyAfterKwh ?? 0).toFixed(2)}</td>
-                    <td className="p-2">{((scenario.exportReduction ?? 0) * 100).toFixed(1)}%</td>
-                    <td className="p-2">{scenario.levelizedCostOfEnergy?.toFixed(3) ?? '-'}</td>
-                    <td className="p-2">{scenario.paybackPeriodYears?.toFixed(1) ?? '-'}</td>
-                  </>
+                  scenario.pvAnalysisMode === 'FULL_PV' ? (
+                    <>
+                      <td className="p-2">{((scenario.achievedSelfConsumption ?? 0) * 100).toFixed(1)}%</td>
+                      <td className="p-2">{((scenario.selfSufficiency ?? 0) * 100).toFixed(1)}%</td>
+                      <td className="p-2">{(scenario.importedEnergyAfterKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{(scenario.exportedEnergyAfterKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{((scenario.exportReduction ?? 0) * 100).toFixed(1)}%</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="p-2">{(scenario.exportedEnergyBeforeKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{(scenario.exportedEnergyAfterKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{(scenario.capturedExportEnergyKwh ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{((scenario.batteryUtilizationAgainstExport ?? 0) * 100).toFixed(1)}%</td>
+                      <td className="p-2">{(scenario.importedEnergyAfterKwh ?? 0).toFixed(2)}</td>
+                    </>
+                  )
                 ) : (
                   <>
                     <td className="p-2">{scenario.exceedanceEnergyKwhBefore.toFixed(2)}</td>

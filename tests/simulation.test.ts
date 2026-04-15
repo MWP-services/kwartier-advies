@@ -181,6 +181,36 @@ describe('simulation', () => {
     expect(result.socSeries?.length).toBe(intervals.length);
   });
 
+  it('treats export-only PV datasets as limited mode without inventing PV totals', () => {
+    const exportOnlyRows = [
+      { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 8, exportKwh: 20 },
+      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 12, exportKwh: 4 }
+    ];
+    const intervals = processIntervals(exportOnlyRows, 500);
+    const result = simulatePvScenario(intervals, 64, { initialSocRatio: 0, dischargeEfficiency: 1 });
+
+    expect(result.pvAnalysisMode).toBe('EXPORT_ONLY');
+    expect(result.totalPvKwh).toBeNull();
+    expect(result.achievedSelfConsumption).toBeNull();
+    expect(result.exportedEnergyAfterKwh).toBeLessThan(result.exportedEnergyBeforeKwh ?? Infinity);
+    expect(result.capturedExportEnergyKwh).toBeGreaterThan(0);
+    expect(result.limitations?.[0]).toContain('pv_kwh');
+  });
+
+  it('respects PV charging and discharging power limits within a 15-minute interval', () => {
+    const pvRows = [
+      { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 0, pvKwh: 40 },
+      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 30, pvKwh: 0 }
+    ];
+    const intervals = processIntervals(pvRows, 500);
+    const result = simulatePvScenario(intervals, 64, { initialSocRatio: 0, dischargeEfficiency: 1 });
+
+    expect(result.capturedExportEnergyKwh).toBeCloseTo(8, 5); // 32 kW charge limit -> 8 kWh
+    expect(result.importedEnergyAfterKwh).toBeCloseTo(22.5, 5); // 30 kW discharge limit -> 7.5 kWh served
+    expect(result.maxChargeKw).toBe(32);
+    expect(result.maxDischargeKw).toBe(30);
+  });
+
   it('returns PV scenario sets that include fixed large-capacity options', () => {
     const pvRows = Array.from({ length: 8 }, (_, idx) => ({
       timestamp: new Date(Date.UTC(2024, 0, 1, 8, idx * 15)).toISOString(),

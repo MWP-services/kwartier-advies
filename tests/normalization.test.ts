@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { findMaxObserved, processIntervals, type IntervalRecord } from '@/lib/calculations';
 import { formatTimestamp } from '@/lib/datetime';
-import { normalizeConsumptionSeries } from '@/lib/normalization';
+import { normalizeConsumptionSeries, normalizeEnergyDataset } from '@/lib/normalization';
 
 describe('normalization', () => {
   it('keeps interval data unchanged in INTERVAL mode', () => {
@@ -71,5 +71,22 @@ describe('normalization', () => {
 
     expect(formatTimestamp(result.normalizedRows[0].timestamp)).toContain('04-05-2025 00:00');
     expect(formatTimestamp(result.normalizedRows[1].timestamp)).toContain('04-05-2025 00:15');
+  });
+
+  it('normalizes cumulative consumption, pv, and export series independently in AUTO mode', () => {
+    const rows: IntervalRecord[] = [
+      { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 1000, pvKwh: 200, exportKwh: 50 },
+      { timestamp: '2024-01-01T00:15:00.000Z', consumptionKwh: 1003, pvKwh: 205, exportKwh: 51 },
+      { timestamp: '2024-01-01T00:30:00.000Z', consumptionKwh: 1007, pvKwh: 211, exportKwh: 53 }
+    ];
+
+    const result = normalizeEnergyDataset(rows, { interpretationMode: 'AUTO' });
+
+    expect(result.normalizedRows.map((row) => row.consumptionKwh)).toEqual([0, 3, 4]);
+    expect(result.normalizedRows.map((row) => row.pvKwh)).toEqual([0, 5, 6]);
+    expect(result.normalizedRows.map((row) => row.exportKwh)).toEqual([0, 1, 2]);
+    expect(result.diagnostics.series.consumptionKwh?.interpretationUsed).toBe('CUMULATIVE_DELTA');
+    expect(result.diagnostics.series.pvKwh?.interpretationUsed).toBe('CUMULATIVE_DELTA');
+    expect(result.diagnostics.series.exportKwh?.interpretationUsed).toBe('CUMULATIVE_DELTA');
   });
 });

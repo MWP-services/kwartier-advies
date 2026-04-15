@@ -1,4 +1,12 @@
 import { getLocalDayIso, getLocalHourMinute, parseTimestamp } from './datetime';
+import {
+  derivePvIntervalFlow as derivePvIntervalFlowBase,
+  generateScenarioOptions,
+  scorePvScenarioForRecommendation,
+  simulatePvBattery,
+  type PvAnalysisMode
+} from './pvSimulation';
+import { getBatterySpecForCapacity } from './batterySpecs';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 
@@ -96,6 +104,7 @@ export interface DayKwSeriesPoint {
 }
 
 export interface PvIntervalFlow {
+  mode?: PvAnalysisMode;
   directSelfConsumptionKwh: number;
   surplusKwh: number;
   loadDeficitKwh: number;
@@ -286,20 +295,84 @@ export function processIntervals(
 }
 
 export function derivePvIntervalFlow(interval: IntervalRecord | ProcessedInterval): PvIntervalFlow {
-  const consumptionKwh = Math.max(0, interval.consumptionKwh ?? 0);
-  const pvKwh = Math.max(0, interval.pvKwh ?? 0);
-  const directSelfConsumptionKwh = Math.min(consumptionKwh, pvKwh);
-  const measuredExportKwh = interval.exportKwh == null ? null : Math.max(0, interval.exportKwh);
-  const surplusKwh = Math.max(0, measuredExportKwh ?? pvKwh - directSelfConsumptionKwh);
-  const loadDeficitKwh = Math.max(0, consumptionKwh - directSelfConsumptionKwh);
-  const mismatchKw = Math.max(surplusKwh, loadDeficitKwh) / 0.25;
+  const base = derivePvIntervalFlowBase(interval);
+  const mismatchKw = Math.max(base.surplusKwh, base.loadDeficitKwh) / 0.25;
 
   return {
-    directSelfConsumptionKwh,
-    surplusKwh,
-    loadDeficitKwh,
+    mode: base.mode,
+    directSelfConsumptionKwh: base.directSelfConsumptionKwh,
+    surplusKwh: base.surplusKwh,
+    loadDeficitKwh: base.loadDeficitKwh,
     mismatchKw
   };
+}
+
+function buildBatteryProductFromScenarioOption(option: { capacityKwh: number; label: string }): BatteryProduct {
+  const spec = getBatterySpecForCapacity(option.capacityKwh);
+  const matchedBase = BATTERY_OPTIONS.find((candidate) => candidate.capacityKwh === option.capacityKwh);
+  if (matchedBase) {
+    return {
+      ...matchedBase,
+      powerKw: spec.maxDischargeKw
+    };
+  }
+
+  const modularMatch = option.label.match(/^(\d+)x(\d+) \((\d+) kWh\)$/);
+  if (modularMatch) {
+    const [, countRaw, baseSizeRaw] = modularMatch;
+    const count = Number(countRaw);
+    const baseSize = Number(baseSizeRaw);
+    const baseOption = BATTERY_OPTIONS.find((candidate) => candidate.capacityKwh === baseSize);
+    const totalPriceEur = (baseOption?.unitPriceEur ?? 0) * count;
+
+    return {
+      label: `${count}x ${baseSize} kWh (modulair)`,
+      capacityKwh: option.capacityKwh,
+      powerKw: spec.maxDischargeKw,
+      modular: true,
+      unitCapacityKwh: baseSize,
+      unitPowerKw: baseOption?.powerKw ?? spec.maxDischargeKw / Math.max(1, count),
+      count,
+      unitPriceEur: baseOption?.unitPriceEur,
+      totalPriceEur: totalPriceEur > 0 ? roundCurrency(totalPriceEur) : undefined
+    };
+  }
+
+  return {
+    label: option.label,
+    capacityKwh: option.capacityKwh,
+    powerKw: spec.maxDischargeKw
+  };
+}
+
+function selectRecommendedScenarioOptions(
+  scoredOptions: Array<{
+    option: { capacityKwh: number; label: string };
+    primary: number;
+    secondary: number;
+    score: number;
+  }>
+): {
+  recommended: { capacityKwh: number; label: string } | null;
+  alternative: { capacityKwh: number; label: string } | null;
+} {
+  if (scoredOptions.length === 0) {
+    return { recommended: null, alternative: null };
+  }
+
+  const bestScore = Math.max(...scoredOptions.map((candidate) => candidate.score));
+  const practicalThreshold = Math.max(0.6, bestScore * 0.92);
+  const eligible = scoredOptions
+    .filter((candidate) => candidate.score >= practicalThreshold)
+    .sort((a, b) => a.option.capacityKwh - b.option.capacityKwh || b.score - a.score);
+
+  const recommended = (eligible[0] ?? [...scoredOptions].sort((a, b) => b.score - a.score || a.option.capacityKwh - b.option.capacityKwh)[0])?.option ?? null;
+  const alternative =
+    scoredOptions
+      .filter((candidate) => recommended && candidate.option.capacityKwh > recommended.capacityKwh)
+      .sort((a, b) => b.score - a.score || a.option.capacityKwh - b.option.capacityKwh)[0]?.option ?? null;
+
+  return { recommended, alternative };
 }
 
 export function groupPeakEvents(intervals: ProcessedInterval[]): PeakEvent[] {
@@ -453,68 +526,50 @@ export function computePvSizing(params: {
   settings: PvSizingSettings;
 }): SizingResult {
   const { intervals, settings } = params;
-
-  // Gebruik een meer realistische sizing: simuleer een dag met batterij om opslagbehoefte te bepalen
-  const intervalsByDay = new Map<string, ProcessedInterval[]>();
-  intervals
-    .slice()
-    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-    .forEach((interval) => {
-      const dayIso = getLocalDayIso(interval.timestamp) || interval.timestamp.slice(0, 10);
-      const dayIntervals = intervalsByDay.get(dayIso) ?? [];
-      dayIntervals.push(interval);
-      intervalsByDay.set(dayIso, dayIntervals);
-    });
-
-  let maxStorageNeededKwh = 0;
-  let maxPowerNeededKw = 0;
-
-  intervalsByDay.forEach((dayIntervals) => {
-    // Simuleer een eenvoudige batterij voor deze dag om opslagbehoefte te bepalen
-    let virtualSoc = 0;
-    let maxVirtualSoc = 0;
-
-    dayIntervals.forEach((interval) => {
-      const flow = derivePvIntervalFlow(interval);
-      maxPowerNeededKw = Math.max(maxPowerNeededKw, flow.mismatchKw);
-
-      // Laad virtuele batterij met surplus
-      virtualSoc += flow.surplusKwh;
-      maxVirtualSoc = Math.max(maxVirtualSoc, virtualSoc);
-
-      // Ontlaad voor deficit
-      virtualSoc = Math.max(0, virtualSoc - flow.loadDeficitKwh);
-    });
-
-    maxStorageNeededKwh = Math.max(maxStorageNeededKwh, maxVirtualSoc);
-  });
-
-  const kWhNeededRaw = maxStorageNeededKwh;
-  const kWNeededRaw = maxPowerNeededKw;
-
-  // Pas compliance toe (bijv. 80% zelfconsumptie target)
-  const adjustedKwh = kWhNeededRaw * (1 / settings.compliance);
-  const adjustedKw = kWNeededRaw * (1 / settings.compliance);
-
-  const kWhNeeded = settings.efficiency > 0 ? (adjustedKwh / settings.efficiency) * settings.safetyFactor : 0;
-  const kWNeeded = adjustedKw * settings.safetyFactor;
-
-  if (kWhNeeded <= 0 && kWNeeded <= 0) {
-    return {
-      kWhNeededRaw,
-      kWNeededRaw,
-      kWhNeeded,
-      kWNeeded,
-      recommendedProduct: null,
-      alternativeProduct: null,
-      noFeasibleBatteryByPower: false
-    };
-  }
-
-  const { recommendedProduct, alternativeProduct, noFeasibleBatteryByPower } = selectMinimumCostBatteryOptions(
-    kWhNeeded,
-    kWNeeded
+  const targetKwh = Math.max(
+    64,
+    ...intervals.map((interval) => Math.max(0, interval.exportKwh ?? interval.pvKwh ?? 0) * 4)
   );
+  const options = generateScenarioOptions({ targetKwh });
+  const scoredOptions = options.map((option) => {
+    const metrics = simulatePvBattery(intervals, option.capacityKwh, {
+      initialSocRatio: 0,
+      dischargeEfficiency: settings.efficiency
+    });
+    const scoreParts = scorePvScenarioForRecommendation(metrics);
+    const score = metrics.mode === 'FULL_PV'
+      ? scoreParts.primary * 0.7 + scoreParts.secondary * 0.3
+      : scoreParts.primary * 0.8 + scoreParts.secondary * 0.2;
+
+    return {
+      option,
+      metrics,
+      primary: scoreParts.primary,
+      secondary: scoreParts.secondary,
+      score
+    };
+  });
+  const { recommended, alternative } = selectRecommendedScenarioOptions(scoredOptions);
+  const recommendedMetrics =
+    scoredOptions.find((candidate) => candidate.option.capacityKwh === recommended?.capacityKwh)?.metrics ?? null;
+  const recommendedSpec = recommended ? getBatterySpecForCapacity(recommended.capacityKwh) : null;
+  const fallbackFlow = intervals.map((interval) => derivePvIntervalFlow(interval));
+  const kWhNeededRaw =
+    recommendedMetrics?.capturedExportEnergyKwh ??
+    Math.max(0, ...fallbackFlow.map((flow) => flow.surplusKwh));
+  const kWNeededRaw =
+    recommendedMetrics != null
+      ? Math.min(
+          recommendedMetrics.maxChargeKw,
+          Math.max(0, ...fallbackFlow.map((flow) => flow.surplusKwh / 0.25))
+        )
+      : Math.max(0, ...fallbackFlow.map((flow) => flow.surplusKwh / 0.25));
+  const kWhNeeded =
+    recommendedSpec?.capacityKwh ??
+    (settings.efficiency > 0 ? (kWhNeededRaw / settings.efficiency) * settings.safetyFactor : 0);
+  const kWNeeded = recommendedSpec?.maxDischargeKw ?? (kWNeededRaw * settings.safetyFactor);
+  const recommendedProduct = recommended ? buildBatteryProductFromScenarioOption(recommended) : null;
+  const alternativeProduct = alternative ? buildBatteryProductFromScenarioOption(alternative) : null;
 
   return {
     kWhNeededRaw,
@@ -523,7 +578,7 @@ export function computePvSizing(params: {
     kWNeeded,
     recommendedProduct,
     alternativeProduct,
-    noFeasibleBatteryByPower
+    noFeasibleBatteryByPower: false
   };
 }
 

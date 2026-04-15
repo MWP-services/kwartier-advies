@@ -35,6 +35,7 @@ export function ScenarioCharts({
   compliance
 }: ScenarioChartsProps) {
   const selected = scenarios.find((scenario) => scenario.capacityKwh === selectedScenarioCapacity) ?? scenarios[0];
+  const pvMode = scenarios[0]?.pvAnalysisMode ?? null;
   const gridAfterComplianceKwh = sizing.kWhNeededRaw;
   const gridBeforeComplianceKwh = compliance > 0 ? gridAfterComplianceKwh / compliance : gridAfterComplianceKwh;
   const batteryBeforeSafetyKwh = efficiency > 0 ? gridAfterComplianceKwh / efficiency : 0;
@@ -47,7 +48,9 @@ export function ScenarioCharts({
   ];
   const comparisonTitle =
     analysisType === 'PV_SELF_CONSUMPTION'
-      ? 'PV-export voor/na batterij'
+      ? pvMode === 'FULL_PV'
+        ? 'PV-export voor/na batterij'
+        : 'Teruglevering voor/na batterij'
       : 'Overschrijdingsenergie voor/na (datasetsimulatie)';
   const beforeKey = analysisType === 'PV_SELF_CONSUMPTION' ? 'exportedEnergyBeforeKwh' : 'exceedanceEnergyKwhBefore';
   const afterKey = analysisType === 'PV_SELF_CONSUMPTION' ? 'exportedEnergyAfterKwh' : 'exceedanceEnergyKwhAfter';
@@ -107,7 +110,9 @@ export function ScenarioCharts({
           <div>Veiligheidsfactor: {safetyFactor.toFixed(2)}x</div>
           <div>
             {analysisType === 'PV_SELF_CONSUMPTION'
-              ? 'Sizing is gebaseerd op PV-surplus, mismatchvermogen en batterijverliezen.'
+              ? pvMode === 'FULL_PV'
+                ? 'Sizing is gebaseerd op dezelfde 15-minuten PV-surplus simulatie als de scenariovergelijking.'
+                : 'Sizing is gebaseerd op dezelfde 15-minuten terugleversimulatie als de scenariovergelijking.'
               : 'Buffer + verliezen zijn verwerkt in de uiteindelijke benodigde kWh'}
           </div>
         </div>

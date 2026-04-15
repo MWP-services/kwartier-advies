@@ -80,32 +80,46 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
   const embeddedLogoSrc = getEmbeddedLogoSrc();
   const brochure = getRecommendedBrochureInfo(payload);
   const pvSummary = payload.pvSummary ?? {
+    mode: 'EXPORT_ONLY',
+    warnings: ['PV total and self-consumption ratio cannot be calculated without pv_kwh input.'],
     totalPvKwh: 0,
     totalConsumptionKwh: 0,
-    selfConsumptionBeforeKwh: 0,
-    selfConsumptionAfterKwh: 0,
+    selfConsumptionBeforeKwh: null,
+    selfConsumptionAfterKwh: null,
     importedBefore: 0,
     importedAfter: 0,
     exportBefore: 0,
     exportAfter: 0,
-    selfConsumptionRatio: 0,
-    selfSufficiency: 0,
+    capturedExportEnergyKwh: 0,
+    batteryUtilizationAgainstExport: 0,
+    selfConsumptionRatio: null,
+    selfSufficiency: null,
     exportReduction: 0
   };
   const scenarioChartData = payload.scenarios.map((scenario) => ({
     optionLabel: scenario.optionLabel,
     exportBefore: scenario.exportedEnergyBeforeKwh ?? 0,
     exportAfter: scenario.exportedEnergyAfterKwh ?? 0,
-    selfConsumption: (scenario.achievedSelfConsumption ?? 0) * 100,
-    selfSufficiency: (scenario.selfSufficiency ?? 0) * 100
+    selfConsumption: ((scenario.achievedSelfConsumption ?? 0) * 100),
+    selfSufficiency: ((scenario.selfSufficiency ?? 0) * 100),
+    captureUtilization: ((scenario.batteryUtilizationAgainstExport ?? 0) * 100)
   }));
-  const kpiCards = [
-    ['Totale PV-opwek', `${pvSummary.totalPvKwh.toFixed(2)} kWh`],
-    ['Zelfconsumptie', `${(pvSummary.selfConsumptionRatio * 100).toFixed(1)}%`],
-    ['Zelfvoorziening', `${(pvSummary.selfSufficiency * 100).toFixed(1)}%`],
-    ['Export voor batterij', `${pvSummary.exportBefore.toFixed(2)} kWh`],
-    ['Export na batterij', `${pvSummary.exportAfter.toFixed(2)} kWh`]
-  ];
+  const kpiCards =
+    pvSummary.mode === 'FULL_PV'
+      ? [
+          ['Totale PV-opwek', `${(pvSummary.totalPvKwh ?? 0).toFixed(2)} kWh`],
+          ['Zelfconsumptie', `${(((pvSummary.selfConsumptionRatio ?? 0) * 100)).toFixed(1)}%`],
+          ['Zelfvoorziening', `${(((pvSummary.selfSufficiency ?? 0) * 100)).toFixed(1)}%`],
+          ['Export voor batterij', `${pvSummary.exportBefore.toFixed(2)} kWh`],
+          ['Export na batterij', `${pvSummary.exportAfter.toFixed(2)} kWh`]
+        ]
+      : [
+          ['Export voor batterij', `${pvSummary.exportBefore.toFixed(2)} kWh`],
+          ['Export na batterij', `${pvSummary.exportAfter.toFixed(2)} kWh`],
+          ['Opgeslagen export', `${pvSummary.capturedExportEnergyKwh.toFixed(2)} kWh`],
+          ['Benutting exportoverschot', `${(pvSummary.batteryUtilizationAgainstExport * 100).toFixed(1)}%`],
+          ['Import na batterij', `${pvSummary.importedAfter.toFixed(2)} kWh`]
+        ];
 
   return `<!doctype html>
 <html lang="nl">
@@ -274,12 +288,21 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
             <tr><th>Benodigde capaciteit</th><td>${payload.sizing.kWhNeeded.toFixed(2)} kWh</td></tr>
             <tr><th>Benodigd vermogen</th><td>${payload.sizing.kWNeeded.toFixed(2)} kW</td></tr>
             <tr><th>Export voor/na batterij</th><td>${pvSummary.exportBefore.toFixed(2)} / ${pvSummary.exportAfter.toFixed(2)} kWh</td></tr>
-            <tr><th>Zelfconsumptie ratio</th><td>${(pvSummary.selfConsumptionRatio * 100).toFixed(1)}%</td></tr>
-            <tr><th>Zelfvoorziening</th><td>${(pvSummary.selfSufficiency * 100).toFixed(1)}%</td></tr>
+            ${
+              pvSummary.mode === 'FULL_PV'
+                ? `<tr><th>Zelfconsumptie ratio</th><td>${(((pvSummary.selfConsumptionRatio ?? 0) * 100)).toFixed(1)}%</td></tr>
+                   <tr><th>Zelfvoorziening</th><td>${(((pvSummary.selfSufficiency ?? 0) * 100)).toFixed(1)}%</td></tr>`
+                : `<tr><th>Opgeslagen export</th><td>${pvSummary.capturedExportEnergyKwh.toFixed(2)} kWh</td></tr>
+                   <tr><th>Benutting exportoverschot</th><td>${(pvSummary.batteryUtilizationAgainstExport * 100).toFixed(1)}%</td></tr>`
+            }
           </tbody>
         </table>
         <div class="callout">
-          De PV-batterij wordt gedimensioneerd op basis van PV-surplus, piekmismatch tussen opwek en load, en batterijverliezen.
+          ${
+            pvSummary.mode === 'FULL_PV'
+              ? 'De PV-batterij wordt gedimensioneerd op basis van PV-surplus, piekmismatch tussen opwek en load, en batterijverliezen.'
+              : 'De batterij wordt hier gedimensioneerd op basis van gemeten terugleveroverschot en batterijbeperkingen; totale PV-opwek blijft onbekend zonder pv_kwh.'
+          }
         </div>
       </div>
       <div class="card">
@@ -301,7 +324,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
         <div id="pv-export-chart" class="plot"></div>
       </div>
       <div class="card">
-        <h3>Self-consumption per scenario</h3>
+        <h3>${pvSummary.mode === 'FULL_PV' ? 'Self-consumption per scenario' : 'Benutting exportoverschot per scenario'}</h3>
         <div id="pv-self-chart" class="plot"></div>
       </div>
     </section>
@@ -311,12 +334,18 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
         <h3>PV kernmetrics</h3>
         <table>
           <tbody>
-            <tr><th>Totale PV-opwek</th><td>${pvSummary.totalPvKwh.toFixed(2)} kWh</td></tr>
             <tr><th>Totale load</th><td>${pvSummary.totalConsumptionKwh.toFixed(2)} kWh</td></tr>
-            <tr><th>Self-consumed voor batterij</th><td>${pvSummary.selfConsumptionBeforeKwh.toFixed(2)} kWh</td></tr>
-            <tr><th>Self-consumed na batterij</th><td>${pvSummary.selfConsumptionAfterKwh.toFixed(2)} kWh</td></tr>
             <tr><th>Import voor/na batterij</th><td>${pvSummary.importedBefore.toFixed(2)} / ${pvSummary.importedAfter.toFixed(2)} kWh</td></tr>
             <tr><th>Export reductie</th><td>${(pvSummary.exportReduction * 100).toFixed(1)}%</td></tr>
+            ${
+              pvSummary.mode === 'FULL_PV'
+                ? `<tr><th>Totale PV-opwek</th><td>${(pvSummary.totalPvKwh ?? 0).toFixed(2)} kWh</td></tr>
+                   <tr><th>Self-consumed voor batterij</th><td>${(pvSummary.selfConsumptionBeforeKwh ?? 0).toFixed(2)} kWh</td></tr>
+                   <tr><th>Self-consumed na batterij</th><td>${(pvSummary.selfConsumptionAfterKwh ?? 0).toFixed(2)} kWh</td></tr>`
+                : `<tr><th>Opgeslagen export</th><td>${pvSummary.capturedExportEnergyKwh.toFixed(2)} kWh</td></tr>
+                   <tr><th>Benutting exportoverschot</th><td>${(pvSummary.batteryUtilizationAgainstExport * 100).toFixed(1)}%</td></tr>
+                   <tr><th>Beperking</th><td>${pvSummary.warnings.join(' ')}</td></tr>`
+            }
           </tbody>
         </table>
       </div>
@@ -376,16 +405,16 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
     Plotly.newPlot('pv-self-chart', [
       {
         type: 'bar',
-        name: 'Zelfconsumptie',
+        name: '${pvSummary.mode === 'FULL_PV' ? 'Zelfconsumptie' : 'Benutting surplus'}',
         x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => d.selfConsumption),
+        y: scenarioData.map(d => ${pvSummary.mode === 'FULL_PV' ? 'd.selfConsumption' : 'd.captureUtilization'}),
         marker: {color: '#2563EB'}
       },
       {
         type: 'bar',
-        name: 'Zelfvoorziening',
+        name: '${pvSummary.mode === 'FULL_PV' ? 'Zelfvoorziening' : 'Exportreductie'}',
         x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => d.selfSufficiency),
+        y: scenarioData.map(d => ${pvSummary.mode === 'FULL_PV' ? 'd.selfSufficiency' : '((d.exportBefore > 0 ? ((d.exportBefore - d.exportAfter) / d.exportBefore) * 100 : 0))'}),
         marker: {color: '#7C3AED'}
       }
     ], {

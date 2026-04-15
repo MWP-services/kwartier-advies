@@ -14,6 +14,7 @@ export function DataQualityPanel({ diagnostics, quality }: DataQualityPanelProps
     diagnostics.interpretationRequested === 'AUTO'
       ? `AUTO -> ${diagnostics.interpretationUsed}`
       : diagnostics.interpretationUsed;
+  const seriesRows = Object.values(diagnostics.series ?? {}).filter(Boolean);
 
   return (
     <div className="wx-card">
@@ -31,6 +32,12 @@ export function DataQualityPanel({ diagnostics, quality }: DataQualityPanelProps
             : ''}
         </p>
         <p>Negatieve deltas: {diagnostics.negativeDeltaCount}</p>
+        {seriesRows.map((seriesDiagnostic) => (
+          <p key={seriesDiagnostic.series}>
+            {seriesDiagnostic.series}: {seriesDiagnostic.interpretationUsed}, negatieve deltas {seriesDiagnostic.negativeDeltaCount},
+            outliers {seriesDiagnostic.outlierCount}
+          </p>
+        ))}
       </div>
     </div>
   );

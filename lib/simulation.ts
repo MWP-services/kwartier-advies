@@ -1,17 +1,29 @@
-import { BATTERY_OPTIONS, derivePvIntervalFlow, type ProcessedInterval } from './calculations';
+import { BATTERY_OPTIONS, type ProcessedInterval } from './calculations';
 import { getBatterySpecForCapacity } from './batterySpecs';
 import { getLocalDayIso } from './datetime';
+import {
+  generateScenarioOptions,
+  simulatePvBattery,
+  type PvAnalysisMode,
+  type PvSimulationConfig,
+} from './pvSimulation';
+
+export { generateNearbyModularOptions, generateScenarioOptions } from './pvSimulation';
 
 export interface SimulationConfig {
   powerCapKw?: number;
   initialSocRatio?: number;
   // Use the sizing efficiency directly as battery-side -> grid-side discharge efficiency.
   dischargeEfficiency?: number;
+  reserveEnergyForTradingKwh?: number;
+  reserveEmptyCapacityForTradingKwh?: number;
 }
 
 export interface ScenarioResult {
   optionLabel: string;
   capacityKwh: number;
+  pvAnalysisMode?: PvAnalysisMode;
+  limitations?: string[];
   exceedanceIntervalsBefore: number;
   exceedanceIntervalsAfter: number;
   exceedanceEnergyKwhBefore: number;
@@ -24,151 +36,38 @@ export interface ScenarioResult {
   maxDischargeKw: number;
   endingSocKwh: number;
   shavedSeries: { timestamp: string; originalKw: number; shavedKw: number }[];
-  totalPvKwh?: number;
+  totalPvKwh?: number | null;
   totalConsumptionKwh?: number;
-  selfConsumptionBeforeKwh?: number;
-  selfConsumptionAfterKwh?: number;
+  selfConsumptionBeforeKwh?: number | null;
+  selfConsumptionAfterKwh?: number | null;
   importedEnergyBeforeKwh?: number;
   importedEnergyAfterKwh?: number;
   exportedEnergyBeforeKwh?: number;
   exportedEnergyAfterKwh?: number;
-  achievedSelfConsumption?: number;
-  selfSufficiency?: number;
+  capturedExportEnergyKwh?: number;
+  batteryUtilizationAgainstExport?: number;
+  achievedSelfConsumption?: number | null;
+  selfSufficiency?: number | null;
   exportReduction?: number;
   socSeries?: { timestamp: string; socKwh: number }[];
-  // Nieuwe metrics voor economische analyse
-  levelizedCostOfEnergy?: number; // LCOE in €/kWh
-  paybackPeriodYears?: number; // Terugverdientijd in jaren
-  netPresentValue?: number; // NPV in €
-  internalRateOfReturn?: number; // IRR in %
 }
 
 export interface PvSummary {
-  totalPvKwh: number;
+  mode: PvAnalysisMode;
+  warnings: string[];
+  totalPvKwh: number | null;
   totalConsumptionKwh: number;
-  selfConsumptionBeforeKwh: number;
-  selfConsumptionAfterKwh: number;
+  selfConsumptionBeforeKwh: number | null;
+  selfConsumptionAfterKwh: number | null;
   importedBefore: number;
   importedAfter: number;
   exportBefore: number;
   exportAfter: number;
-  selfConsumptionRatio: number;
-  selfSufficiency: number;
+  capturedExportEnergyKwh: number;
+  batteryUtilizationAgainstExport: number;
+  selfConsumptionRatio: number | null;
+  selfSufficiency: number | null;
   exportReduction: number;
-  levelizedCostOfEnergy?: number;
-  paybackPeriodYears?: number;
-  netPresentValue?: number;
-  internalRateOfReturn?: number;
-}
-
-export interface ScenarioOption {
-  capacityKwh: number;
-  label: string;
-  modular?: {
-    baseSize: number;
-    count: number;
-  };
-}
-
-const MODULAR_BASE_SIZES = [64, 96, 261];
-const FIXED_SCENARIO_OPTIONS: ScenarioOption[] = [
-  { capacityKwh: 64, label: '64 kWh' },
-  { capacityKwh: 96, label: '96 kWh' },
-  { capacityKwh: 261, label: '261 kWh' },
-  { capacityKwh: 2090, label: '2.09 MWh (2090 kWh)' },
-  { capacityKwh: 5015, label: '5.015 MWh (5015 kWh)' }
-];
-
-export function generateNearbyModularOptions(params: {
-  baseSize: number;
-  targetKwh: number;
-  maxOptionsPerBase?: number;
-}): ScenarioOption[] {
-  const { baseSize, targetKwh, maxOptionsPerBase = 4 } = params;
-  const nCenter = targetKwh / baseSize;
-  const n0 = Math.floor(nCenter);
-  const n1 = Math.ceil(nCenter);
-  const nCandidates = [n0 - 2, n0 - 1, n0, n1, n1 + 1, n1 + 2].filter((n) => n >= 1);
-  const uniqueCounts = Array.from(new Set(nCandidates));
-
-  return uniqueCounts
-    .map((count) => {
-      const capacityKwh = count * baseSize;
-      return {
-        capacityKwh,
-        label: `${count}x${baseSize} (${capacityKwh} kWh)`,
-        modular: { baseSize, count }
-      };
-    })
-    .sort(
-      (a, b) =>
-        Math.abs(a.capacityKwh - targetKwh) - Math.abs(b.capacityKwh - targetKwh) ||
-        (a.capacityKwh - targetKwh) - (b.capacityKwh - targetKwh) ||
-        a.capacityKwh - b.capacityKwh
-    )
-    .slice(0, maxOptionsPerBase);
-}
-
-export function generateScenarioOptions(params: {
-  targetKwh: number;
-  maxOptionsPerBase?: number;
-  maxTotalOptions?: number;
-}): ScenarioOption[] {
-  const { targetKwh, maxOptionsPerBase = 3, maxTotalOptions = 10 } = params;
-
-  const modularOptions = MODULAR_BASE_SIZES.flatMap((baseSize) =>
-    generateNearbyModularOptions({ baseSize, targetKwh, maxOptionsPerBase })
-  );
-  const combined = [...modularOptions, ...FIXED_SCENARIO_OPTIONS];
-  const deduped = new Map<number, ScenarioOption>();
-  combined.forEach((option) => {
-    if (!deduped.has(option.capacityKwh)) {
-      deduped.set(option.capacityKwh, option);
-    }
-  });
-
-  const allOptions = Array.from(deduped.values());
-  if (allOptions.length <= maxTotalOptions) {
-    return allOptions.sort((a, b) => a.capacityKwh - b.capacityKwh);
-  }
-
-  const relevanceSort = (a: ScenarioOption, b: ScenarioOption) =>
-    Math.abs(a.capacityKwh - targetKwh) - Math.abs(b.capacityKwh - targetKwh) ||
-    (a.capacityKwh - targetKwh) - (b.capacityKwh - targetKwh) ||
-    a.capacityKwh - b.capacityKwh;
-
-  const selected = new Map<number, ScenarioOption>();
-  const alwaysIncludeCapacities = [2090, 5015];
-  alwaysIncludeCapacities.forEach((capacity) => {
-    const option = allOptions.find((candidate) => candidate.capacityKwh === capacity);
-    if (option) selected.set(option.capacityKwh, option);
-  });
-
-  MODULAR_BASE_SIZES.forEach((baseSize) => {
-    const optionsForBase = allOptions
-      .filter((option) => option.capacityKwh % baseSize === 0)
-      .sort((a, b) => a.capacityKwh - b.capacityKwh);
-
-    const closestPerBase = [...optionsForBase].sort(relevanceSort)[0];
-    if (closestPerBase) selected.set(closestPerBase.capacityKwh, closestPerBase);
-
-    // Also include one smaller and one larger option per base so charts show impact progression.
-    const belowTarget = [...optionsForBase].reverse().find((option) => option.capacityKwh < targetKwh);
-    const aboveTarget = optionsForBase.find((option) => option.capacityKwh > targetKwh);
-    if (belowTarget) selected.set(belowTarget.capacityKwh, belowTarget);
-    if (aboveTarget) selected.set(aboveTarget.capacityKwh, aboveTarget);
-  });
-
-  allOptions
-    .sort(relevanceSort)
-    .forEach((option) => {
-      if (selected.size >= maxTotalOptions) return;
-      selected.set(option.capacityKwh, option);
-    });
-
-  return Array.from(selected.values())
-    .slice(0, maxTotalOptions)
-    .sort((a, b) => a.capacityKwh - b.capacityKwh);
 }
 
 export function simulateSingleScenario(
@@ -295,146 +194,86 @@ export function simulateAllScenarios(
   );
 }
 
+export function findHighestPeakDay(intervals: ProcessedInterval[]): string | null {
+  if (intervals.length === 0) return null;
+
+  const dailyPeakKw = new Map<string, number>();
+
+  intervals.forEach((interval) => {
+    const day = getLocalDayIso(interval.timestamp, 'Europe/Amsterdam');
+    const currentPeakKw = dailyPeakKw.get(day) ?? 0;
+    dailyPeakKw.set(day, Math.max(currentPeakKw, interval.consumptionKw));
+  });
+
+  let highestPeakDay: string | null = null;
+  let highestPeakKw = -Infinity;
+
+  dailyPeakKw.forEach((peakKw, day) => {
+    if (peakKw > highestPeakKw) {
+      highestPeakKw = peakKw;
+      highestPeakDay = day;
+    }
+  });
+
+  return highestPeakDay;
+}
+
 export function simulatePvScenario(
   intervals: ProcessedInterval[],
   batteryCapacityKwh: number,
-  config?: SimulationConfig,
+  config?: PvSimulationConfig,
   optionLabel?: string
 ): ScenarioResult {
-  const initialSocRatio = config?.initialSocRatio ?? 0;
-  const spec = getBatterySpecForCapacity(batteryCapacityKwh);
-  const hasDischargeEfficiencyOverride = config?.dischargeEfficiency != null;
-  const dischargeEff = hasDischargeEfficiencyOverride
-    ? Math.max(0, Math.min(1, config?.dischargeEfficiency ?? 1))
-    : Math.sqrt(spec.roundTripEfficiency);
-  const chargeEff = hasDischargeEfficiencyOverride ? 1 : Math.sqrt(spec.roundTripEfficiency);
-  const intervalHours = 0.25;
-
-  let soc = spec.capacityKwh * initialSocRatio;
-  let exportedEnergyBeforeKwh = 0;
-  let exportedEnergyAfterKwh = 0;
-  let importedEnergyBeforeKwh = 0;
-  let importedEnergyAfterKwh = 0;
-  let selfConsumptionBeforeKwh = 0;
-  let selfConsumptionAfterKwh = 0;
-  let totalPvKwh = 0;
-  let totalConsumptionKwh = 0;
-  let exportIntervalsBefore = 0;
-  let exportIntervalsAfter = 0;
-  let maxRemainingExportKw = 0;
-  const socSeries: { timestamp: string; socKwh: number }[] = [];
-
-  intervals.forEach((interval) => {
-    const flow = derivePvIntervalFlow(interval);
-    const pvKwh = Math.max(0, interval.pvKwh ?? 0);
-    const consumptionKwh = Math.max(0, interval.consumptionKwh ?? 0);
-    const maxChargeKwh = spec.maxChargeKw * intervalHours;
-    const maxDischargeKwh = spec.maxDischargeKw * intervalHours;
-
-    totalPvKwh += pvKwh;
-    totalConsumptionKwh += consumptionKwh;
-    selfConsumptionBeforeKwh += flow.directSelfConsumptionKwh;
-    importedEnergyBeforeKwh += flow.loadDeficitKwh;
-    exportedEnergyBeforeKwh += flow.surplusKwh;
-    if (flow.surplusKwh > 0) {
-      exportIntervalsBefore += 1;
-    }
-
-    const remainingCapacityKwh = Math.max(0, spec.capacityKwh - soc);
-    const chargeInputLimitKwh = chargeEff > 0 ? remainingCapacityKwh / chargeEff : 0;
-    const chargeFromPvKwh = Math.min(flow.surplusKwh, maxChargeKwh, chargeInputLimitKwh);
-    soc = Math.min(spec.capacityKwh, soc + chargeFromPvKwh * chargeEff);
-
-    const batteryDeliverableKwh = Math.min(maxDischargeKwh, soc * dischargeEff);
-    const dischargeToLoadKwh = Math.min(flow.loadDeficitKwh, batteryDeliverableKwh);
-    if (dischargeEff > 0) {
-      soc = Math.max(0, soc - dischargeToLoadKwh / dischargeEff);
-    }
-
-    importedEnergyAfterKwh += Math.max(0, flow.loadDeficitKwh - dischargeToLoadKwh);
-    const exportedAfterKwh = Math.max(0, flow.surplusKwh - chargeFromPvKwh);
-    exportedEnergyAfterKwh += exportedAfterKwh;
-    if (exportedAfterKwh > 0) {
-      exportIntervalsAfter += 1;
-    }
-    maxRemainingExportKw = Math.max(maxRemainingExportKw, exportedAfterKwh / intervalHours);
-    selfConsumptionAfterKwh += flow.directSelfConsumptionKwh + dischargeToLoadKwh;
-    socSeries.push({ timestamp: interval.timestamp, socKwh: soc });
-  });
-
-  const achievedSelfConsumption = totalPvKwh > 0 ? selfConsumptionAfterKwh / totalPvKwh : 0;
-  const selfSufficiency = totalConsumptionKwh > 0 ? selfConsumptionAfterKwh / totalConsumptionKwh : 0;
-  const exportReduction =
-    exportedEnergyBeforeKwh > 0 ? (exportedEnergyBeforeKwh - exportedEnergyAfterKwh) / exportedEnergyBeforeKwh : 0;
-
-  const economicMetrics = calculateEconomicMetrics({
-    optionLabel: optionLabel ?? BATTERY_OPTIONS.find((b) => b.capacityKwh === batteryCapacityKwh)?.label ?? `${batteryCapacityKwh} kWh`,
-    capacityKwh: batteryCapacityKwh,
-    exceedanceIntervalsBefore: exportIntervalsBefore,
-    exceedanceIntervalsAfter: exportIntervalsAfter,
-    exceedanceEnergyKwhBefore: exportedEnergyBeforeKwh,
-    exceedanceEnergyKwhAfter: exportedEnergyAfterKwh,
-    achievedComplianceDataset: achievedSelfConsumption,
-    achievedComplianceDailyAverage: selfSufficiency,
-    achievedCompliance: achievedSelfConsumption,
-    maxRemainingExcessKw: maxRemainingExportKw,
-    maxChargeKw: spec.maxChargeKw,
-    maxDischargeKw: spec.maxDischargeKw,
-    endingSocKwh: soc,
-    shavedSeries: [],
-    totalPvKwh,
-    totalConsumptionKwh,
-    selfConsumptionBeforeKwh,
-    selfConsumptionAfterKwh,
-    importedEnergyBeforeKwh,
-    importedEnergyAfterKwh,
-    exportedEnergyBeforeKwh,
-    exportedEnergyAfterKwh,
-    achievedSelfConsumption,
-    selfSufficiency,
-    exportReduction,
-    socSeries
-  });
+  const metrics = simulatePvBattery(intervals, batteryCapacityKwh, config);
 
   return {
     optionLabel:
       optionLabel ?? BATTERY_OPTIONS.find((b) => b.capacityKwh === batteryCapacityKwh)?.label ?? `${batteryCapacityKwh} kWh`,
     capacityKwh: batteryCapacityKwh,
-    exceedanceIntervalsBefore: exportIntervalsBefore,
-    exceedanceIntervalsAfter: exportIntervalsAfter,
-    exceedanceEnergyKwhBefore: exportedEnergyBeforeKwh,
-    exceedanceEnergyKwhAfter: exportedEnergyAfterKwh,
-    achievedComplianceDataset: achievedSelfConsumption,
-    achievedComplianceDailyAverage: selfSufficiency,
-    achievedCompliance: achievedSelfConsumption,
-    maxRemainingExcessKw: maxRemainingExportKw,
-    maxChargeKw: spec.maxChargeKw,
-    maxDischargeKw: spec.maxDischargeKw,
-    endingSocKwh: soc,
+    pvAnalysisMode: metrics.mode,
+    limitations: metrics.limitations,
+    exceedanceIntervalsBefore: metrics.exportIntervalsBefore,
+    exceedanceIntervalsAfter: metrics.exportIntervalsAfter,
+    exceedanceEnergyKwhBefore: metrics.exportedEnergyBeforeKwh,
+    exceedanceEnergyKwhAfter: metrics.exportedEnergyAfterKwh,
+    achievedComplianceDataset:
+      metrics.mode === 'FULL_PV'
+        ? metrics.selfConsumptionRatio ?? metrics.exportReduction
+        : metrics.batteryUtilizationAgainstExport,
+    achievedComplianceDailyAverage:
+      metrics.mode === 'FULL_PV'
+        ? metrics.selfSufficiency ?? metrics.exportReduction
+        : metrics.exportReduction,
+    achievedCompliance:
+      metrics.mode === 'FULL_PV'
+        ? metrics.selfConsumptionRatio ?? metrics.exportReduction
+        : metrics.batteryUtilizationAgainstExport,
+    maxRemainingExcessKw: metrics.maxRemainingExportKw,
+    maxChargeKw: metrics.maxChargeKw,
+    maxDischargeKw: metrics.maxDischargeKw,
+    endingSocKwh: metrics.endingSocKwh,
     shavedSeries: [],
-    totalPvKwh,
-    totalConsumptionKwh,
-    selfConsumptionBeforeKwh,
-    selfConsumptionAfterKwh,
-    importedEnergyBeforeKwh,
-    importedEnergyAfterKwh,
-    exportedEnergyBeforeKwh,
-    exportedEnergyAfterKwh,
-    achievedSelfConsumption,
-    selfSufficiency,
-    exportReduction,
-    socSeries,
-    levelizedCostOfEnergy: economicMetrics.levelizedCostOfEnergy,
-    paybackPeriodYears: economicMetrics.paybackPeriodYears,
-    netPresentValue: economicMetrics.netPresentValue,
-    internalRateOfReturn: economicMetrics.internalRateOfReturn
+    totalPvKwh: metrics.totalPvKwh,
+    totalConsumptionKwh: metrics.totalConsumptionKwh,
+    selfConsumptionBeforeKwh: metrics.directSelfConsumptionBeforeKwh,
+    selfConsumptionAfterKwh: metrics.selfConsumptionAfterKwh,
+    importedEnergyBeforeKwh: metrics.importedEnergyBeforeKwh,
+    importedEnergyAfterKwh: metrics.importedEnergyAfterKwh,
+    exportedEnergyBeforeKwh: metrics.exportedEnergyBeforeKwh,
+    exportedEnergyAfterKwh: metrics.exportedEnergyAfterKwh,
+    capturedExportEnergyKwh: metrics.capturedExportEnergyKwh,
+    batteryUtilizationAgainstExport: metrics.batteryUtilizationAgainstExport,
+    achievedSelfConsumption: metrics.selfConsumptionRatio,
+    selfSufficiency: metrics.selfSufficiency,
+    exportReduction: metrics.exportReduction,
+    socSeries: metrics.socSeries
   };
 }
 
 export function simulateAllPvScenarios(
   intervals: ProcessedInterval[],
-  targetKwhOrConfig?: number | SimulationConfig,
-  config?: SimulationConfig
+  targetKwhOrConfig?: number | PvSimulationConfig,
+  config?: PvSimulationConfig
 ): ScenarioResult[] {
   const fallbackTargetKwh = Math.max(
     64,
@@ -450,70 +289,22 @@ export function buildPvSummaryFromScenario(scenario: ScenarioResult | null): PvS
   if (!scenario) return null;
 
   return {
-    totalPvKwh: scenario.totalPvKwh ?? 0,
+    mode: scenario.pvAnalysisMode ?? 'EXPORT_ONLY',
+    warnings: scenario.limitations ?? [],
+    totalPvKwh: scenario.totalPvKwh ?? null,
     totalConsumptionKwh: scenario.totalConsumptionKwh ?? 0,
-    selfConsumptionBeforeKwh: scenario.selfConsumptionBeforeKwh ?? 0,
-    selfConsumptionAfterKwh: scenario.selfConsumptionAfterKwh ?? 0,
+    selfConsumptionBeforeKwh: scenario.selfConsumptionBeforeKwh ?? null,
+    selfConsumptionAfterKwh: scenario.selfConsumptionAfterKwh ?? null,
     importedBefore: scenario.importedEnergyBeforeKwh ?? 0,
     importedAfter: scenario.importedEnergyAfterKwh ?? 0,
     exportBefore: scenario.exportedEnergyBeforeKwh ?? 0,
     exportAfter: scenario.exportedEnergyAfterKwh ?? 0,
-    selfConsumptionRatio: scenario.achievedSelfConsumption ?? 0,
-    selfSufficiency: scenario.selfSufficiency ?? 0,
-    exportReduction: scenario.exportReduction ?? 0,
-    levelizedCostOfEnergy: scenario.levelizedCostOfEnergy,
-    paybackPeriodYears: scenario.paybackPeriodYears,
-    netPresentValue: scenario.netPresentValue,
-    internalRateOfReturn: scenario.internalRateOfReturn
+    capturedExportEnergyKwh: scenario.capturedExportEnergyKwh ?? 0,
+    batteryUtilizationAgainstExport: scenario.batteryUtilizationAgainstExport ?? 0,
+    selfConsumptionRatio: scenario.achievedSelfConsumption ?? null,
+    selfSufficiency: scenario.selfSufficiency ?? null,
+    exportReduction: scenario.exportReduction ?? 0
   };
 }
 
-export function calculateEconomicMetrics(
-  scenario: ScenarioResult,
-  electricityPriceEurPerKwh: number = 0.25, // Default €0.25/kWh
-  feedInTariffEurPerKwh: number = 0.10, // Default €0.10/kWh
-  projectLifetimeYears: number = 10,
-  discountRate: number = 0.05
-): {
-  levelizedCostOfEnergy: number;
-  paybackPeriodYears: number;
-  netPresentValue: number;
-  internalRateOfReturn: number;
-} {
-  const batteryProduct = BATTERY_OPTIONS.find(b => b.capacityKwh === scenario.capacityKwh);
-  if (!batteryProduct || !batteryProduct.totalPriceEur) {
-    return {
-      levelizedCostOfEnergy: 0,
-      paybackPeriodYears: 0,
-      netPresentValue: 0,
-      internalRateOfReturn: 0
-    };
-  }
 
-  const initialInvestment = batteryProduct.totalPriceEur;
-  const annualSavings = (scenario.importedEnergyBeforeKwh ?? 0) - (scenario.importedEnergyAfterKwh ?? 0) * electricityPriceEurPerKwh +
-                       ((scenario.exportedEnergyBeforeKwh ?? 0) - (scenario.exportedEnergyAfterKwh ?? 0)) * feedInTariffEurPerKwh;
-
-  // LCOE = Initial Investment / Total Energy Saved over lifetime
-  const totalEnergySaved = annualSavings * projectLifetimeYears;
-  const levelizedCostOfEnergy = totalEnergySaved > 0 ? initialInvestment / totalEnergySaved : 0;
-
-  // Payback period
-  const paybackPeriodYears = annualSavings > 0 ? initialInvestment / annualSavings : 0;
-
-  // NPV
-  let netPresentValue = -initialInvestment;
-  for (let year = 1; year <= projectLifetimeYears; year++) {
-    netPresentValue += annualSavings / Math.pow(1 + discountRate, year);
-  }
-
-  // IRR (vereenvoudigde berekening)
-  const internalRateOfReturn = annualSavings > 0 ? (annualSavings / initialInvestment) * 100 : 0;
-
-  return {
-    levelizedCostOfEnergy,
-    paybackPeriodYears,
-    netPresentValue,
-    internalRateOfReturn
-  };
-}

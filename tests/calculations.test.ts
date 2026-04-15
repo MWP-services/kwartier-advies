@@ -105,6 +105,26 @@ describe('calculations', () => {
     expect(result.kWNeededRaw).toBeCloseTo(48, 5);
   });
 
+  it('recommends modular PV options from simulated outcomes and keeps a larger alternative', () => {
+    const pvRows = Array.from({ length: 8 }, (_, idx) => ({
+      timestamp: new Date(Date.UTC(2024, 0, 1, 10, idx * 15)).toISOString(),
+      consumptionKwh: idx < 4 ? 5 : 18,
+      pvKwh: idx < 4 ? 22 : 2
+    }));
+    const intervals = processIntervals(pvRows, 500);
+    const result = computePvSizing({
+      intervals,
+      settings: { compliance: 0.95, safetyFactor: 1.2, efficiency: 0.9 }
+    });
+
+    expect(result.recommendedProduct?.capacityKwh).toBeGreaterThanOrEqual(64);
+    expect([64, 96, 128, 192, 261, 522, 2090, 5015]).toContain(result.recommendedProduct?.capacityKwh);
+    expect(
+      result.alternativeProduct == null ||
+      result.alternativeProduct.capacityKwh > (result.recommendedProduct?.capacityKwh ?? 0)
+    ).toBe(true);
+  });
+
   it('selects earliest timestamp when max observed kW ties', () => {
     const tieRows = [
       { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 200 },

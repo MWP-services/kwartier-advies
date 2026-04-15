@@ -38,14 +38,40 @@ export function parseXlsx(arrayBuffer: ArrayBuffer): ParseResult {
 }
 
 function normalizeHeader(header: string): string {
-  return header.trim().toLowerCase();
+  return header
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '');
 }
 
 export function autoDetectColumns(headers: string[]): ColumnMapping | null {
   const lookup = new Map(headers.map((header) => [normalizeHeader(header), header]));
-  const timestamp = lookup.get('timestamp') ?? lookup.get('date') ?? lookup.get('datetime');
-  const consumptionKwh =
-    lookup.get('consumption_kwh') ?? lookup.get('consumption') ?? lookup.get('load_kwh');
+  const findHeader = (candidates: string[]): string | undefined =>
+    candidates.map((candidate) => lookup.get(normalizeHeader(candidate))).find((value) => value != null);
+
+  const timestamp = findHeader([
+    'timestamp',
+    'datetime',
+    'date',
+    'tijdstip',
+    'tijd',
+    'datum',
+    'date_time',
+    'meter_datetime'
+  ]);
+  const consumptionKwh = findHeader([
+    'consumption_kwh',
+    'verbruik_kwh',
+    'afname_kwh',
+    'load_kwh',
+    'consumption',
+    'verbruik',
+    'import_kwh',
+    'afname',
+    'load'
+  ]);
 
   if (!timestamp || !consumptionKwh) {
     return null;
@@ -54,9 +80,43 @@ export function autoDetectColumns(headers: string[]): ColumnMapping | null {
   return {
     timestamp,
     consumptionKwh,
-    exportKwh: lookup.get('export_kwh'),
-    pvKwh: lookup.get('pv_kwh')
+    exportKwh: findHeader([
+      'export_kwh',
+      'teruglevering_kwh',
+      'injectie_kwh',
+      'export',
+      'teruglever_kwh',
+      'teruglevering',
+      'injectie'
+    ]),
+    pvKwh: findHeader([
+      'pv_kwh',
+      'opwek_kwh',
+      'productie_kwh',
+      'solar_kwh',
+      'pv',
+      'generation_kwh',
+      'opbrengst_kwh',
+      'opwek',
+      'productie'
+    ])
   };
+}
+
+function parseNumericCell(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value !== 'string') return Number(value);
+
+  const trimmed = value.trim();
+  if (!trimmed) return Number.NaN;
+
+  const normalized = trimmed
+    .replace(/\s/g, '')
+    .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+    .replace(/,(?=\d{3}(?:\D|$))/g, '')
+    .replace(',', '.');
+
+  return Number(normalized);
 }
 
 export function mapRows(rows: Record<string, unknown>[], mapping: ColumnMapping): IntervalRecord[] {
@@ -69,17 +129,20 @@ export function mapRows(rows: Record<string, unknown>[], mapping: ColumnMapping)
     const pvRaw = mapping.pvKwh ? row[mapping.pvKwh] : undefined;
 
     const timestamp = parseTimestamp(timestampRaw);
-    const consumptionKwh = Number(consumptionRaw);
+    const consumptionKwh = parseNumericCell(consumptionRaw);
 
     if (Number.isNaN(timestamp.getTime()) || Number.isNaN(consumptionKwh)) {
       return;
     }
 
+    const parsedExport = exportRaw == null ? undefined : parseNumericCell(exportRaw);
+    const parsedPv = pvRaw == null ? undefined : parseNumericCell(pvRaw);
+
     mapped.push({
       timestamp: timestamp.toISOString(),
       consumptionKwh,
-      exportKwh: exportRaw == null ? undefined : Number(exportRaw),
-      pvKwh: pvRaw == null ? undefined : Number(pvRaw)
+      exportKwh: Number.isNaN(parsedExport) ? undefined : parsedExport,
+      pvKwh: Number.isNaN(parsedPv) ? undefined : parsedPv
     });
   });
 
