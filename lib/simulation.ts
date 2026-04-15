@@ -1,4 +1,4 @@
-import { BATTERY_OPTIONS, type ProcessedInterval } from './calculations';
+import { BATTERY_OPTIONS, derivePvIntervalFlow, type ProcessedInterval } from './calculations';
 import { getBatterySpecForCapacity } from './batterySpecs';
 import { getLocalDayIso } from './datetime';
 
@@ -24,6 +24,32 @@ export interface ScenarioResult {
   maxDischargeKw: number;
   endingSocKwh: number;
   shavedSeries: { timestamp: string; originalKw: number; shavedKw: number }[];
+  totalPvKwh?: number;
+  totalConsumptionKwh?: number;
+  selfConsumptionBeforeKwh?: number;
+  selfConsumptionAfterKwh?: number;
+  importedEnergyBeforeKwh?: number;
+  importedEnergyAfterKwh?: number;
+  exportedEnergyBeforeKwh?: number;
+  exportedEnergyAfterKwh?: number;
+  achievedSelfConsumption?: number;
+  selfSufficiency?: number;
+  exportReduction?: number;
+  socSeries?: { timestamp: string; socKwh: number }[];
+}
+
+export interface PvSummary {
+  totalPvKwh: number;
+  totalConsumptionKwh: number;
+  selfConsumptionBeforeKwh: number;
+  selfConsumptionAfterKwh: number;
+  importedBefore: number;
+  importedAfter: number;
+  exportBefore: number;
+  exportAfter: number;
+  selfConsumptionRatio: number;
+  selfSufficiency: number;
+  exportReduction: number;
 }
 
 export interface ScenarioOption {
@@ -258,6 +284,142 @@ export function simulateAllScenarios(
   return options.map((option) =>
     simulateSingleScenario(intervals, option.capacityKwh, sizingKwNeeded, maxExcessKw, effectiveConfig, option.label)
   );
+}
+
+export function simulatePvScenario(
+  intervals: ProcessedInterval[],
+  batteryCapacityKwh: number,
+  config?: SimulationConfig,
+  optionLabel?: string
+): ScenarioResult {
+  const initialSocRatio = config?.initialSocRatio ?? 0;
+  const spec = getBatterySpecForCapacity(batteryCapacityKwh);
+  const hasDischargeEfficiencyOverride = config?.dischargeEfficiency != null;
+  const dischargeEff = hasDischargeEfficiencyOverride
+    ? Math.max(0, Math.min(1, config?.dischargeEfficiency ?? 1))
+    : Math.sqrt(spec.roundTripEfficiency);
+  const chargeEff = hasDischargeEfficiencyOverride ? 1 : Math.sqrt(spec.roundTripEfficiency);
+  const intervalHours = 0.25;
+
+  let soc = spec.capacityKwh * initialSocRatio;
+  let exportedEnergyBeforeKwh = 0;
+  let exportedEnergyAfterKwh = 0;
+  let importedEnergyBeforeKwh = 0;
+  let importedEnergyAfterKwh = 0;
+  let selfConsumptionBeforeKwh = 0;
+  let selfConsumptionAfterKwh = 0;
+  let totalPvKwh = 0;
+  let totalConsumptionKwh = 0;
+  let exportIntervalsBefore = 0;
+  let exportIntervalsAfter = 0;
+  let maxRemainingExportKw = 0;
+  const socSeries: { timestamp: string; socKwh: number }[] = [];
+
+  intervals.forEach((interval) => {
+    const flow = derivePvIntervalFlow(interval);
+    const pvKwh = Math.max(0, interval.pvKwh ?? 0);
+    const consumptionKwh = Math.max(0, interval.consumptionKwh ?? 0);
+    const maxChargeKwh = spec.maxChargeKw * intervalHours;
+    const maxDischargeKwh = spec.maxDischargeKw * intervalHours;
+
+    totalPvKwh += pvKwh;
+    totalConsumptionKwh += consumptionKwh;
+    selfConsumptionBeforeKwh += flow.directSelfConsumptionKwh;
+    importedEnergyBeforeKwh += flow.loadDeficitKwh;
+    exportedEnergyBeforeKwh += flow.surplusKwh;
+    if (flow.surplusKwh > 0) {
+      exportIntervalsBefore += 1;
+    }
+
+    const remainingCapacityKwh = Math.max(0, spec.capacityKwh - soc);
+    const chargeInputLimitKwh = chargeEff > 0 ? remainingCapacityKwh / chargeEff : 0;
+    const chargeFromPvKwh = Math.min(flow.surplusKwh, maxChargeKwh, chargeInputLimitKwh);
+    soc = Math.min(spec.capacityKwh, soc + chargeFromPvKwh * chargeEff);
+
+    const batteryDeliverableKwh = Math.min(maxDischargeKwh, soc * dischargeEff);
+    const dischargeToLoadKwh = Math.min(flow.loadDeficitKwh, batteryDeliverableKwh);
+    if (dischargeEff > 0) {
+      soc = Math.max(0, soc - dischargeToLoadKwh / dischargeEff);
+    }
+
+    importedEnergyAfterKwh += Math.max(0, flow.loadDeficitKwh - dischargeToLoadKwh);
+    const exportedAfterKwh = Math.max(0, flow.surplusKwh - chargeFromPvKwh);
+    exportedEnergyAfterKwh += exportedAfterKwh;
+    if (exportedAfterKwh > 0) {
+      exportIntervalsAfter += 1;
+    }
+    maxRemainingExportKw = Math.max(maxRemainingExportKw, exportedAfterKwh / intervalHours);
+    selfConsumptionAfterKwh += flow.directSelfConsumptionKwh + dischargeToLoadKwh;
+    socSeries.push({ timestamp: interval.timestamp, socKwh: soc });
+  });
+
+  const achievedSelfConsumption = totalPvKwh > 0 ? selfConsumptionAfterKwh / totalPvKwh : 0;
+  const selfSufficiency = totalConsumptionKwh > 0 ? selfConsumptionAfterKwh / totalConsumptionKwh : 0;
+  const exportReduction =
+    exportedEnergyBeforeKwh > 0 ? (exportedEnergyBeforeKwh - exportedEnergyAfterKwh) / exportedEnergyBeforeKwh : 0;
+
+  return {
+    optionLabel:
+      optionLabel ?? BATTERY_OPTIONS.find((b) => b.capacityKwh === batteryCapacityKwh)?.label ?? `${batteryCapacityKwh} kWh`,
+    capacityKwh: batteryCapacityKwh,
+    exceedanceIntervalsBefore: exportIntervalsBefore,
+    exceedanceIntervalsAfter: exportIntervalsAfter,
+    exceedanceEnergyKwhBefore: exportedEnergyBeforeKwh,
+    exceedanceEnergyKwhAfter: exportedEnergyAfterKwh,
+    achievedComplianceDataset: achievedSelfConsumption,
+    achievedComplianceDailyAverage: selfSufficiency,
+    achievedCompliance: achievedSelfConsumption,
+    maxRemainingExcessKw: maxRemainingExportKw,
+    maxChargeKw: spec.maxChargeKw,
+    maxDischargeKw: spec.maxDischargeKw,
+    endingSocKwh: soc,
+    shavedSeries: [],
+    totalPvKwh,
+    totalConsumptionKwh,
+    selfConsumptionBeforeKwh,
+    selfConsumptionAfterKwh,
+    importedEnergyBeforeKwh,
+    importedEnergyAfterKwh,
+    exportedEnergyBeforeKwh,
+    exportedEnergyAfterKwh,
+    achievedSelfConsumption,
+    selfSufficiency,
+    exportReduction,
+    socSeries
+  };
+}
+
+export function simulateAllPvScenarios(
+  intervals: ProcessedInterval[],
+  targetKwhOrConfig?: number | SimulationConfig,
+  config?: SimulationConfig
+): ScenarioResult[] {
+  const fallbackTargetKwh = Math.max(
+    64,
+    ...intervals.map((interval) => Math.max(0, interval.exportKwh ?? interval.pvKwh ?? 0) * 4)
+  );
+  const targetKwh = typeof targetKwhOrConfig === 'number' ? targetKwhOrConfig : fallbackTargetKwh;
+  const effectiveConfig = typeof targetKwhOrConfig === 'number' ? config : targetKwhOrConfig;
+  const options = generateScenarioOptions({ targetKwh });
+  return options.map((option) => simulatePvScenario(intervals, option.capacityKwh, effectiveConfig, option.label));
+}
+
+export function buildPvSummaryFromScenario(scenario: ScenarioResult | null): PvSummary | null {
+  if (!scenario) return null;
+
+  return {
+    totalPvKwh: scenario.totalPvKwh ?? 0,
+    totalConsumptionKwh: scenario.totalConsumptionKwh ?? 0,
+    selfConsumptionBeforeKwh: scenario.selfConsumptionBeforeKwh ?? 0,
+    selfConsumptionAfterKwh: scenario.selfConsumptionAfterKwh ?? 0,
+    importedBefore: scenario.importedEnergyBeforeKwh ?? 0,
+    importedAfter: scenario.importedEnergyAfterKwh ?? 0,
+    exportBefore: scenario.exportedEnergyBeforeKwh ?? 0,
+    exportAfter: scenario.exportedEnergyAfterKwh ?? 0,
+    selfConsumptionRatio: scenario.achievedSelfConsumption ?? 0,
+    selfSufficiency: scenario.selfSufficiency ?? 0,
+    exportReduction: scenario.exportReduction ?? 0
+  };
 }
 
 export function findHighestPeakDay(intervals: ProcessedInterval[]): string | null {

@@ -3,6 +3,7 @@ import {
   buildDayKwSeries,
   buildDayProfile,
   buildDataQualityReport,
+  computePvSizing,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
@@ -72,6 +73,36 @@ describe('calculations', () => {
 
     expect(partial.kWhNeededRaw).toBeCloseTo(full.kWhNeededRaw * 0.8, 5);
     expect(partial.kWNeededRaw).toBeCloseTo(full.kWNeededRaw * 0.8, 5);
+  });
+
+  it('computes PV sizing from surplus energy and peak mismatch power', () => {
+    const pvRows = [
+      { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 5, pvKwh: 25 },
+      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 20, pvKwh: 5 }
+    ];
+    const intervals = processIntervals(pvRows, 500);
+    const result = computePvSizing({
+      intervals,
+      settings: { compliance: 1, safetyFactor: 1, efficiency: 1 }
+    });
+
+    expect(result.kWhNeededRaw).toBeCloseTo(20, 5);
+    expect(result.kWNeededRaw).toBeCloseTo(80, 5);
+  });
+
+  it('uses measured export_kwh when available for PV sizing surplus', () => {
+    const pvRows = [
+      { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 10, pvKwh: 30, exportKwh: 12 },
+      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 8, pvKwh: 6 }
+    ];
+    const intervals = processIntervals(pvRows, 500);
+    const result = computePvSizing({
+      intervals,
+      settings: { compliance: 1, safetyFactor: 1, efficiency: 1 }
+    });
+
+    expect(result.kWhNeededRaw).toBeCloseTo(12, 5);
+    expect(result.kWNeededRaw).toBeCloseTo(48, 5);
   });
 
   it('selects earliest timestamp when max observed kW ties', () => {

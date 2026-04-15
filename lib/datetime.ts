@@ -29,12 +29,15 @@ function getZonedParts(date: Date, timeZone: string): DateParts {
     timeZone
   }).formatToParts(date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const rawHour = Number(values.hour);
+  // Some runtimes emit 24:00 at midnight; normalize to 00:00 for wall-time matching.
+  const hour = rawHour === 24 ? 0 : rawHour;
 
   return {
     year: Number(values.year),
     month: Number(values.month),
     day: Number(values.day),
-    hour: Number(values.hour),
+    hour,
     minute: Number(values.minute),
     second: Number(values.second)
   };

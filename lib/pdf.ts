@@ -1,9 +1,11 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import type { AnalysisType } from './analysis';
 import type { DataQualityReport, PeakEvent, PeakMoment, ProcessedInterval, SizingResult } from './calculations';
 import { formatTimestamp } from './datetime';
-import type { ScenarioResult } from './simulation';
+import type { PvSummary, ScenarioResult } from './simulation';
 
 export interface PdfPayload {
+  analysisType?: AnalysisType;
   contractedPowerKw: number;
   maxObservedKw: number;
   maxObservedTimestamp?: string | null;
@@ -18,6 +20,7 @@ export interface PdfPayload {
   peakMoments?: PeakMoment[];
   intervals?: ProcessedInterval[];
   highestPeakDay?: string | null;
+  pvSummary?: PvSummary | null;
   scenarios: ScenarioResult[];
 }
 
