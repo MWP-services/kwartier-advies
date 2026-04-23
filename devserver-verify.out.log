@@ -1,0 +1,17 @@
+
+> dev
+> npm --prefix ./kwartier-advies run dev --
+
+
+> kwartier-advies@0.1.0 dev
+> next dev --hostname 127.0.0.1
+
+  ▲ Next.js 14.2.33
+  - Local:        http://127.0.0.1:3000
+  - Network:      http://127.0.0.1:3000
+
+ ✓ Starting...
+ ✓ Ready in 1846ms
+ ○ Compiling / ...
+ ✓ Compiled / in 4.9s (1581 modules)
+ GET / 200 in 5465ms
