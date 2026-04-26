@@ -14,14 +14,14 @@ export function ColumnMapper({ headers, mapping, analysisType, onChange }: Colum
   const update = (key: keyof ColumnMapping, value: string) => {
     onChange({ ...mapping, [key]: value });
   };
-  const showPvColumn = analysisType !== 'PV_SELF_CONSUMPTION' || hasLikelyPvHeader(headers);
+  const hasDetectedPvColumn = hasLikelyPvHeader(headers);
   const fields: Array<[keyof ColumnMapping, string]> = [
     ['timestamp', 'timestamp (vul hier de datum/tijd (tot) in)'],
     ['consumptionKwh', 'consumption_kwh (vul hier het verbruik in kWh in)'],
     ['exportKwh', 'export_kwh (optioneel)']
   ];
 
-  if (showPvColumn) {
+  if (analysisType === 'PV_SELF_CONSUMPTION') {
     fields.push(['pvKwh', 'pv_kwh (optioneel)']);
   }
 
@@ -47,9 +47,11 @@ export function ColumnMapper({ headers, mapping, analysisType, onChange }: Colum
           </label>
         ))}
       </div>
-      {!showPvColumn && analysisType === 'PV_SELF_CONSUMPTION' && (
+      {analysisType === 'PV_SELF_CONSUMPTION' && (
         <p className="mt-3 text-xs text-slate-500">
-          Geen waarschijnlijke `pv_kwh`-kolom gevonden. Deze analyse gebruikt daarom alleen verbruik + teruglevering.
+          {hasDetectedPvColumn
+            ? 'Je kunt ook een `pv_kwh`-kolom koppelen om extra PV-metrics zoals totale opwek en zelfconsumptie te tonen.'
+            : 'Je kunt optioneel een `pv_kwh`-kolom koppelen voor extra PV-metrics; de analyse werkt ook met alleen verbruik en teruglevering.'}
         </p>
       )}
     </div>

@@ -17,27 +17,26 @@ export function KpiCards({
   maxObservedKw,
   maxObservedTimestamp,
   exceedanceIntervals,
-  sizing,
-  pvSummary
+  sizing
 }: KpiCardsProps) {
   const cards =
     analysisType === 'PV_SELF_CONSUMPTION'
       ? [
           {
-            label: 'Benodigde opslag (profiel)',
-            value: `${sizing.kWhNeededRaw.toFixed(2)} kWh`
+            label: 'Totale netafname',
+            value: `${(sizing.pvFormulaAdvice?.totals.totalImportKwh ?? 0).toFixed(2)} kWh`
           },
           {
-            label: 'Benodigde batterij (advies)',
-            value: `${sizing.kWhNeeded.toFixed(2)} kWh`
+            label: 'Totale teruglevering',
+            value: `${(sizing.pvFormulaAdvice?.totals.totalExportKwh ?? 0).toFixed(2)} kWh`
           },
           {
-            label: 'Export zonder batterij',
-            value: `${(pvSummary?.exportBefore ?? 0).toFixed(2)} kWh`
+            label: 'P50 opslagbehoefte',
+            value: `${(sizing.pvFormulaAdvice?.percentiles.p50StorageNeedKwh ?? 0).toFixed(2)} kWh`
           },
           {
-            label: 'Import zonder batterij',
-            value: `${(pvSummary?.importedBefore ?? 0).toFixed(2)} kWh`
+            label: 'P75 opslagbehoefte',
+            value: `${(sizing.pvFormulaAdvice?.percentiles.p75StorageNeedKwh ?? 0).toFixed(2)} kWh`
           },
           {
             label: 'Aanbevolen',

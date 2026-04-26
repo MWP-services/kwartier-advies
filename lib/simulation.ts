@@ -12,6 +12,7 @@ import {
   simulatePvBattery,
   type PvAnalysisMode,
   type PvSimulationConfig,
+  type ScenarioOptionProfile,
   type PvStrategy
 } from './pvSimulation';
 
@@ -29,6 +30,7 @@ export interface SimulationConfig {
 export interface ScenarioResult {
   optionLabel: string;
   capacityKwh: number;
+  usableCapacityKwh?: number;
   pvAnalysisMode?: PvAnalysisMode;
   pvStrategy?: PvStrategy;
   limitations?: string[];
@@ -67,6 +69,17 @@ export interface ScenarioResult {
   totalEconomicValueEur?: number | null;
   peakSocKwh?: number;
   socSeries?: { timestamp: string; socKwh: number }[];
+  cyclesPerYear?: number;
+  marginalGainPerAddedKwh?: number;
+  importReductionKwhAnnualized?: number;
+  exportReductionKwhAnnualized?: number;
+  remainingExportKwhAnnualized?: number;
+  chargedKwhAnnualized?: number;
+  dischargedKwhAnnualized?: number;
+  scenarioScore?: number;
+  isEligible?: boolean;
+  excludedReason?: string;
+  recommendationReason?: string;
 }
 
 export interface PvSummary {
@@ -317,15 +330,16 @@ export function simulatePvScenario(
 export function simulateAllPvScenarios(
   intervals: ProcessedInterval[],
   targetKwhOrConfig?: number | PvSimulationConfig,
-  config?: PvSimulationConfig
+  config?: PvSimulationConfig,
+  profile: ScenarioOptionProfile = 'HOME_PV'
 ): ScenarioResult[] {
   const fallbackTargetKwh = Math.max(
-    64,
-    ...intervals.map((interval) => Math.max(0, interval.exportKwh ?? interval.pvKwh ?? 0) * 4)
+    5,
+    ...intervals.map((interval) => Math.max(0, interval.exportKwh ?? interval.pvKwh ?? 0))
   );
   const targetKwh = typeof targetKwhOrConfig === 'number' ? targetKwhOrConfig : fallbackTargetKwh;
   const effectiveConfig = typeof targetKwhOrConfig === 'number' ? config : targetKwhOrConfig;
-  const options = generateScenarioOptions({ targetKwh });
+  const options = generateScenarioOptions({ targetKwh, profile });
   return options.map((option) => simulatePvScenario(intervals, option.capacityKwh, effectiveConfig, option.label));
 }
 

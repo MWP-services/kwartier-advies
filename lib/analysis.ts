@@ -1,6 +1,7 @@
 import type {
   DataQualityReport,
   ExceededInterval,
+  PvAdviceChartsData,
   PeakEvent,
   PeakMoment,
   ProcessedInterval,
@@ -22,6 +23,7 @@ export interface AnalysisSettings {
   efficiency: number;
   interpretationMode: InterpretationMode;
   pvStrategy: PvStrategy;
+  pvCustomerType: 'auto' | 'home' | 'business';
   includeHistogram?: boolean;
   includePeakEventsTable?: boolean;
   includeScenarioSection?: boolean;
@@ -42,6 +44,7 @@ export interface AnalysisResult {
   normalizationDiagnostics: NormalizationDiagnostics;
   quality: DataQualityReport;
   pvSummary: PvSummary | null;
+  pvAdviceCharts?: PvAdviceChartsData | null;
   pvAnalysisMode?: PvAnalysisMode | null;
   pvWarnings?: string[];
 }
@@ -55,6 +58,7 @@ export const defaultAnalysisSettings: AnalysisSettings = {
   efficiency: 0.9,
   interpretationMode: 'AUTO',
   pvStrategy: 'SELF_CONSUMPTION_ONLY',
+  pvCustomerType: 'auto',
   includeHistogram: true,
   includePeakEventsTable: true,
   includeScenarioSection: true
@@ -70,6 +74,7 @@ export function analysisSettingsEqual(a: AnalysisSettings, b: AnalysisSettings):
     a.efficiency === b.efficiency &&
     a.interpretationMode === b.interpretationMode &&
     a.pvStrategy === b.pvStrategy &&
+    a.pvCustomerType === b.pvCustomerType &&
     (a.includeHistogram ?? true) === (b.includeHistogram ?? true) &&
     (a.includePeakEventsTable ?? true) === (b.includePeakEventsTable ?? true) &&
     (a.includeScenarioSection ?? true) === (b.includeScenarioSection ?? true)

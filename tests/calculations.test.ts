@@ -3,7 +3,9 @@ import {
   buildDayKwSeries,
   buildDayProfile,
   buildDataQualityReport,
+  buildPvAdviceChartsData,
   computePvSizing,
+  computePvStorageFormulaAdvice,
   computeSizing,
   findMaxObserved,
   groupPeakEvents,
@@ -78,7 +80,8 @@ describe('calculations', () => {
   it('computes PV sizing from surplus energy and peak mismatch power', () => {
     const pvRows = [
       { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 5, pvKwh: 25 },
-      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 20, pvKwh: 5 }
+      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 20, pvKwh: 5 },
+      { timestamp: '2024-01-01T18:00:00.000Z', consumptionKwh: 12, pvKwh: 0 }
     ];
     const intervals = processIntervals(pvRows, 500);
     const result = computePvSizing({
@@ -88,13 +91,15 @@ describe('calculations', () => {
 
     expect(result.kWhNeededRaw).toBeGreaterThan(0);
     expect(result.kWNeededRaw).toBeGreaterThan(0);
-    expect(result.recommendedProduct?.capacityKwh).toBeGreaterThanOrEqual(64);
+    expect(result.recommendedProduct?.capacityKwh).toBeLessThanOrEqual(40);
+    expect(result.pvFormulaAdvice).toBeTruthy();
   });
 
   it('uses measured export_kwh when available for PV sizing surplus', () => {
     const pvRows = [
       { timestamp: '2024-01-01T10:00:00.000Z', consumptionKwh: 10, pvKwh: 30, exportKwh: 12 },
-      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 8, pvKwh: 6 }
+      { timestamp: '2024-01-01T10:15:00.000Z', consumptionKwh: 8, pvKwh: 6 },
+      { timestamp: '2024-01-01T19:00:00.000Z', consumptionKwh: 9, pvKwh: 0 }
     ];
     const intervals = processIntervals(pvRows, 500);
     const result = computePvSizing({
@@ -106,7 +111,7 @@ describe('calculations', () => {
     expect(result.kWNeededRaw).toBeGreaterThan(0);
   });
 
-  it('recommends modular PV options from simulated outcomes and keeps a larger alternative', () => {
+  it('recommends a practical home PV option and keeps a larger useful alternative', () => {
     const pvRows = Array.from({ length: 8 }, (_, idx) => ({
       timestamp: new Date(Date.UTC(2024, 0, 1, 10, idx * 15)).toISOString(),
       consumptionKwh: idx < 4 ? 5 : 18,
@@ -118,12 +123,13 @@ describe('calculations', () => {
       settings: { compliance: 0.95, safetyFactor: 1.2, efficiency: 0.9, strategy: 'SELF_CONSUMPTION_ONLY' }
     });
 
-    expect(result.recommendedProduct?.capacityKwh).toBeGreaterThanOrEqual(64);
-    expect([64, 96, 128, 192, 261, 522, 2090, 5015]).toContain(result.recommendedProduct?.capacityKwh);
+    expect(result.recommendedProduct?.capacityKwh).toBeLessThanOrEqual(40);
+    expect([5, 10, 15, 20, 25, 30, 40]).toContain(result.recommendedProduct?.capacityKwh);
     expect(
       result.alternativeProduct == null ||
-      result.alternativeProduct.capacityKwh > (result.recommendedProduct?.capacityKwh ?? 0)
+      result.alternativeProduct.capacityKwh >= (result.recommendedProduct?.capacityKwh ?? 0)
     ).toBe(true);
+    expect(result.pvFormulaAdvice?.roundedAdvice.conservativeKwh).toBeLessThanOrEqual(result.recommendedProduct?.capacityKwh ?? Infinity);
   });
 
   it('can size PV + trading from scenario outcomes without ignoring later grid export', () => {
@@ -137,7 +143,7 @@ describe('calculations', () => {
       settings: { compliance: 0.95, safetyFactor: 1.1, efficiency: 0.9, strategy: 'PV_WITH_TRADING' }
     });
 
-    expect(result.recommendedProduct?.capacityKwh).toBeGreaterThanOrEqual(64);
+    expect(result.recommendedProduct?.capacityKwh).toBeLessThanOrEqual(40);
     expect(result.kWNeededRaw).toBeGreaterThan(0);
   });
 
@@ -170,7 +176,68 @@ describe('calculations', () => {
     });
 
     expect(result.kWhNeededRaw).toBeLessThan(64);
-    expect(result.recommendedProduct?.capacityKwh).toBe(64);
+    expect(result.recommendedProduct?.capacityKwh).toBe(40);
+    expect(result.pvFormulaAdvice?.rawAdvice.capReason).toContain('particuliere');
+  });
+
+  it('computes daily PV storage formula percentiles from export and evening-night import', () => {
+    const pvRows = [
+      { timestamp: '2024-01-01T01:00:00.000Z', consumptionKwh: 2, exportKwh: 0 },
+      { timestamp: '2024-01-01T12:00:00.000Z', consumptionKwh: 0, exportKwh: 6 },
+      { timestamp: '2024-01-01T18:00:00.000Z', consumptionKwh: 3, exportKwh: 0 },
+      { timestamp: '2024-01-02T01:00:00.000Z', consumptionKwh: 1, exportKwh: 0 },
+      { timestamp: '2024-01-02T12:00:00.000Z', consumptionKwh: 0, exportKwh: 10 },
+      { timestamp: '2024-01-02T18:00:00.000Z', consumptionKwh: 5, exportKwh: 0 }
+    ];
+    const intervals = processIntervals(pvRows, 500);
+    const result = computePvStorageFormulaAdvice(intervals, {
+      customerType: 'home',
+      minActiveDays: 1
+    });
+
+    expect(result.dailyRows.map((row) => row.dailyStorageNeedKwh)).toEqual([5, 6]);
+    expect(result.percentiles.p50StorageNeedKwh).toBeCloseTo(5.5, 5);
+    expect(result.percentiles.p75StorageNeedKwh).toBeGreaterThanOrEqual(result.percentiles.p50StorageNeedKwh);
+    expect(result.roundedAdvice.recommendedKwh).toBeGreaterThan(0);
+  });
+
+  it('detects business PV datasets and rounds up to business options', () => {
+    const businessRows = Array.from({ length: 40 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 0, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 1 * 60 * 60 * 1000).toISOString(), consumptionKwh: 30, exportKwh: 0 },
+        { timestamp: new Date(base + 12 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 220 },
+        { timestamp: new Date(base + 18 * 60 * 60 * 1000).toISOString(), consumptionKwh: 180, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(businessRows, 500);
+    const result = computePvStorageFormulaAdvice(intervals, { minActiveDays: 1 });
+
+    expect(result.customerTypeDetected).toBe('business');
+    expect(result.usedCustomerType).toBe('business');
+    expect([261, 522, 783, 1044, 1305, 1566, 1827, 2090, 5015]).toContain(result.roundedAdvice.recommendedKwh);
+    expect(result.roundedAdvice.recommendedKwh).toBeGreaterThan(40);
+  });
+
+  it('builds PV advice charts from the same daily formula values', () => {
+    const rows = [
+      { timestamp: '2024-01-01T01:00:00.000Z', consumptionKwh: 2, exportKwh: 0 },
+      { timestamp: '2024-01-01T12:00:00.000Z', consumptionKwh: 0, exportKwh: 8 },
+      { timestamp: '2024-01-01T18:00:00.000Z', consumptionKwh: 4, exportKwh: 0 },
+      { timestamp: '2024-01-02T01:00:00.000Z', consumptionKwh: 1, exportKwh: 0 },
+      { timestamp: '2024-01-02T12:00:00.000Z', consumptionKwh: 0, exportKwh: 12 },
+      { timestamp: '2024-01-02T18:00:00.000Z', consumptionKwh: 6, exportKwh: 0 }
+    ];
+    const intervals = processIntervals(rows, 500);
+    const advice = computePvStorageFormulaAdvice(intervals, { customerType: 'home', minActiveDays: 1 });
+    const charts = buildPvAdviceChartsData(advice, intervals);
+
+    expect(charts.dailyStorageChart).toHaveLength(2);
+    expect(charts.storageDistributionChart.length).toBeGreaterThan(0);
+    expect(charts.adviceComparisonChart.find((item) => item.label === 'Aanbevolen')?.emphasis).toBe(true);
+    expect(charts.marginalGainChart[0].capacityKwh).toBe(5);
+    expect(charts.coverageByCapacityChart[0].fullyCoveredDaysPercentage).toBeGreaterThanOrEqual(0);
+    expect(charts.monthlyStorageChart).toHaveLength(1);
   });
 
   it('selects earliest timestamp when max observed kW ties', () => {

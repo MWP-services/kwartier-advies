@@ -9,12 +9,15 @@ import { ColumnMapper } from '@/components/ColumnMapper';
 import { ComplianceSlider } from '@/components/ComplianceSlider';
 import { DataQualityPanel } from '@/components/DataQualityPanel';
 import { KpiCards } from '@/components/KpiCards';
+import { PvAdviceCharts } from '@/components/PvAdviceCharts';
 import { ScenarioCharts } from '@/components/ScenarioCharts';
 import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
 import {
   buildDataQualityReport,
+  buildPvAdviceChartsData,
   computePvSizingFromScenarioResults,
+  computePvStorageFormulaAdvice,
   computeSizing,
   derivePvIntervalFlow,
   findMaxObserved,
@@ -25,8 +28,6 @@ import {
 } from '@/lib/calculations';
 import {
   autoDetectColumns,
-  hasLikelyPvHeader,
-  isLikelyPvHeader,
   mapRows,
   parseCsv,
   parseXlsx,
@@ -54,15 +55,7 @@ function runAnalysis(
   mapping: ColumnMapping,
   settings: AnalysisSettings
 ): AnalysisResult | null {
-  const sanitizedMapping: ColumnMapping =
-    settings.analysisType === 'PV_SELF_CONSUMPTION' &&
-    mapping.exportKwh &&
-    mapping.pvKwh &&
-    !hasLikelyPvHeader(headers) &&
-    !isLikelyPvHeader(mapping.pvKwh)
-      ? { ...mapping, pvKwh: undefined }
-      : mapping;
-  const mappedRows = mapRows(rawRows, sanitizedMapping);
+  const mappedRows = mapRows(rawRows, mapping);
   if (mappedRows.length === 0) return null;
 
   const normalized = normalizeConsumptionSeries(mappedRows, {
@@ -85,20 +78,27 @@ function runAnalysis(
       safetyFactor: settings.safetyFactor,
       efficiency: settings.efficiency,
       strategy: settings.pvStrategy,
-      trading: buildDefaultTradingConfig(settings.pvStrategy)
+      trading: buildDefaultTradingConfig(settings.pvStrategy),
+      customerType: settings.pvCustomerType
     };
+    const formulaAdvice = computePvStorageFormulaAdvice(intervals, {
+      customerType: settings.pvCustomerType
+    });
     const scenarioTargetCapacityKwh = Math.max(
-      64,
-      ...intervals.map((interval) => Math.max(0, interval.exportKwh ?? interval.pvKwh ?? 0) * 4)
+      formulaAdvice.roundedAdvice.spaciousKwh,
+      formulaAdvice.roundedAdvice.recommendedKwh,
+      5
     );
+    const scenarioProfile = formulaAdvice.usedCustomerType === 'business' ? 'BUSINESS_PV' : 'HOME_PV';
     const scenarios = simulateAllPvScenarios(intervals, scenarioTargetCapacityKwh, {
       dischargeEfficiency: settings.efficiency,
       initialSocRatio: 0,
       strategy: settings.pvStrategy,
       trading: buildDefaultTradingConfig(settings.pvStrategy),
       captureSocSeries: false
-    });
+    }, scenarioProfile);
     const sizing = computePvSizingFromScenarioResults(intervals, scenarios, pvSizingSettings);
+    const pvAdviceCharts = buildPvAdviceChartsData(sizing.pvFormulaAdvice ?? formulaAdvice, intervals);
     const recommendedScenario =
       scenarios.find((scenario) => scenario.capacityKwh === sizing.recommendedProduct?.capacityKwh) ?? scenarios[0] ?? null;
     const pvSummary = buildPvSummaryFromScenario(recommendedScenario);
@@ -119,6 +119,7 @@ function runAnalysis(
       quality,
       exceedanceIntervals: exportIntervals,
       pvSummary,
+      pvAdviceCharts,
       pvAnalysisMode,
       pvWarnings: pvSummary?.warnings ?? []
     };
@@ -159,6 +160,7 @@ function runAnalysis(
     quality,
     exceedanceIntervals,
     pvSummary: null,
+    pvAdviceCharts: null,
     pvAnalysisMode: null,
     pvWarnings: []
   };
@@ -432,22 +434,41 @@ export default function HomePage() {
         )}
 
         {isPvMode && (
-          <label className="text-sm">
-            PV batterijmodus
-            <select
-              className="wx-input"
-              value={draftSettings.pvStrategy}
-              onChange={(event) =>
-                setDraftSettings((prev) => ({
-                  ...prev,
-                  pvStrategy: event.target.value as AnalysisSettings['pvStrategy']
-                }))
-              }
-            >
-              <option value="SELF_CONSUMPTION_ONLY">Self-consumption only</option>
-              <option value="PV_WITH_TRADING">PV + trading</option>
-            </select>
-          </label>
+          <>
+            <label className="text-sm">
+              PV batterijmodus
+              <select
+                className="wx-input"
+                value={draftSettings.pvStrategy}
+                onChange={(event) =>
+                  setDraftSettings((prev) => ({
+                    ...prev,
+                    pvStrategy: event.target.value as AnalysisSettings['pvStrategy']
+                  }))
+                }
+              >
+                <option value="SELF_CONSUMPTION_ONLY">Self-consumption only</option>
+                <option value="PV_WITH_TRADING">PV + trading</option>
+              </select>
+            </label>
+            <label className="text-sm">
+              Klanttype
+              <select
+                className="wx-input"
+                value={draftSettings.pvCustomerType}
+                onChange={(event) =>
+                  setDraftSettings((prev) => ({
+                    ...prev,
+                    pvCustomerType: event.target.value as AnalysisSettings['pvCustomerType']
+                  }))
+                }
+              >
+                <option value="auto">Auto</option>
+                <option value="home">Home</option>
+                <option value="business">Business</option>
+              </select>
+            </label>
+          </>
         )}
 
         <label className="text-sm">
@@ -585,8 +606,8 @@ export default function HomePage() {
                 opwekprofiel berekenen we hoeveel opslagcapaciteit nodig is om relevant PV-overschot te verschuiven.
               </p>
               <p>
-                Benodigde opslag uit profiel: {analysisResult.sizing.kWhNeededRaw.toFixed(2)} kWh. Benodigde batterijcapaciteit
-                na batterijverliezen: {analysisResult.sizing.kWhNeeded.toFixed(2)} kWh.
+                Benodigde opslag uit formule: {analysisResult.sizing.kWhNeededRaw.toFixed(2)} kWh. Afgerond aanbevolen
+                batterijadvies: {analysisResult.sizing.kWhNeeded.toFixed(2)} kWh.
               </p>
               <p>
                 Batterijmodus: {analysisResult.pvSummary?.strategy === 'PV_WITH_TRADING' ? 'PV + trading' : 'Self-consumption only'}.
@@ -614,43 +635,140 @@ export default function HomePage() {
               ) : (
                 <>
                   <p>
-                    Export zonder batterij: {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh. Zonder `pv_kwh`
-                    baseren we de benodigde opslag op gemeten teruglevering en resterend verbruik.
+                    Export zonder batterij: {(analysisResult.pvSummary?.exportBefore ?? 0).toFixed(2)} kWh. De benodigde
+                    opslag wordt hier bepaald op basis van gemeten teruglevering en resterend verbruik.
                   </p>
                   <p className="text-xs text-slate-500">
-                    Totale PV-opwek en zelfconsumptieratio worden niet getoond zonder `pv_kwh`.
+                    Extra PV-metrics zoals totale opwek en zelfconsumptie worden getoond zodra die databron beschikbaar is.
                   </p>
                 </>
               )}
             </div>
           )}
 
-          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && (
-            <div className="wx-card text-sm text-slate-700">
-              <h3 className="wx-title">Simulatie-impact per batterij</h3>
-              <p>
-                Hieronder zie je pas de simulatiescenario&apos;s. Die laten zien wat de impact zou zijn als er een batterij
-                geplaatst wordt met een bepaalde capaciteit.
-              </p>
-            </div>
+          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && analysisResult.sizing.pvFormulaAdvice && (
+            (() => {
+              const advice = analysisResult.sizing.pvFormulaAdvice;
+              const pvActiveDays = advice.totals.numberOfPvActiveDays;
+              const confidenceLabel =
+                pvActiveDays >= 90 ? 'Hoog vertrouwen' : pvActiveDays >= 30 ? 'Goed onderbouwd' : 'Indicatief';
+
+              return (
+                <div className="wx-card border-l-4 border-l-emerald-600 bg-emerald-50/40 text-sm text-slate-800">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                    <div className="max-w-3xl">
+                      <h3 className="wx-title">Waarom dit batterijadvies?</h3>
+                      <p className="text-base font-semibold text-slate-900">
+                        Aanbevolen batterij: {advice.roundedAdvice.recommendedKwh} kWh
+                      </p>
+                      <p className="mt-1">
+                        Dit advies is gebaseerd op P75 van de dagelijkse nuttige opslagbehoefte over{' '}
+                        {advice.totals.numberOfPvActiveDays} PV-actieve dagen, met veiligheidsfactor en correctie voor
+                        bruikbare batterijcapaciteit.
+                      </p>
+                    </div>
+                    <div className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-700">
+                      {confidenceLabel}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="text-xs uppercase tracking-wide text-slate-500">Sterkste basis</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">
+                        P75 {advice.percentiles.p75StorageNeedKwh.toFixed(1)} kWh
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">Representatieve dagelijkse opslagbehoefte vóór safety factor en DoD-correctie.</div>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="text-xs uppercase tracking-wide text-slate-500">Datadekking</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">
+                        {advice.totals.numberOfPvActiveDays} / {advice.totals.numberOfDays} dagen
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">Aantal PV-actieve dagen waarop het advies is gebaseerd.</div>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="text-xs uppercase tracking-wide text-slate-500">Balans van opties</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">
+                        {advice.roundedAdvice.conservativeKwh} / {advice.roundedAdvice.recommendedKwh} / {advice.roundedAdvice.spaciousKwh} kWh
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">Conservatief, aanbevolen en ruim advies op basis van P50, P75 en P90.</div>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-2 text-sm">
+                    <p>
+                      Klanttype: {advice.usedCustomerType}. Totale teruglevering {advice.totals.totalExportKwh.toFixed(1)} kWh en
+                      totale netafname {advice.totals.totalImportKwh.toFixed(1)} kWh.
+                    </p>
+                    {advice.rawAdvice.capReason && <p>{advice.rawAdvice.capReason}</p>}
+                    {advice.warnings.map((warning) => (
+                      <p key={warning} className="text-amber-700">
+                        {warning}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()
           )}
 
-          <ScenarioTable
-            analysisType={analysisResult.analysisType}
-            scenarios={analysisResult.scenarios}
-            recommendedCapacityKwh={analysisResult.sizing.recommendedProduct?.capacityKwh ?? null}
-          />
+          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' &&
+            analysisResult.sizing.pvFormulaAdvice &&
+            analysisResult.pvAdviceCharts && (
+              <PvAdviceCharts
+                advice={analysisResult.sizing.pvFormulaAdvice}
+                charts={analysisResult.pvAdviceCharts}
+              />
+            )}
 
-          <ScenarioCharts
-            analysisType={analysisResult.analysisType}
-            scenarios={analysisResult.scenarios}
-            selectedScenarioCapacity={selectedScenario}
-            onSelectScenario={setSelectedScenario}
-            sizing={analysisResult.sizing}
-            efficiency={appliedSettings?.efficiency ?? draftSettings.efficiency}
-            safetyFactor={appliedSettings?.safetyFactor ?? draftSettings.safetyFactor}
-            compliance={appliedSettings?.compliance ?? draftSettings.compliance}
-          />
+          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' ? (
+            <details className="wx-card">
+              <summary className="cursor-pointer list-none text-base font-semibold text-slate-900">
+                Technische verdieping: simulatie per batterijoptie
+              </summary>
+              <p className="mt-3 text-sm text-slate-600">
+                Deze sectie is bedoeld voor technische vergelijking. Het uiteindelijke advies hierboven is gebaseerd op
+                dagelijkse opslagbehoefte en percentielen, niet op maximale exportreductie of de grootste batterij.
+              </p>
+              <div className="mt-4">
+                <ScenarioTable
+                  analysisType={analysisResult.analysisType}
+                  scenarios={analysisResult.scenarios}
+                  recommendedCapacityKwh={analysisResult.sizing.recommendedProduct?.capacityKwh ?? null}
+                />
+              </div>
+              <div className="mt-4">
+                <ScenarioCharts
+                  analysisType={analysisResult.analysisType}
+                  scenarios={analysisResult.scenarios}
+                  selectedScenarioCapacity={selectedScenario}
+                  onSelectScenario={setSelectedScenario}
+                  sizing={analysisResult.sizing}
+                  efficiency={appliedSettings?.efficiency ?? draftSettings.efficiency}
+                  safetyFactor={appliedSettings?.safetyFactor ?? draftSettings.safetyFactor}
+                  compliance={appliedSettings?.compliance ?? draftSettings.compliance}
+                />
+              </div>
+            </details>
+          ) : (
+            <>
+              <ScenarioTable
+                analysisType={analysisResult.analysisType}
+                scenarios={analysisResult.scenarios}
+                recommendedCapacityKwh={analysisResult.sizing.recommendedProduct?.capacityKwh ?? null}
+              />
+
+              <ScenarioCharts
+                analysisType={analysisResult.analysisType}
+                scenarios={analysisResult.scenarios}
+                selectedScenarioCapacity={selectedScenario}
+                onSelectScenario={setSelectedScenario}
+                sizing={analysisResult.sizing}
+                efficiency={appliedSettings?.efficiency ?? draftSettings.efficiency}
+                safetyFactor={appliedSettings?.safetyFactor ?? draftSettings.safetyFactor}
+                compliance={appliedSettings?.compliance ?? draftSettings.compliance}
+              />
+            </>
+          )}
 
           <div className="wx-card">
             <h3 className="wx-title">Advies</h3>
@@ -660,12 +778,20 @@ export default function HomePage() {
                 ? analysisResult.sizing.recommendedProduct.label
                 : 'Geen haalbare batterijconfiguratie op basis van kWh + kW'}
             </p>
+            {analysisResult.sizing.pvFormulaAdvice && analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && (
+              <p>Conservatief: {analysisResult.sizing.pvFormulaAdvice.roundedAdvice.conservativeKwh} kWh</p>
+            )}
             <p>
               Alternatief:{' '}
               {analysisResult.sizing.alternativeProduct
                 ? analysisResult.sizing.alternativeProduct.label
                 : 'Geen grotere productoptie beschikbaar'}
             </p>
+            {analysisResult.sizing.pvFormulaAdvice?.warnings.map((line) => (
+              <p key={line} className="mt-1 text-xs text-amber-700">
+                {line}
+              </p>
+            ))}
             {analyzedAt && <p className="mt-1 text-xs text-slate-500">Laatst geanalyseerd: {analyzedAt}</p>}
             <p className="mt-2 text-xs text-slate-500">
               {analysisResult.analysisType === 'PV_SELF_CONSUMPTION'
@@ -673,7 +799,7 @@ export default function HomePage() {
                   ? 'PV + trading gebruikt dezelfde batterij-fysica als peak shaving en laat opgeslagen PV later naar het net ontladen binnen kW-, kWh- en SOC-limieten.'
                   : analysisResult.pvSummary?.mode === 'FULL_PV'
                     ? 'PV-dimensionering gebruikt een 15-minuten simulatie met PV-surplus, laad/ontlaadlimieten en batterijverliezen; finale engineeringvalidatie blijft vereist.'
-                    : 'Export-only advies gebruikt een 15-minuten simulatie op terugleveroverschot en batterijbeperkingen; totale PV-opwek blijft onbekend zonder pv_kwh.'
+                    : 'Export-only advies gebruikt een 15-minuten simulatie op terugleveroverschot en batterijbeperkingen; extra PV-metrics worden getoond wanneer die databron beschikbaar is.'
                 : 'Dimensionering voor peak shaving; finale engineeringvalidatie blijft vereist.'}
             </p>
             <button

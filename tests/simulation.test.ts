@@ -194,7 +194,7 @@ describe('simulation', () => {
     expect(result.achievedSelfConsumption).toBeNull();
     expect(result.exportedEnergyAfterKwh).toBeLessThan(result.exportedEnergyBeforeKwh ?? Infinity);
     expect(result.capturedExportEnergyKwh).toBeGreaterThan(0);
-    expect(result.limitations?.[0]).toContain('pv_kwh');
+    expect(result.limitations ?? []).toEqual([]);
   });
 
   it('respects PV charging and discharging power limits within a 15-minute interval', () => {
@@ -211,7 +211,7 @@ describe('simulation', () => {
     expect(result.maxDischargeKw).toBe(30);
   });
 
-  it('returns PV scenario sets that include fixed large-capacity options', () => {
+  it('returns home-focused PV scenario sets without industrial capacities', () => {
     const pvRows = Array.from({ length: 8 }, (_, idx) => ({
       timestamp: new Date(Date.UTC(2024, 0, 1, 8, idx * 15)).toISOString(),
       consumptionKwh: 5,
@@ -220,8 +220,23 @@ describe('simulation', () => {
     const intervals = processIntervals(pvRows, 500);
     const scenarios = simulateAllPvScenarios(intervals, 200);
 
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 5)).toBeTruthy();
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 40)).toBeTruthy();
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 2090)).toBeFalsy();
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 5015)).toBeFalsy();
+  });
+
+  it('can return business PV scenario sets including larger modular options', () => {
+    const pvRows = Array.from({ length: 8 }, (_, idx) => ({
+      timestamp: new Date(Date.UTC(2024, 0, 1, 8, idx * 15)).toISOString(),
+      consumptionKwh: 10,
+      exportKwh: 80
+    }));
+    const intervals = processIntervals(pvRows, 500);
+    const scenarios = simulateAllPvScenarios(intervals, 1000, undefined, 'BUSINESS_PV');
+
+    expect(scenarios.find((scenario) => scenario.capacityKwh === 522)).toBeTruthy();
     expect(scenarios.find((scenario) => scenario.capacityKwh === 2090)).toBeTruthy();
-    expect(scenarios.find((scenario) => scenario.capacityKwh === 5015)).toBeTruthy();
   });
 
   it('allows later battery-to-grid export in PV_WITH_TRADING mode within discharge limits', () => {

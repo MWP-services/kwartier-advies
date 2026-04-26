@@ -82,7 +82,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
   const pvSummary = payload.pvSummary ?? {
     mode: 'EXPORT_ONLY',
     strategy: payload.pvStrategy ?? 'SELF_CONSUMPTION_ONLY',
-    warnings: ['PV total and self-consumption ratio cannot be calculated without pv_kwh input.'],
+    warnings: [],
     totalPvKwh: 0,
     totalConsumptionKwh: 0,
     selfConsumptionBeforeKwh: null,
@@ -118,6 +118,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
     importReduction: scenario.importReductionKwh ?? 0,
     economicValue: scenario.totalEconomicValueEur ?? null
   }));
+  const formulaAdvice = payload.sizing.pvFormulaAdvice;
   const kpiCards =
     pvSummary.strategy === 'PV_WITH_TRADING'
       ? [
@@ -309,6 +310,13 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
             <tr><th>Aanbevolen configuratie</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
             <tr><th>Benodigde capaciteit</th><td>${payload.sizing.kWhNeeded.toFixed(2)} kWh</td></tr>
             <tr><th>Benodigd vermogen</th><td>${payload.sizing.kWNeeded.toFixed(2)} kW</td></tr>
+            ${
+              formulaAdvice
+                ? `<tr><th>Klanttype</th><td>${formulaAdvice.usedCustomerType}</td></tr>
+                   <tr><th>P50 / P75 / P90</th><td>${formulaAdvice.percentiles.p50StorageNeedKwh.toFixed(2)} / ${formulaAdvice.percentiles.p75StorageNeedKwh.toFixed(2)} / ${formulaAdvice.percentiles.p90StorageNeedKwh.toFixed(2)} kWh</td></tr>
+                   <tr><th>Conservatief / aanbevolen / ruim</th><td>${formulaAdvice.roundedAdvice.conservativeKwh} / ${formulaAdvice.roundedAdvice.recommendedKwh} / ${formulaAdvice.roundedAdvice.spaciousKwh} kWh</td></tr>`
+                : ''
+            }
             <tr><th>Export voor/na batterij</th><td>${pvSummary.exportBefore.toFixed(2)} / ${pvSummary.exportAfter.toFixed(2)} kWh</td></tr>
             ${
               pvSummary.strategy === 'PV_WITH_TRADING'
@@ -324,11 +332,13 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
         </table>
         <div class="callout">
           ${
-            pvSummary.strategy === 'PV_WITH_TRADING'
-              ? 'De batterij mag opgeslagen PV later terugleveren aan het net binnen dezelfde kW-, efficiency- en SOC-limieten als elders in de app.'
-              : pvSummary.mode === 'FULL_PV'
-              ? 'De PV-batterij wordt gedimensioneerd op basis van PV-surplus, piekmismatch tussen opwek en load, en batterijverliezen.'
-              : 'De batterij wordt hier gedimensioneerd op basis van gemeten terugleveroverschot en batterijbeperkingen; totale PV-opwek blijft onbekend zonder pv_kwh.'
+            formulaAdvice
+              ? 'Het batterijadvies is berekend op basis van dagelijkse teruglevering versus avond/nacht-netafname, zodat seizoensopslag en extreme zomerdagen niet tot een onrealistisch grote thuisbatterij leiden.'
+              : pvSummary.strategy === 'PV_WITH_TRADING'
+                ? 'De batterij mag opgeslagen PV later terugleveren aan het net binnen dezelfde kW-, efficiency- en SOC-limieten als elders in de app.'
+                : pvSummary.mode === 'FULL_PV'
+                  ? 'De PV-batterij wordt gedimensioneerd op basis van PV-surplus, piekmismatch tussen opwek en load, en batterijverliezen.'
+                  : 'De batterij wordt hier gedimensioneerd op basis van gemeten terugleveroverschot en batterijbeperkingen; extra PV-metrics worden getoond zodra die data beschikbaar is.'
           }
         </div>
       </div>
@@ -365,6 +375,13 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
             <tr><th>Import voor/na batterij</th><td>${pvSummary.importedBefore.toFixed(2)} / ${pvSummary.importedAfter.toFixed(2)} kWh</td></tr>
             <tr><th>Export reductie</th><td>${(pvSummary.exportReduction * 100).toFixed(1)}%</td></tr>
             ${
+              formulaAdvice
+                ? `<tr><th>PV-actieve dagen</th><td>${formulaAdvice.totals.numberOfPvActiveDays} / ${formulaAdvice.totals.numberOfDays}</td></tr>
+                   <tr><th>Max dagelijkse export</th><td>${formulaAdvice.totals.maxDailyExportKwh.toFixed(2)} kWh</td></tr>
+                   <tr><th>Cap reden</th><td>${formulaAdvice.rawAdvice.capReason ?? '-'}</td></tr>`
+                : ''
+            }
+            ${
               pvSummary.strategy === 'PV_WITH_TRADING'
                 ? `<tr><th>Direct geëxporteerd</th><td>${pvSummary.immediateExportedKwh.toFixed(2)} kWh</td></tr>
                    <tr><th>Later geëxporteerd uit batterij</th><td>${pvSummary.shiftedExportedLaterKwh.toFixed(2)} kWh</td></tr>
@@ -376,7 +393,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
                    <tr><th>Self-consumed na batterij</th><td>${(pvSummary.selfConsumptionAfterKwh ?? 0).toFixed(2)} kWh</td></tr>`
                 : `<tr><th>Opgeslagen export</th><td>${pvSummary.capturedExportEnergyKwh.toFixed(2)} kWh</td></tr>
                    <tr><th>Benutting exportoverschot</th><td>${(pvSummary.batteryUtilizationAgainstExport * 100).toFixed(1)}%</td></tr>
-                   <tr><th>Beperking</th><td>${pvSummary.warnings.join(' ')}</td></tr>`
+                   <tr><th>Status</th><td>${pvSummary.warnings.join(' ') || 'Analyse op basis van verbruik en teruglevering'}</td></tr>`
             }
           </tbody>
         </table>

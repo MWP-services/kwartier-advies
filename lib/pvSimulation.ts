@@ -86,7 +86,8 @@ export interface ScenarioOption {
   };
 }
 
-const EXPORT_ONLY_LIMITATION = 'PV total and self-consumption ratio cannot be calculated without pv_kwh input.';
+export type ScenarioOptionProfile = 'DEFAULT' | 'HOME_PV' | 'BUSINESS_PV';
+
 const NO_PV_DATA_LIMITATION = 'Geen bruikbare PV- of exportdata gevonden voor de PV-analyse.';
 const TRADING_LIMITATION = 'Trading mode allows stored PV energy to be exported later within the battery power and SOC limits.';
 const DEFAULT_PEAK_PRICE_HOURS = [17, 18, 19, 20];
@@ -96,6 +97,30 @@ const FIXED_SCENARIO_OPTIONS: ScenarioOption[] = [
   { capacityKwh: 64, label: '64 kWh' },
   { capacityKwh: 96, label: '96 kWh' },
   { capacityKwh: 261, label: '261 kWh' },
+  { capacityKwh: 2090, label: '2.09 MWh (2090 kWh)' },
+  { capacityKwh: 5015, label: '5.015 MWh (5015 kWh)' }
+];
+const HOME_PV_SCENARIO_OPTIONS: ScenarioOption[] = [
+  { capacityKwh: 5, label: '5 kWh' },
+  { capacityKwh: 10, label: '10 kWh' },
+  { capacityKwh: 15, label: '15 kWh' },
+  { capacityKwh: 20, label: '20 kWh' },
+  { capacityKwh: 25, label: '25 kWh' },
+  { capacityKwh: 30, label: '30 kWh' },
+  { capacityKwh: 40, label: '40 kWh' },
+  { capacityKwh: 50, label: '50 kWh' },
+  { capacityKwh: 64, label: '64 kWh' }
+];
+const BUSINESS_PV_SCENARIO_OPTIONS: ScenarioOption[] = [
+  { capacityKwh: 64, label: '64 kWh' },
+  { capacityKwh: 96, label: '96 kWh' },
+  { capacityKwh: 261, label: '261 kWh' },
+  { capacityKwh: 522, label: '2x261 (522 kWh)' },
+  { capacityKwh: 783, label: '3x261 (783 kWh)' },
+  { capacityKwh: 1044, label: '4x261 (1044 kWh)' },
+  { capacityKwh: 1305, label: '5x261 (1305 kWh)' },
+  { capacityKwh: 1566, label: '6x261 (1566 kWh)' },
+  { capacityKwh: 1827, label: '7x261 (1827 kWh)' },
   { capacityKwh: 2090, label: '2.09 MWh (2090 kWh)' },
   { capacityKwh: 5015, label: '5.015 MWh (5015 kWh)' }
 ];
@@ -112,7 +137,6 @@ export function determinePvAnalysisMode(intervals: Array<IntervalRecord | Proces
 
 export function getPvAnalysisLimitations(mode: PvAnalysisMode | null, strategy?: PvStrategy): string[] {
   const warnings: string[] = [];
-  if (mode === 'EXPORT_ONLY') warnings.push(EXPORT_ONLY_LIMITATION);
   if (mode == null) warnings.push(NO_PV_DATA_LIMITATION);
   if (strategy === 'PV_WITH_TRADING') warnings.push(TRADING_LIMITATION);
   return warnings;
@@ -384,8 +408,19 @@ export function generateScenarioOptions(params: {
   targetKwh: number;
   maxOptionsPerBase?: number;
   maxTotalOptions?: number;
+  profile?: ScenarioOptionProfile;
 }): ScenarioOption[] {
-  const { targetKwh, maxOptionsPerBase = 3, maxTotalOptions = 10 } = params;
+  const { targetKwh, maxOptionsPerBase = 3, maxTotalOptions = 10, profile = 'DEFAULT' } = params;
+
+  if (profile === 'HOME_PV') {
+    return HOME_PV_SCENARIO_OPTIONS.filter((option) => option.capacityKwh <= Math.max(64, targetKwh * 4))
+      .sort((a, b) => a.capacityKwh - b.capacityKwh);
+  }
+
+  if (profile === 'BUSINESS_PV') {
+    return BUSINESS_PV_SCENARIO_OPTIONS.filter((option) => option.capacityKwh <= Math.max(5015, targetKwh * 1.5))
+      .sort((a, b) => a.capacityKwh - b.capacityKwh);
+  }
 
   const modularOptions = MODULAR_BASE_SIZES.flatMap((baseSize) =>
     generateNearbyModularOptions({ baseSize, targetKwh, maxOptionsPerBase })
