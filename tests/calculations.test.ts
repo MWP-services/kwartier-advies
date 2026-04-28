@@ -217,7 +217,7 @@ describe('calculations', () => {
 
     expect(result.customerTypeDetected).toBe('business');
     expect(result.usedCustomerType).toBe('business');
-    expect([261, 522, 783, 1044, 1305, 1566, 1827, 2090, 5015]).toContain(result.roundedAdvice.recommendedKwh);
+    expect([232, 261, 464, 522, 696, 783, 928, 1044, 1160, 1305, 1392, 1566, 1624, 1827, 1856, 2090, 5015]).toContain(result.roundedAdvice.recommendedKwh);
     expect(result.roundedAdvice.recommendedKwh).toBeGreaterThan(40);
   });
 
@@ -470,6 +470,15 @@ describe('calculations', () => {
     expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(22225.98, 2);
   });
 
+  it('does not treat unpriced 232 kWh module as a free option', () => {
+    const result = selectMinimumCostBatteryOptions(200, 100);
+
+    expect(result.noFeasibleBatteryByPower).toBe(false);
+    expect(result.recommendedProduct?.label).toBe('1x 261 kWh (modulair)');
+    expect(result.recommendedProduct?.capacityKwh).toBe(261);
+    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(43995.96, 2);
+  });
+
   it('filters out candidates that meet kWh but not kW and selects a power-feasible option', () => {
     const result = selectMinimumCostBatteryOptions(70, 60);
 
@@ -480,7 +489,7 @@ describe('calculations', () => {
   });
 
   it('chooses the cheapest candidate that satisfies both kWh and kW', () => {
-    const result = selectMinimumCostBatteryOptions(200, 100);
+    const result = selectMinimumCostBatteryOptions(240, 120);
 
     expect(result.noFeasibleBatteryByPower).toBe(false);
     expect(result.recommendedProduct?.label).toBe('1x 261 kWh (modulair)');

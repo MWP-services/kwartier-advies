@@ -92,10 +92,11 @@ const NO_PV_DATA_LIMITATION = 'Geen bruikbare PV- of exportdata gevonden voor de
 const TRADING_LIMITATION = 'Trading mode allows stored PV energy to be exported later within the battery power and SOC limits.';
 const DEFAULT_PEAK_PRICE_HOURS = [17, 18, 19, 20];
 const INTERVAL_HOURS = 0.25;
-const MODULAR_BASE_SIZES = [64, 96, 261];
+const MODULAR_BASE_SIZES = [64, 96, 232, 261];
 const FIXED_SCENARIO_OPTIONS: ScenarioOption[] = [
   { capacityKwh: 64, label: '64 kWh' },
   { capacityKwh: 96, label: '96 kWh' },
+  { capacityKwh: 232, label: '232 kWh' },
   { capacityKwh: 261, label: '261 kWh' },
   { capacityKwh: 2090, label: '2.09 MWh (2090 kWh)' },
   { capacityKwh: 5015, label: '5.015 MWh (5015 kWh)' }
@@ -114,13 +115,21 @@ const HOME_PV_SCENARIO_OPTIONS: ScenarioOption[] = [
 const BUSINESS_PV_SCENARIO_OPTIONS: ScenarioOption[] = [
   { capacityKwh: 64, label: '64 kWh' },
   { capacityKwh: 96, label: '96 kWh' },
+  { capacityKwh: 232, label: '232 kWh' },
   { capacityKwh: 261, label: '261 kWh' },
+  { capacityKwh: 464, label: '2x232 (464 kWh)' },
   { capacityKwh: 522, label: '2x261 (522 kWh)' },
+  { capacityKwh: 696, label: '3x232 (696 kWh)' },
   { capacityKwh: 783, label: '3x261 (783 kWh)' },
+  { capacityKwh: 928, label: '4x232 (928 kWh)' },
   { capacityKwh: 1044, label: '4x261 (1044 kWh)' },
+  { capacityKwh: 1160, label: '5x232 (1160 kWh)' },
   { capacityKwh: 1305, label: '5x261 (1305 kWh)' },
+  { capacityKwh: 1392, label: '6x232 (1392 kWh)' },
   { capacityKwh: 1566, label: '6x261 (1566 kWh)' },
+  { capacityKwh: 1624, label: '7x232 (1624 kWh)' },
   { capacityKwh: 1827, label: '7x261 (1827 kWh)' },
+  { capacityKwh: 1856, label: '8x232 (1856 kWh)' },
   { capacityKwh: 2090, label: '2.09 MWh (2090 kWh)' },
   { capacityKwh: 5015, label: '5.015 MWh (5015 kWh)' }
 ];

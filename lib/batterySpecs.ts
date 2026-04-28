@@ -19,6 +19,12 @@ const BASE_BATTERY_SPECS: Record<number, BatterySpec> = {
     maxDischargeKw: 48,
     roundTripEfficiency: 0.9
   },
+  232: {
+    capacityKwh: 232,
+    maxChargeKw: 115,
+    maxDischargeKw: 115,
+    roundTripEfficiency: 0.9
+  },
   261: {
     capacityKwh: 261.24,
     maxChargeKw: 125,
@@ -39,7 +45,7 @@ const BASE_BATTERY_SPECS: Record<number, BatterySpec> = {
   }
 };
 
-const MODULAR_BASES = [261, 64, 96] as const;
+const MODULAR_BASES = [232, 261, 64, 96] as const;
 const CONTAINER_2090 = BASE_BATTERY_SPECS[2090];
 const CONTAINER_5015 = BASE_BATTERY_SPECS[5015];
 const FIXED_CAPACITY_TOLERANCE_KWH = 1;
@@ -68,7 +74,7 @@ function matchFixedContainer(capacityKwh: number): BatterySpec | null {
 }
 
 function matchSingleCabinet(capacityKwh: number): BatterySpec | null {
-  const candidates: Array<keyof typeof BASE_BATTERY_SPECS> = [64, 96, 261];
+  const candidates: Array<keyof typeof BASE_BATTERY_SPECS> = [64, 96, 232, 261];
   for (const key of candidates) {
     const spec = BASE_BATTERY_SPECS[key];
     if (

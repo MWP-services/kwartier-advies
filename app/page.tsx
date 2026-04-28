@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import type { AnalysisResult, AnalysisSettings } from '@/lib/analysis';
-import { analysisSettingsEqual, defaultAnalysisSettings } from '@/lib/analysis';
+import { defaultAnalysisSettings } from '@/lib/analysis';
 import { Charts } from '@/components/Charts';
 import { ColumnMapper } from '@/components/ColumnMapper';
 import { ComplianceSlider } from '@/components/ComplianceSlider';
@@ -26,7 +26,8 @@ import {
   listPeakMoments,
   processIntervals,
   selectTopExceededIntervals,
-  toScenarioResult
+  toScenarioResult,
+  type PvSelfConsumptionAdviceResult
 } from '@/lib/calculations';
 import {
   autoDetectColumns,
@@ -52,11 +53,27 @@ function mappingEqual(a: ColumnMapping | null, b: ColumnMapping): boolean {
   );
 }
 
+function technicalSettingsEqual(a: AnalysisSettings, b: AnalysisSettings): boolean {
+  return (
+    a.analysisType === b.analysisType &&
+    a.contractedPowerKw === b.contractedPowerKw &&
+    a.method === b.method &&
+    a.compliance === b.compliance &&
+    a.safetyFactor === b.safetyFactor &&
+    a.efficiency === b.efficiency &&
+    a.interpretationMode === b.interpretationMode &&
+    a.pvStrategy === b.pvStrategy &&
+    a.pvCustomerType === b.pvCustomerType &&
+    (a.includeHistogram ?? true) === (b.includeHistogram ?? true) &&
+    (a.includePeakEventsTable ?? true) === (b.includePeakEventsTable ?? true) &&
+    (a.includeScenarioSection ?? true) === (b.includeScenarioSection ?? true)
+  );
+}
+
 function runAnalysis(
   rawRows: Record<string, unknown>[],
   mapping: ColumnMapping,
-  settings: AnalysisSettings,
-  priceIntervals: PriceInterval[]
+  settings: AnalysisSettings
 ): AnalysisResult | null {
   const mappedRows = mapRows(rawRows, mapping);
   if (mappedRows.length === 0) return null;
@@ -71,18 +88,7 @@ function runAnalysis(
 
   const baseIntervals = processIntervals(normalized.normalizedRows, settings.contractedPowerKw);
   const quality = buildDataQualityReport(normalized.normalizedRows);
-  const pricingAttachment =
-    settings.analysisType === 'PV_SELF_CONSUMPTION' && settings.pvPricingMode !== 'average'
-      ? attachPricesToIntervals(baseIntervals, priceIntervals, {
-          pricingMode: settings.pvPricingMode,
-          averageImportPriceEurPerKwh: settings.pvImportPriceEurPerKwh,
-          averageExportPriceEurPerKwh: settings.pvExportCompensationEurPerKwh,
-          averageFeedInCostEurPerKwh: settings.pvFeedInCostEurPerKwh,
-          priceIntervals,
-          fallbackToAveragePrices: settings.pvFallbackToAveragePrices
-        })
-      : null;
-  const intervals = pricingAttachment?.intervalsWithPrices ?? baseIntervals;
+  const intervals = baseIntervals;
   const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
 
   if (settings.analysisType === 'PV_SELF_CONSUMPTION') {
@@ -92,18 +98,7 @@ function runAnalysis(
       customerType: settings.pvCustomerType
     });
     const hybridAdvice = computePvSelfConsumptionAdvice(intervals, {
-      customerType: settings.pvCustomerType,
-      economics: {
-        importPriceEurPerKwh: settings.pvImportPriceEurPerKwh,
-        exportCompensationEurPerKwh: settings.pvExportCompensationEurPerKwh,
-        feedInCostEurPerKwh: settings.pvFeedInCostEurPerKwh,
-        installationCostEur: settings.pvInstallationCostEur,
-        yearlyMaintenanceEur: settings.pvYearlyMaintenanceEur,
-        pricingMode: settings.pvPricingMode,
-        fallbackToAveragePrices: settings.pvFallbackToAveragePrices,
-        priceIntervals,
-        pricingStats: pricingAttachment?.pricingStats
-      }
+      customerType: settings.pvCustomerType
     });
     const sizing = buildSizingResultFromPvSelfConsumptionAdvice(formulaAdvice, hybridAdvice);
     const scenarios = hybridAdvice.simulationAdvice.allScenarios.map((scenario) =>
@@ -135,7 +130,7 @@ function runAnalysis(
       pvSummary,
       pvAdviceCharts,
       pvAnalysisMode,
-      pvWarnings: [...(pricingAttachment?.warnings ?? []), ...hybridAdvice.warnings]
+      pvWarnings: hybridAdvice.warnings
     };
   }
 
@@ -188,6 +183,7 @@ export default function HomePage() {
   const [draftSettings, setDraftSettings] = useState<AnalysisSettings>(defaultAnalysisSettings);
   const [appliedSettings, setAppliedSettings] = useState<AnalysisSettings | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [financialResult, setFinancialResult] = useState<PvSelfConsumptionAdviceResult | null>(null);
   const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
   const [priceIntervals, setPriceIntervals] = useState<PriceInterval[]>([]);
   const [variablePricePeriods, setVariablePricePeriods] = useState<PriceInterval[]>([
@@ -204,6 +200,7 @@ export default function HomePage() {
   const [selectedScenario, setSelectedScenario] = useState(64);
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isCalculatingFinancials, setIsCalculatingFinancials] = useState(false);
   const isPvMode = draftSettings.analysisType === 'PV_SELF_CONSUMPTION';
   const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
 
@@ -214,17 +211,38 @@ export default function HomePage() {
     draftSettings.efficiency > 0 &&
     (isPvMode || draftSettings.contractedPowerKw > 0) &&
     (isPvMode || (draftSettings.compliance >= 0.7 && draftSettings.compliance <= 1)) &&
-    (draftSettings.analysisType === 'PEAK_SHAVING' || hasPvInputs) &&
-    (draftSettings.analysisType !== 'PV_SELF_CONSUMPTION' ||
-      draftSettings.pvPricingMode === 'average' ||
-      (draftSettings.pvPricingMode === 'dynamic' &&
-        (priceIntervals.length > 0 || draftSettings.pvFallbackToAveragePrices)) ||
-      (draftSettings.pvPricingMode === 'variable' &&
-        variablePricePeriods.some((period) => !!period.startTs && !!period.endTs)));
+    (draftSettings.analysisType === 'PEAK_SHAVING' || hasPvInputs);
 
   const hasPendingChanges =
     !!appliedSettings &&
-    (!analysisSettingsEqual(draftSettings, appliedSettings) || !mappingEqual(appliedMapping, draftMapping));
+    (!technicalSettingsEqual(draftSettings, appliedSettings) || !mappingEqual(appliedMapping, draftMapping));
+
+  const financialSettingsKey = JSON.stringify({
+    pvPricingMode: draftSettings.pvPricingMode,
+    pvImportPriceEurPerKwh: draftSettings.pvImportPriceEurPerKwh,
+    pvExportCompensationEurPerKwh: draftSettings.pvExportCompensationEurPerKwh,
+    pvFeedInCostEurPerKwh: draftSettings.pvFeedInCostEurPerKwh,
+    pvInstallationCostEur: draftSettings.pvInstallationCostEur ?? null,
+    pvYearlyMaintenanceEur: draftSettings.pvYearlyMaintenanceEur ?? 0,
+    pvFallbackToAveragePrices: draftSettings.pvFallbackToAveragePrices,
+    priceFileName,
+    priceIntervalCount: priceIntervals.length,
+    variablePricePeriods
+  });
+  const previousFinancialSettingsKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (previousFinancialSettingsKeyRef.current === null) {
+      previousFinancialSettingsKeyRef.current = financialSettingsKey;
+      return;
+    }
+    if (previousFinancialSettingsKeyRef.current !== financialSettingsKey) {
+      previousFinancialSettingsKeyRef.current = financialSettingsKey;
+      if (financialResult) {
+        setFinancialResult(null);
+      }
+    }
+  }, [financialSettingsKey, financialResult]);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -249,6 +267,7 @@ export default function HomePage() {
       setAppliedSettings(null);
       setAppliedMapping(null);
       setAnalysisResult(null);
+      setFinancialResult(null);
       setAnalyzedAt(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Bestand kon niet worden ingelezen');
@@ -265,38 +284,16 @@ export default function HomePage() {
       setError('Voor PV-analyse is een pv_kwh- of export_kwh-kolom nodig.');
       return;
     }
-    if (
-      draftSettings.analysisType === 'PV_SELF_CONSUMPTION' &&
-      draftSettings.pvPricingMode === 'dynamic' &&
-      priceIntervals.length === 0 &&
-      !draftSettings.pvFallbackToAveragePrices
-    ) {
-      setError('Upload een prijsbestand of zet fallback naar gemiddelde prijzen aan.');
-      return;
-    }
-    if (
-      draftSettings.analysisType === 'PV_SELF_CONSUMPTION' &&
-      draftSettings.pvPricingMode === 'variable' &&
-      !variablePricePeriods.some((period) => !!period.startTs && !!period.endTs)
-    ) {
-      setError('Vul minimaal één geldige tariefperiode in.');
-      return;
-    }
     if (!canAnalyze) {
       setError('Controleer instellingen en data voordat je analyseert.');
       return;
     }
 
     setIsAnalyzing(true);
-    // Yield once so the UI can paint the loading state before heavy synchronous analysis starts.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
-      const effectivePriceIntervals =
-        draftSettings.pvPricingMode === 'variable'
-          ? variablePricePeriods.filter((period) => period.startTs && period.endTs)
-          : priceIntervals;
-      const result = runAnalysis(rawRows, draftMapping, draftSettings, effectivePriceIntervals);
+      const result = runAnalysis(rawRows, draftMapping, draftSettings);
       if (!result) {
         setError('Geen bruikbare rijen na normalisatie of filtering.');
         return;
@@ -305,6 +302,7 @@ export default function HomePage() {
       setAppliedSettings({ ...draftSettings });
       setAppliedMapping({ ...draftMapping });
       setAnalysisResult(result);
+      setFinancialResult(null);
       setSelectedScenario(result.sizing.recommendedProduct?.capacityKwh ?? result.scenarios[0]?.capacityKwh ?? 64);
       setAnalyzedAt(new Date().toISOString());
     } finally {
@@ -314,8 +312,7 @@ export default function HomePage() {
 
   const updateVariablePricePeriod = (index: number, patch: Partial<PriceInterval>) => {
     setVariablePricePeriods((prev) => prev.map((period, periodIndex) => (periodIndex === index ? { ...period, ...patch } : period)));
-    setAppliedSettings(null);
-    setAnalysisResult(null);
+    setFinancialResult(null);
   };
 
   const addVariablePricePeriod = () => {
@@ -330,14 +327,12 @@ export default function HomePage() {
         source: 'variable_period'
       }
     ]);
-    setAppliedSettings(null);
-    setAnalysisResult(null);
+    setFinancialResult(null);
   };
 
   const removeVariablePricePeriod = (index: number) => {
     setVariablePricePeriods((prev) => prev.filter((_, periodIndex) => periodIndex !== index));
-    setAppliedSettings(null);
-    setAnalysisResult(null);
+    setFinancialResult(null);
   };
 
   const handlePriceFile = async (file: File) => {
@@ -346,11 +341,67 @@ export default function HomePage() {
       const result = await parsePriceFile(file);
       setPriceIntervals(result.rows);
       setPriceFileName(file.name);
-      setAppliedSettings(null);
-      setAnalysisResult(null);
-      setAnalyzedAt(null);
+      setFinancialResult(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Prijsbestand kon niet worden ingelezen');
+    }
+  };
+
+  const handleCalculateFinancials = async () => {
+    setError(null);
+    if (!analysisResult || analysisResult.analysisType !== 'PV_SELF_CONSUMPTION') return;
+    if (
+      draftSettings.pvPricingMode === 'dynamic' &&
+      priceIntervals.length === 0 &&
+      !draftSettings.pvFallbackToAveragePrices
+    ) {
+      setError('Upload een prijsbestand of zet fallback naar gemiddelde prijzen aan.');
+      return;
+    }
+    if (
+      draftSettings.pvPricingMode === 'variable' &&
+      !variablePricePeriods.some((period) => !!period.startTs && !!period.endTs)
+    ) {
+      setError('Vul minimaal één geldige tariefperiode in.');
+      return;
+    }
+
+    setIsCalculatingFinancials(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    try {
+      const effectivePriceIntervals =
+        draftSettings.pvPricingMode === 'variable'
+          ? variablePricePeriods.filter((period) => period.startTs && period.endTs)
+          : priceIntervals;
+      const pricedIntervals =
+        draftSettings.pvPricingMode === 'average'
+          ? analysisResult.intervals
+          : attachPricesToIntervals(analysisResult.intervals, effectivePriceIntervals, {
+              pricingMode: draftSettings.pvPricingMode,
+              averageImportPriceEurPerKwh: draftSettings.pvImportPriceEurPerKwh,
+              averageExportPriceEurPerKwh: draftSettings.pvExportCompensationEurPerKwh,
+              averageFeedInCostEurPerKwh: draftSettings.pvFeedInCostEurPerKwh,
+              priceIntervals: effectivePriceIntervals,
+              fallbackToAveragePrices: draftSettings.pvFallbackToAveragePrices
+            }).intervalsWithPrices;
+
+      const financialAdvice = computePvSelfConsumptionAdvice(pricedIntervals, {
+        customerType: appliedSettings?.pvCustomerType ?? draftSettings.pvCustomerType,
+        economics: {
+          importPriceEurPerKwh: draftSettings.pvImportPriceEurPerKwh,
+          exportCompensationEurPerKwh: draftSettings.pvExportCompensationEurPerKwh,
+          feedInCostEurPerKwh: draftSettings.pvFeedInCostEurPerKwh,
+          installationCostEur: draftSettings.pvInstallationCostEur,
+          yearlyMaintenanceEur: draftSettings.pvYearlyMaintenanceEur,
+          pricingMode: draftSettings.pvPricingMode,
+          fallbackToAveragePrices: draftSettings.pvFallbackToAveragePrices,
+          priceIntervals: effectivePriceIntervals
+        }
+      });
+      setFinancialResult(financialAdvice);
+    } finally {
+      setIsCalculatingFinancials(false);
     }
   };
 
@@ -412,6 +463,7 @@ export default function HomePage() {
     }));
 
     const reportPayload = {
+      reportVariant: 'advice',
       analysisType: appliedSettings.analysisType,
       contractedPowerKw: appliedSettings.contractedPowerKw,
       maxObservedKw: analysisResult.maxObservedKw,
@@ -452,6 +504,63 @@ export default function HomePage() {
     URL.revokeObjectURL(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download van rapport mislukt');
+    }
+  };
+
+  const downloadFinancialReport = async () => {
+    if (!analysisResult || !appliedSettings || !financialResult || analysisResult.analysisType !== 'PV_SELF_CONSUMPTION') return;
+    const formulaAdvice = analysisResult.sizing.pvFormulaAdvice ?? computePvStorageFormulaAdvice(analysisResult.intervals, {
+      customerType: appliedSettings.pvCustomerType
+    });
+    const sizing = buildSizingResultFromPvSelfConsumptionAdvice(formulaAdvice, financialResult);
+    const reportScenarios = financialResult.simulationAdvice.allScenarios.map((scenario) =>
+      toScenarioResult({
+        ...scenario,
+        optionLabel: `${scenario.capacityKwh} kWh / ${scenario.dischargePowerKw.toFixed(1)} kW`
+      })
+    );
+    const reportPayload = {
+      reportVariant: 'financial',
+      analysisType: appliedSettings.analysisType,
+      contractedPowerKw: appliedSettings.contractedPowerKw,
+      maxObservedKw: analysisResult.maxObservedKw,
+      maxObservedTimestamp: analysisResult.maxObservedTimestamp,
+      exceedanceCount: analysisResult.exceedanceIntervals,
+      compliance: appliedSettings.compliance,
+      method: appliedSettings.method,
+      efficiency: appliedSettings.efficiency,
+      safetyFactor: appliedSettings.safetyFactor,
+      pvStrategy: appliedSettings.pvStrategy,
+      sizing,
+      quality: analysisResult.quality,
+      topEvents: analysisResult.events,
+      peakMoments: analysisResult.peakMoments,
+      intervals: analysisResult.intervals,
+      highestPeakDay: analysisResult.highestPeakDay,
+      pvSummary: analysisResult.pvSummary,
+      pvAdviceCharts: buildPvAdviceChartsData(formulaAdvice, analysisResult.intervals, financialResult),
+      scenarios: reportScenarios
+    };
+
+    try {
+      const response = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reportPayload)
+      });
+      if (!response.ok) {
+        throw new Error(`Financieel rapport download mislukt (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `wattsnext-pv-financial-report-${Date.now()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download van financieel rapport mislukt');
     }
   };
 
@@ -576,252 +685,7 @@ export default function HomePage() {
                 <option value="business">Business</option>
               </select>
             </label>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm lg:col-span-3">
-              <h3 className="font-semibold text-slate-900">Financiële berekening</h3>
-              <p className="mt-1 text-slate-600">
-                Bij dynamische prijzen wordt de waarde van de batterij per interval berekend. De batterij laadt in PV_SELF_CONSUMPTION nog steeds alleen met zonne-overschot en wordt niet gebruikt voor actieve handel met netstroom.
-              </p>
-              <div className="mt-3 grid gap-4 lg:grid-cols-3">
-                <label className="text-sm">
-                  Contracttype
-                  <select
-                    className="wx-input"
-                    value={draftSettings.pvPricingMode}
-                    onChange={(event) =>
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        pvPricingMode: event.target.value as AnalysisSettings['pvPricingMode']
-                      }))
-                    }
-                  >
-                    <option value="average">Vast tarief</option>
-                    <option value="variable">Variabel contract</option>
-                    <option value="dynamic">Dynamische prijzen</option>
-                  </select>
-                </label>
-                <label className="text-sm">
-                  Importprijs / fallback (EUR/kWh)
-                  <input
-                    className="wx-input"
-                    type="number"
-                    step="0.01"
-                    value={draftSettings.pvImportPriceEurPerKwh}
-                    onChange={(event) =>
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        pvImportPriceEurPerKwh: Number(event.target.value)
-                      }))
-                    }
-                  />
-                </label>
-                <label className="text-sm">
-                  Terugleververgoeding / fallback (EUR/kWh)
-                  <input
-                    className="wx-input"
-                    type="number"
-                    step="0.01"
-                    value={draftSettings.pvExportCompensationEurPerKwh}
-                    onChange={(event) =>
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        pvExportCompensationEurPerKwh: Number(event.target.value)
-                      }))
-                    }
-                  />
-                </label>
-                <label className="text-sm">
-                  Terugleverkosten / fallback (EUR/kWh)
-                  <input
-                    className="wx-input"
-                    type="number"
-                    step="0.01"
-                    value={draftSettings.pvFeedInCostEurPerKwh}
-                    onChange={(event) =>
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        pvFeedInCostEurPerKwh: Number(event.target.value)
-                      }))
-                    }
-                  />
-                </label>
-                <label className="text-sm">
-                  Installatiekosten (optioneel, EUR)
-                  <input
-                    className="wx-input"
-                    type="number"
-                    step="100"
-                    value={draftSettings.pvInstallationCostEur ?? ''}
-                    onChange={(event) =>
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        pvInstallationCostEur:
-                          event.target.value === '' ? undefined : Number(event.target.value)
-                      }))
-                    }
-                  />
-                </label>
-                <label className="text-sm">
-                  Jaarlijks onderhoud / kosten (EUR)
-                  <input
-                    className="wx-input"
-                    type="number"
-                    step="10"
-                    value={draftSettings.pvYearlyMaintenanceEur ?? 0}
-                    onChange={(event) =>
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        pvYearlyMaintenanceEur: Number(event.target.value)
-                      }))
-                    }
-                  />
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={draftSettings.pvFallbackToAveragePrices}
-                    onChange={(event) =>
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        pvFallbackToAveragePrices: event.target.checked
-                      }))
-                    }
-                  />
-                  Fallback naar gemiddelde prijzen toestaan
-                </label>
-                {draftSettings.pvPricingMode === 'variable' && (
-                  <div className="lg:col-span-3">
-                    <div className="rounded-lg border border-slate-200 bg-white p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-sm font-medium text-slate-900">Tariefperiodes</p>
-                        <button className="wx-btn-secondary" type="button" onClick={addVariablePricePeriod}>
-                          Periode toevoegen
-                        </button>
-                      </div>
-                      <div className="grid gap-3">
-                        {variablePricePeriods.map((period, index) => (
-                          <div
-                            key={`${index}-${period.startTs}-${period.endTs}`}
-                            className="grid gap-3 rounded-lg border border-slate-200 p-3 lg:grid-cols-5"
-                          >
-                            <label className="text-xs">
-                              Startdatum
-                              <input
-                                className="wx-input"
-                                type="datetime-local"
-                                value={period.startTs ? period.startTs.slice(0, 16) : ''}
-                                onChange={(event) =>
-                                  updateVariablePricePeriod(index, {
-                                    startTs: event.target.value ? new Date(event.target.value).toISOString() : ''
-                                  })
-                                }
-                              />
-                            </label>
-                            <label className="text-xs">
-                              Einddatum
-                              <input
-                                className="wx-input"
-                                type="datetime-local"
-                                value={period.endTs ? period.endTs.slice(0, 16) : ''}
-                                onChange={(event) =>
-                                  updateVariablePricePeriod(index, {
-                                    endTs: event.target.value ? new Date(event.target.value).toISOString() : ''
-                                  })
-                                }
-                              />
-                            </label>
-                            <label className="text-xs">
-                              Importprijs
-                              <input
-                                className="wx-input"
-                                type="number"
-                                step="0.01"
-                                value={period.importPriceEurPerKwh}
-                                onChange={(event) =>
-                                  updateVariablePricePeriod(index, {
-                                    importPriceEurPerKwh: Number(event.target.value)
-                                  })
-                                }
-                              />
-                            </label>
-                            <label className="text-xs">
-                              Exportvergoeding
-                              <input
-                                className="wx-input"
-                                type="number"
-                                step="0.01"
-                                value={period.exportPriceEurPerKwh}
-                                onChange={(event) =>
-                                  updateVariablePricePeriod(index, {
-                                    exportPriceEurPerKwh: Number(event.target.value)
-                                  })
-                                }
-                              />
-                            </label>
-                            <div className="flex items-end gap-2">
-                              <label className="text-xs">
-                                Terugleverkosten
-                                <input
-                                  className="wx-input"
-                                  type="number"
-                                  step="0.01"
-                                  value={period.feedInCostEurPerKwh ?? 0}
-                                  onChange={(event) =>
-                                    updateVariablePricePeriod(index, {
-                                      feedInCostEurPerKwh: Number(event.target.value),
-                                      source: 'variable_period'
-                                    })
-                                  }
-                                />
-                              </label>
-                              {variablePricePeriods.length > 1 && (
-                                <button
-                                  className="wx-btn-secondary"
-                                  type="button"
-                                  onClick={() => removeVariablePricePeriod(index)}
-                                >
-                                  Verwijderen
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {draftSettings.pvPricingMode === 'dynamic' && (
-                  <label className="text-sm">
-                    Upload prijsbestand (CSV/XLSX)
-                    <input
-                      className="wx-input"
-                      type="file"
-                      accept=".csv,.xlsx,.xls"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (file) {
-                          void handlePriceFile(file);
-                        }
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
-              {draftSettings.pvPricingMode !== 'average' && (
-                <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600">
-                  <p>Prijsbestand: {priceFileName ?? 'Nog niet geüpload'}</p>
-                  <p>Gekoppelde prijspunten: {draftSettings.pvPricingMode === 'dynamic' ? priceIntervals.length : variablePricePeriods.length}</p>
-                  {analysisResult?.sizing.pvSelfConsumptionAdvice?.configUsed.pricingStats && (
-                    <>
-                      <p>Exacte matches: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.exactMatches}</p>
-                      <p>Uurmatches: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.hourlyMatches}</p>
-                      <p>Periode-matches: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.variablePeriodMatches}</p>
-                      <p>Fallbackmatches: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.fallbackMatches}</p>
-                      <p>Ontbrekende prijzen: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.missingPrices}</p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+
           </>
         )}
 
@@ -1062,10 +926,7 @@ export default function HomePage() {
                           {hybrid.simulationAdvice.recommended.cyclesPerYear.toFixed(1)} cycli/jaar.
                         </p>
                         <p>
-                          Jaarlijkse waarde: EUR {hybrid.simulationAdvice.recommended.annualValueEur?.toFixed(2) ?? '0.00'}.
-                          {hybrid.simulationAdvice.recommended.paybackYears != null
-                            ? ` Terugverdientijd: ${hybrid.simulationAdvice.recommended.paybackYears.toFixed(1)} jaar.`
-                            : ''}
+                          Financi?le berekening en terugverdientijd worden pas hieronder apart doorgerekend op basis van contracttype en prijsdata.
                         </p>
                       </>
                     )}
@@ -1089,6 +950,204 @@ export default function HomePage() {
                 charts={analysisResult.pvAdviceCharts}
               />
             )}
+
+          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && (
+            <div className="wx-card">
+              <h3 className="wx-title">Financiële berekening na advies</h3>
+              <p className="text-sm text-slate-600">
+                Eerst is het technische batterijadvies bepaald. Vul daarna de financiële aannames in om de terugverdientijd en onderbouwing apart te berekenen en te downloaden.
+              </p>
+              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                <label className="text-sm">
+                  Contracttype
+                  <select
+                    className="wx-input"
+                    value={draftSettings.pvPricingMode}
+                    onChange={(event) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        pvPricingMode: event.target.value as AnalysisSettings['pvPricingMode']
+                      }))
+                    }
+                  >
+                    <option value="dynamic">Dynamisch contract</option>
+                    <option value="average">Vast tarief</option>
+                    <option value="variable">Variabel contract</option>
+                  </select>
+                </label>
+                <label className="text-sm">
+                  Importprijs / fallback (EUR/kWh)
+                  <input className="wx-input" type="number" step="0.01" value={draftSettings.pvImportPriceEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvImportPriceEurPerKwh: Number(event.target.value) }))} />
+                </label>
+                <label className="text-sm">
+                  Terugleververgoeding / fallback (EUR/kWh)
+                  <input className="wx-input" type="number" step="0.01" value={draftSettings.pvExportCompensationEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvExportCompensationEurPerKwh: Number(event.target.value) }))} />
+                </label>
+                <label className="text-sm">
+                  Terugleverkosten / fallback (EUR/kWh)
+                  <input className="wx-input" type="number" step="0.01" value={draftSettings.pvFeedInCostEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvFeedInCostEurPerKwh: Number(event.target.value) }))} />
+                </label>
+                <label className="text-sm">
+                  Investering (EUR)
+                  <input className="wx-input" type="number" step="100" value={draftSettings.pvInstallationCostEur ?? ''} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvInstallationCostEur: event.target.value === '' ? undefined : Number(event.target.value) }))} />
+                </label>
+                <label className="text-sm">
+                  Jaarlijks onderhoud / kosten (EUR)
+                  <input className="wx-input" type="number" step="10" value={draftSettings.pvYearlyMaintenanceEur ?? 0} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvYearlyMaintenanceEur: Number(event.target.value) }))} />
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={draftSettings.pvFallbackToAveragePrices} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvFallbackToAveragePrices: event.target.checked }))} />
+                  Fallback naar gemiddelde prijzen toestaan
+                </label>
+                {draftSettings.pvPricingMode === 'variable' && (
+                  <div className="lg:col-span-3">
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="text-sm font-medium text-slate-900">Tariefperiodes</p>
+                        <button className="wx-btn-secondary" type="button" onClick={addVariablePricePeriod}>
+                          Periode toevoegen
+                        </button>
+                      </div>
+                      <div className="grid gap-3">
+                        {variablePricePeriods.map((period, index) => (
+                          <div
+                            key={`${index}-${period.startTs}-${period.endTs}`}
+                            className="grid gap-3 rounded-lg border border-slate-200 p-3 lg:grid-cols-5"
+                          >
+                            <label className="text-xs">
+                              Startdatum
+                              <input
+                                className="wx-input"
+                                type="datetime-local"
+                                value={period.startTs ? period.startTs.slice(0, 16) : ''}
+                                onChange={(event) =>
+                                  updateVariablePricePeriod(index, {
+                                    startTs: event.target.value ? new Date(event.target.value).toISOString() : ''
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="text-xs">
+                              Einddatum
+                              <input
+                                className="wx-input"
+                                type="datetime-local"
+                                value={period.endTs ? period.endTs.slice(0, 16) : ''}
+                                onChange={(event) =>
+                                  updateVariablePricePeriod(index, {
+                                    endTs: event.target.value ? new Date(event.target.value).toISOString() : ''
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="text-xs">
+                              Importprijs
+                              <input
+                                className="wx-input"
+                                type="number"
+                                step="0.01"
+                                value={period.importPriceEurPerKwh}
+                                onChange={(event) =>
+                                  updateVariablePricePeriod(index, {
+                                    importPriceEurPerKwh: Number(event.target.value)
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="text-xs">
+                              Exportvergoeding
+                              <input
+                                className="wx-input"
+                                type="number"
+                                step="0.01"
+                                value={period.exportPriceEurPerKwh}
+                                onChange={(event) =>
+                                  updateVariablePricePeriod(index, {
+                                    exportPriceEurPerKwh: Number(event.target.value)
+                                  })
+                                }
+                              />
+                            </label>
+                            <div className="flex items-end gap-2">
+                              <label className="text-xs">
+                                Terugleverkosten
+                                <input
+                                  className="wx-input"
+                                  type="number"
+                                  step="0.01"
+                                  value={period.feedInCostEurPerKwh ?? 0}
+                                  onChange={(event) =>
+                                    updateVariablePricePeriod(index, {
+                                      feedInCostEurPerKwh: Number(event.target.value),
+                                      source: 'variable_period'
+                                    })
+                                  }
+                                />
+                              </label>
+                              {variablePricePeriods.length > 1 && (
+                                <button
+                                  className="wx-btn-secondary"
+                                  type="button"
+                                  onClick={() => removeVariablePricePeriod(index)}
+                                >
+                                  Verwijderen
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {draftSettings.pvPricingMode === 'dynamic' && (
+                  <label className="text-sm">
+                    Upload prijsbestand (CSV/XLSX)
+                    <input className="wx-input" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handlePriceFile(file); }} />
+                  </label>
+                )}
+              </div>
+              {draftSettings.pvPricingMode !== 'average' && (
+                <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600">
+                  <p>Prijsbestand: {priceFileName ?? 'Nog niet geüpload'}</p>
+                  <p>Gekoppelde prijspunten: {draftSettings.pvPricingMode === 'dynamic' ? priceIntervals.length : variablePricePeriods.length}</p>
+                  {financialResult?.configUsed.pricingStats && (
+                    <>
+                      <p>Exacte matches: {financialResult.configUsed.pricingStats.exactMatches}</p>
+                      <p>Uurmatches: {financialResult.configUsed.pricingStats.hourlyMatches}</p>
+                      <p>Periode-matches: {financialResult.configUsed.pricingStats.variablePeriodMatches}</p>
+                      <p>Fallbackmatches: {financialResult.configUsed.pricingStats.fallbackMatches}</p>
+                      <p>Ontbrekende prijzen: {financialResult.configUsed.pricingStats.missingPrices}</p>
+                    </>
+                  )}
+                </div>
+              )}
+              <div className="mt-4 flex gap-2">
+                <button className="wx-btn-primary" onClick={handleCalculateFinancials} disabled={isCalculatingFinancials || hasPendingChanges}>
+                  {isCalculatingFinancials ? 'Berekenen...' : 'Bereken terugverdientijd'}
+                </button>
+                <button className="wx-btn-secondary" onClick={downloadFinancialReport} disabled={!financialResult || hasPendingChanges}>
+                  Download financieel rapport
+                </button>
+              </div>
+              {financialResult && (
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                  <p className="font-semibold text-slate-900">
+                    Terugverdientijd aanbevolen batterij: {financialResult.simulationAdvice.recommended.paybackYears != null ? `${financialResult.simulationAdvice.recommended.paybackYears.toFixed(1)} jaar` : 'niet positief / niet binnen levensduur'}
+                  </p>
+                  <p className="mt-1">
+                    Netto jaarlijkse besparing: EUR {financialResult.simulationAdvice.recommended.netAnnualSavingsEur?.toFixed(2) ?? '0.00'} bij een investering van EUR {(draftSettings.pvInstallationCostEur ?? 0).toFixed(2)}.
+                  </p>
+                  <p className="mt-1">
+                    Onderbouwing: zonder batterij import {financialResult.simulationAdvice.recommended.importBeforeKwh.toFixed(1)} kWh en export {financialResult.simulationAdvice.recommended.exportBeforeKwh.toFixed(1)} kWh; met batterij import {financialResult.simulationAdvice.recommended.importAfterKwh.toFixed(1)} kWh en export {financialResult.simulationAdvice.recommended.exportAfterKwh.toFixed(1)} kWh.
+                  </p>
+                  {financialResult.simulationAdvice.recommended.paybackIndicative && (
+                    <p className="mt-1 text-amber-700">De terugverdientijd is indicatief omdat een deel van de prijsdata met fallbacktarieven is berekend.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' ? (
             <details className="wx-card">
@@ -1192,7 +1251,7 @@ export default function HomePage() {
               onClick={downloadReport}
               disabled={!analysisResult}
             >
-              Download interactief rapport
+              Download adviesrapport
             </button>
           </div>
         </>

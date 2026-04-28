@@ -65,6 +65,11 @@ describe('simulation', () => {
     expect(options.find((option) => option.label === '2x261 (522 kWh)')).toBeTruthy();
   });
 
+  it('target=500 includes nearby modular 2x232 (464 kWh)', () => {
+    const options = generateScenarioOptions({ targetKwh: 500, maxTotalOptions: 12 });
+    expect(options.find((option) => option.label === '2x232 (464 kWh)')).toBeTruthy();
+  });
+
   it('includes smaller-than-target options so impact progression remains visible', () => {
     const options = generateScenarioOptions({ targetKwh: 500, maxTotalOptions: 12 });
 

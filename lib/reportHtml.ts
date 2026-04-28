@@ -55,9 +55,9 @@ function getRecommendedBrochureInfo(payload: PdfPayload): { key: string; dataUri
   if (!product) return null;
 
   const baseKey =
-    product.unitCapacityKwh && [64, 96, 261].includes(Math.round(product.unitCapacityKwh))
+    product.unitCapacityKwh && [64, 96, 232, 261].includes(Math.round(product.unitCapacityKwh))
       ? String(Math.round(product.unitCapacityKwh))
-      : [2090, 5015].includes(Math.round(product.capacityKwh))
+      : [232, 2090, 5015].includes(Math.round(product.capacityKwh))
         ? String(Math.round(product.capacityKwh))
         : null;
 
@@ -488,6 +488,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
 function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
   const embeddedLogoSrc = getEmbeddedLogoSrc();
   const brochure = getRecommendedBrochureInfo(payload);
+  const isFinancialReport = payload.reportVariant === 'financial';
   const formulaAdvice = payload.sizing.pvFormulaAdvice;
   const hybridAdvice = payload.sizing.pvSelfConsumptionAdvice;
   const pvCharts = payload.pvAdviceCharts;
@@ -531,7 +532,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WattsNext PV Opslag Rapport</title>
+  <title>${isFinancialReport ? 'WattsNext Onderbouwing Terugverdientijd' : 'WattsNext PV Opslag Rapport'}</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
     :root { --bg:#fff; --text:#232323; --muted:#8D8D8D; --green:#4E8D3E; --green-dark:#3B812B; --border:#E6E6E6; --header-row:#EEF7EA; --callout:#F7F9F7; --zebra:#FAFAFA; }
@@ -573,12 +574,12 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         ${embeddedLogoSrc ? `<img src="${embeddedLogoSrc}" alt="WattsNext logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" /><div class="logoFallback">WattsNext</div>` : `<div class="logoFallback" style="display:block;">WattsNext</div>`}
       </div>
       <div class="brand">
-        <h1>PV Self Consumption Rapport</h1>
+        <h1>${isFinancialReport ? 'Onderbouwing Terugverdientijd' : 'PV Self Consumption Rapport'}</h1>
         <p>ENERGIEOPLOSSINGEN</p>
       </div>
       <div>
         <div class="pill">${hybridAdvice?.usedCustomerType ?? formulaAdvice?.usedCustomerType ?? 'PV analyse'}</div>
-        <div class="muted" style="margin-top:8px;">Formulebasis plus kwartiersimulatie</div>
+        <div class="muted" style="margin-top:8px;">${isFinancialReport ? 'Financiële doorrekening op basis van bestaand technisch advies' : 'Formulebasis plus kwartiersimulatie'}</div>
       </div>
     </section>
 
@@ -588,7 +589,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>1. Samenvatting batterijadvies</h3>
+        <h3>${isFinancialReport ? '1. Samenvatting terugverdientijd' : '1. Samenvatting batterijadvies'}</h3>
         <table><tbody>
           <tr><th>Aanbevolen configuratie</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
           <tr><th>Benodigde capaciteit</th><td>${payload.sizing.kWhNeeded.toFixed(2)} kWh</td></tr>
@@ -596,27 +597,34 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
           <tr><th>Importreductie per jaar</th><td>${recommendedScenario ? `${recommendedScenario.importReductionKwhAnnualized.toFixed(2)} kWh/jaar` : '-'}</td></tr>
           <tr><th>Exportreductie per jaar</th><td>${recommendedScenario ? `${recommendedScenario.exportReductionKwhAnnualized.toFixed(2)} kWh/jaar` : '-'}</td></tr>
           <tr><th>Cycli per jaar</th><td>${recommendedScenario ? recommendedScenario.cyclesPerYear.toFixed(1) : '-'}</td></tr>
-          <tr><th>Prijsmodus</th><td>${pricingMode === 'dynamic' ? 'Dynamische prijzen' : 'Gemiddelde tarieven'}</td></tr>
-          <tr><th>Gem. importprijs</th><td>${hybridAdvice?.configUsed.importPriceEurPerKwh != null ? `EUR ${hybridAdvice.configUsed.importPriceEurPerKwh.toFixed(3)}/kWh` : '-'}</td></tr>
-          <tr><th>Gem. exportvergoeding</th><td>${hybridAdvice?.configUsed.exportCompensationEurPerKwh != null ? `EUR ${hybridAdvice.configUsed.exportCompensationEurPerKwh.toFixed(3)}/kWh` : '-'}</td></tr>
           ${
-            pricingMode === 'dynamic' && pricingStats
-              ? `<tr><th>Exacte prijs-matches</th><td>${pricingStats.exactMatches}</td></tr>
-                 <tr><th>Uurmatches</th><td>${pricingStats.hourlyMatches}</td></tr>
-                 <tr><th>Periode-matches</th><td>${pricingStats.variablePeriodMatches}</td></tr>
-                 <tr><th>Fallbackmatches</th><td>${pricingStats.fallbackMatches}</td></tr>
-                 <tr><th>Ontbrekende prijzen</th><td>${pricingStats.missingPrices}</td></tr>`
+            isFinancialReport
+              ? `<tr><th>Prijsmodus</th><td>${pricingMode === 'dynamic' ? 'Dynamische prijzen' : 'Gemiddelde tarieven'}</td></tr>
+                 <tr><th>Gem. importprijs</th><td>${hybridAdvice?.configUsed.importPriceEurPerKwh != null ? `EUR ${hybridAdvice.configUsed.importPriceEurPerKwh.toFixed(3)}/kWh` : '-'}</td></tr>
+                 <tr><th>Gem. exportvergoeding</th><td>${hybridAdvice?.configUsed.exportCompensationEurPerKwh != null ? `EUR ${hybridAdvice.configUsed.exportCompensationEurPerKwh.toFixed(3)}/kWh` : '-'}</td></tr>
+                 ${
+                   pricingMode === 'dynamic' && pricingStats
+                     ? `<tr><th>Exacte prijs-matches</th><td>${pricingStats.exactMatches}</td></tr>
+                        <tr><th>Uurmatches</th><td>${pricingStats.hourlyMatches}</td></tr>
+                        <tr><th>Periode-matches</th><td>${pricingStats.variablePeriodMatches}</td></tr>
+                        <tr><th>Fallbackmatches</th><td>${pricingStats.fallbackMatches}</td></tr>
+                        <tr><th>Ontbrekende prijzen</th><td>${pricingStats.missingPrices}</td></tr>`
+                     : ''
+                 }
+                 <tr><th>Jaarlijkse waarde</th><td>${recommendedScenario?.annualValueEur != null ? `EUR ${recommendedScenario.annualValueEur.toFixed(2)}` : 'Niet berekend'}</td></tr>`
               : ''
           }
-          <tr><th>Jaarlijkse waarde</th><td>${recommendedScenario?.annualValueEur != null ? `EUR ${recommendedScenario.annualValueEur.toFixed(2)}` : 'Niet berekend'}</td></tr>
         </tbody></table>
         <div class="callout">
           ${recommendedScenario?.recommendationReason ?? 'Deze batterij is gekozen op basis van dagelijkse opslagbehoefte en kwartiersimulatie.'}
-          <br /><br />
           ${
-            pricingMode === 'dynamic'
-              ? 'De dynamische prijsmodule berekent per interval het verschil tussen de situatie zonder batterij en met batterij. In deze PV-zelfverbruikmodus wordt niet actief geladen vanaf het net voor energiehandel.'
-              : 'De financiële waarde is gebaseerd op gemiddelde import- en exporttarieven en is dus een indicatieve benadering.'
+            isFinancialReport
+              ? `<br /><br />${
+                  pricingMode === 'dynamic'
+                    ? 'De dynamische prijsmodule berekent per interval het verschil tussen de situatie zonder batterij en met batterij. In deze PV-zelfverbruikmodus wordt niet actief geladen vanaf het net voor energiehandel.'
+                    : 'De financi??le waarde is gebaseerd op gemiddelde import- en exporttarieven en is dus een indicatieve benadering.'
+                }`
+              : ''
           }
         </div>
       </div>
@@ -677,7 +685,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
     </section>
 
     ${
-      pricingMode === 'dynamic'
+      isFinancialReport && pricingMode === 'dynamic'
         ? `<section class="grid two">
       <div class="card">
         <h3>Financiële impact per batterijgrootte</h3>
@@ -731,7 +739,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
 
     <footer class="footer">
       <div>WattsNext Energieoplossingen</div>
-      <div>PV self-consumption rapport</div>
+      <div>${isFinancialReport ? 'Financieel PV self-consumption rapport' : 'PV self-consumption rapport'}</div>
     </footer>
   </div>
 
@@ -1232,7 +1240,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
                    <p class="muted">Uw browser ondersteunt geen inline PDF-weergave. Open het HTML-rapport in een moderne browser.</p>
                  </object>`
               : `<img class="brochureFrame" src="${brochure.dataUri}" alt="Productsheet batterij ${brochure.key}" style="object-fit:contain;" />`
-            : `<div class="callout"><p class="callout-title">Productsheet niet gevonden</p><p class="callout-body">Verwacht in assets: 64.pdf / 96.pdf / 261.pdf / 2090.pdf / 5015.pdf (of .jpg) op basis van de aanbevolen batterij.</p></div>`
+            : `<div class="callout"><p class="callout-title">Productsheet niet gevonden</p><p class="callout-body">Verwacht in assets: 64.pdf / 96.pdf / 232.pdf / 261.pdf / 2090.pdf / 5015.pdf (of .jpg) op basis van de aanbevolen batterij.</p></div>`
         }
         ${brochure ? `<div class="muted" style="margin-top:8px;">Gekoppelde brochure: ${brochure.key}</div>` : ''}
       </div>

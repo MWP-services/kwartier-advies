@@ -368,8 +368,8 @@ export interface BatteryBreakdown {
   type: string;
   count: number;
   unitCapacityKwh: number;
-  unitPriceEur: number;
-  totalPriceEur: number;
+  unitPriceEur?: number;
+  totalPriceEur?: number;
 }
 
 export interface ExceededInterval {
@@ -414,6 +414,12 @@ export const BATTERY_OPTIONS: BatteryProduct[] = [
     unitPriceEur: 22225.98
   },
   {
+    label: 'ES232_115K-A 232 kWh',
+    capacityKwh: 232,
+    powerKw: 115,
+    modular: true
+  },
+  {
     label: 'ESS All-in-one Cabinet 261 kWh',
     capacityKwh: 261,
     powerKw: 125,
@@ -440,13 +446,13 @@ interface BatteryConfigurationCandidate {
   label: string;
   totalCapacityKwh: number;
   totalPowerKw: number;
-  totalPriceEur: number;
+  totalPriceEur?: number;
   overCapacityKwh: number;
   overPowerKw: number;
   count: number;
   unitCapacityKwh: number;
   unitPowerKw: number;
-  unitPriceEur: number;
+  unitPriceEur?: number;
 }
 
 function roundCurrency(value: number): number {
@@ -454,7 +460,7 @@ function roundCurrency(value: number): number {
 }
 
 function toBatteryProduct(candidate: BatteryConfigurationCandidate): BatteryProduct {
-  const totalPriceEur = roundCurrency(candidate.totalPriceEur);
+  const totalPriceEur = candidate.totalPriceEur == null ? undefined : roundCurrency(candidate.totalPriceEur);
   return {
     label: candidate.label,
     capacityKwh: candidate.totalCapacityKwh,
@@ -462,15 +468,15 @@ function toBatteryProduct(candidate: BatteryConfigurationCandidate): BatteryProd
     unitCapacityKwh: candidate.unitCapacityKwh,
     unitPowerKw: candidate.unitPowerKw,
     count: candidate.count,
-    unitPriceEur: roundCurrency(candidate.unitPriceEur),
-    totalPriceEur,
+    unitPriceEur: candidate.unitPriceEur == null ? undefined : roundCurrency(candidate.unitPriceEur),
+    totalPriceEur: candidate.totalPriceEur == null ? undefined : totalPriceEur,
     breakdown: [
       {
         type: `${candidate.unitCapacityKwh} kWh`,
         count: candidate.count,
         unitCapacityKwh: candidate.unitCapacityKwh,
-        unitPriceEur: roundCurrency(candidate.unitPriceEur),
-        totalPriceEur
+        unitPriceEur: candidate.unitPriceEur == null ? undefined : roundCurrency(candidate.unitPriceEur),
+        totalPriceEur: candidate.totalPriceEur == null ? undefined : totalPriceEur
       }
     ]
   };
@@ -486,7 +492,7 @@ export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw 
   const candidates: BatteryConfigurationCandidate[] = [];
 
   BATTERY_OPTIONS.forEach((option) => {
-    const unitPriceEur = option.unitPriceEur ?? 0;
+    const unitPriceEur = option.unitPriceEur;
     if (option.modular) {
       const minCountByKwh = Math.ceil(normalizedRequiredKwh / option.capacityKwh);
       const minCountByKw = Math.ceil(normalizedRequiredKw / option.powerKw);
@@ -496,7 +502,7 @@ export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw 
         const totalCapacityKwh = count * option.capacityKwh;
         const totalPowerKw = count * option.powerKw;
         if (totalCapacityKwh < normalizedRequiredKwh || totalPowerKw < normalizedRequiredKw) continue;
-        const totalPriceEur = count * unitPriceEur;
+        const totalPriceEur = unitPriceEur == null ? undefined : count * unitPriceEur;
         candidates.push({
           label: `${count}x ${option.capacityKwh} kWh (modulair)`,
           totalCapacityKwh,
@@ -531,7 +537,8 @@ export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw 
 
   const sorted = candidates.sort(
     (a, b) =>
-      a.totalPriceEur - b.totalPriceEur ||
+      (a.totalPriceEur == null ? 1 : 0) - (b.totalPriceEur == null ? 1 : 0) ||
+      (a.totalPriceEur ?? 0) - (b.totalPriceEur ?? 0) ||
       a.overCapacityKwh - b.overCapacityKwh ||
       a.overPowerKw - b.overPowerKw ||
       a.totalCapacityKwh - b.totalCapacityKwh
@@ -610,7 +617,27 @@ export const DEFAULT_PV_STORAGE_FORMULA_CONFIG: PvStorageFormulaAdviceConfig = {
   customerType: 'auto',
   maxHomeBatteryKwh: 40,
   availableHomeOptionsKwh: [5, 10, 15, 20, 25, 30, 40],
-  availableBusinessOptionsKwh: [64, 96, 261, 522, 783, 1044, 1305, 1566, 1827, 2090, 5015]
+  availableBusinessOptionsKwh: [
+    64,
+    96,
+    232,
+    261,
+    464,
+    522,
+    696,
+    783,
+    928,
+    1044,
+    1160,
+    1305,
+    1392,
+    1566,
+    1624,
+    1827,
+    1856,
+    2090,
+    5015
+  ]
 };
 
 const DEFAULT_PV_ECONOMICS_CONFIG: PvEconomicsConfig = {
@@ -813,15 +840,18 @@ function buildBusinessBatteryProduct(capacityKwh: number, labelPrefix: string): 
     return { ...matchedBase, label: `${labelPrefix}: ${matchedBase.label}` };
   }
 
-  if (capacityKwh % 261 === 0) {
-    const count = capacityKwh / 261;
+  const modularBase = BATTERY_OPTIONS.find(
+    (candidate) => candidate.modular && capacityKwh % candidate.capacityKwh === 0
+  );
+  if (modularBase) {
+    const count = capacityKwh / modularBase.capacityKwh;
     const spec = getBatterySpecForCapacity(capacityKwh);
     return {
-      label: `${labelPrefix}: ${count}x 261 kWh (modulair)`,
+      label: `${labelPrefix}: ${count}x ${modularBase.capacityKwh} kWh (modulair)`,
       capacityKwh,
       powerKw: spec.maxDischargeKw,
       modular: true,
-      unitCapacityKwh: 261,
+      unitCapacityKwh: modularBase.capacityKwh,
       count
     };
   }
@@ -1212,10 +1242,20 @@ export function computePvSelfConsumptionAdvice(
   });
   const customerTypeDetected = formulaAdvice.customerTypeDetected;
   const usedCustomerType = formulaAdvice.usedCustomerType;
-  const resolvedEconomics: PvEconomicsConfig = {
-    ...DEFAULT_PV_ECONOMICS_CONFIG,
-    ...config.economics
-  };
+  const economicsEnabled = config.economics != null;
+  const resolvedEconomics: PvEconomicsConfig = economicsEnabled
+    ? {
+        ...DEFAULT_PV_ECONOMICS_CONFIG,
+        ...config.economics
+      }
+    : {
+        ...DEFAULT_PV_ECONOMICS_CONFIG,
+        importPriceEurPerKwh: 0,
+        exportCompensationEurPerKwh: 0,
+        feedInCostEurPerKwh: 0,
+        yearlyMaintenanceEur: 0,
+        pricingMode: 'average'
+      };
   const resolvedHybridConfig = {
     ...DEFAULT_PV_SELF_CONSUMPTION_CONFIG,
     ...config
@@ -1272,8 +1312,6 @@ export function computePvSelfConsumptionAdvice(
       return (scenario.importReductionKwhAnnualized - previous.importReductionKwhAnnualized) / (scenario.capacityKwh - previous.capacityKwh);
     })
   );
-  const maxAnnualValue = Math.max(0, ...allScenarios.map((scenario) => scenario.annualValueEur ?? 0));
-
   allScenarios.forEach((scenario, index) => {
     const previous = index > 0 ? allScenarios[index - 1] : undefined;
     if (previous) {
@@ -1300,9 +1338,6 @@ export function computePvSelfConsumptionAdvice(
     if ((scenario.marginalGainPerAddedKwh ?? 0) < minMarginalGain && index > 0) {
       excludedReasons.push('Marginale meeropbrengst te laag');
     }
-    if ((scenario.annualValueEur ?? 0) <= 0) {
-      excludedReasons.push('Jaarlijkse waarde niet positief');
-    }
     if (usedCustomerType === 'business' && scenario.capacityKwh === 5015 && (formulaAdvice.rawAdvice.recommendedKwh <= 2090)) {
       excludedReasons.push('5015 kWh niet logisch zolang behoefte onder 2090 kWh blijft');
     }
@@ -1327,14 +1362,12 @@ export function computePvSelfConsumptionAdvice(
         const normalizedImportReduction = maxImportReduction > 0 ? scenario.importReductionKwhAnnualized / maxImportReduction : 0;
         const normalizedCycles = maxCycles > 0 ? Math.min(scenario.cyclesPerYear / maxCycles, 1) : 0;
         const normalizedMarginalGain = maxMarginal > 0 ? Math.min((scenario.marginalGainPerAddedKwh ?? 0) / maxMarginal, 1) : 0;
-        const normalizedEconomicValue = maxAnnualValue > 0 ? Math.max(0, (scenario.annualValueEur ?? 0) / maxAnnualValue) : 0;
         const oversizeRatio =
           formulaAdvice.rawAdvice.recommendedKwh > 0 ? scenario.capacityKwh / formulaAdvice.rawAdvice.recommendedKwh : 1;
         let score =
-          normalizedImportReduction * 0.4 +
-          normalizedCycles * 0.2 +
-          normalizedMarginalGain * 0.2 +
-          normalizedEconomicValue * 0.2;
+          normalizedImportReduction * 0.5 +
+          normalizedCycles * 0.25 +
+          normalizedMarginalGain * 0.25;
         if (oversizeRatio > 3) score -= 0.5;
         else if (oversizeRatio > 2) score -= 0.25;
         else if (oversizeRatio > 1.5) score -= 0.1;
@@ -1359,7 +1392,7 @@ export function computePvSelfConsumptionAdvice(
   conservativeScenario.recommendationReason =
     'Kleinste zinvolle optie die al een groot deel van de praktische importreductie pakt.';
   recommendedScenario.recommendationReason =
-    'Deze batterij is gekozen omdat hij de beste balans geeft tussen extra eigen verbruik, benutting, jaarlijkse besparing en afvlakking van meeropbrengst.';
+    'Deze batterij is gekozen omdat hij de beste balans geeft tussen extra eigen verbruik, benutting en afvlakking van meeropbrengst.';
   spaciousScenario.recommendationReason =
     'Ruimste zinvolle optie voordat de meeropbrengst duidelijk afvlakt.';
 
@@ -1367,7 +1400,7 @@ export function computePvSelfConsumptionAdvice(
   if (formulaAdvice.totals.numberOfDays < 365) {
     warnings.push('Dataset korter dan 12 maanden; jaarlijkse waarden zijn opgeschaald en dus indicatief.');
   }
-  if (resolvedEconomics.pricingMode === 'dynamic') {
+  if (economicsEnabled && resolvedEconomics.pricingMode === 'dynamic') {
     const stats = resolvedEconomics.pricingStats;
     warnings.push(
       'Bij dynamische prijzen wordt de economische waarde per interval berekend. In PV-zelfverbruik laadt de batterij nog steeds alleen met zonne-overschot en niet voor actieve handel met netstroom.'

@@ -22,6 +22,20 @@ describe('batterySpecs', () => {
     expect(spec192.roundTripEfficiency).toBe(0.9);
   });
 
+  it('returns brochure specs for 232 kWh cabinet family', () => {
+    const spec232 = getBatterySpecForCapacity(232);
+    expect(spec232.maxChargeKw).toBe(115);
+    expect(spec232.maxDischargeKw).toBe(115);
+    expect(spec232.roundTripEfficiency).toBe(0.9);
+  });
+
+  it('scales modular 232 kWh variants linearly', () => {
+    const spec464 = getBatterySpecForCapacity(464);
+    expect(spec464.maxChargeKw).toBe(230);
+    expect(spec464.maxDischargeKw).toBe(230);
+    expect(spec464.roundTripEfficiency).toBe(0.9);
+  });
+
   it('scales modular 261 kWh variants linearly', () => {
     const spec522 = getBatterySpecForCapacity(522);
     expect(spec522.maxChargeKw).toBe(250);
@@ -36,4 +50,3 @@ describe('batterySpecs', () => {
     expect(spec5015.roundTripEfficiency).toBe(0.88);
   });
 });
-
