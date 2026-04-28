@@ -30,6 +30,10 @@ function formatPercent(value: unknown): string {
   return `${Number(value ?? 0).toFixed(1)}%`;
 }
 
+function formatEur(value: unknown): string {
+  return `EUR ${Number(value ?? 0).toFixed(2)}`;
+}
+
 export function PvAdviceCharts({ charts, advice }: PvAdviceChartsProps) {
   return (
     <div className="grid gap-4">
@@ -238,6 +242,106 @@ export function PvAdviceCharts({ charts, advice }: PvAdviceChartsProps) {
           <p className="mt-2 text-xs text-slate-500">X-as: kwartiermomenten binnen een representatieve dag. Linker Y-as: import en export in kWh per kwartier. Rechter Y-as: batterijlading in kWh.</p>
         </div>
       </div>
+
+      {charts.annualValueByCapacityChart.length > 0 && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="wx-card">
+            <h3 className="wx-title">Jaarlijkse waarde per batterijgrootte</h3>
+            <p className="mb-3 text-sm text-slate-600">
+              Deze grafiek laat zien welke jaarlijkse financiële waarde elke batterijoptie oplevert op basis van de gekozen prijsmodus.
+            </p>
+            <div className="h-72">
+              <ResponsiveContainer>
+                <ComposedChart data={charts.annualValueByCapacityChart}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="capacityKwh" label={{ value: 'Batterijcapaciteit (kWh)', position: 'insideBottom', offset: -5 }} />
+                  <YAxis label={{ value: 'Jaarlijkse waarde (EUR)', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip formatter={(value) => formatEur(value)} />
+                  <Bar dataKey="annualValueEur" fill="#2563eb" name="Jaarlijkse waarde" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">X-as: batterijgrootte in kWh. Y-as: jaarlijkse waarde in euro.</p>
+          </div>
+
+          <div className="wx-card">
+            <h3 className="wx-title">Import/export kosten voor en na batterij</h3>
+            <p className="mb-3 text-sm text-slate-600">
+              Deze grafiek vergelijkt de energiekosten zonder batterij met de kosten na inzet van de aanbevolen batterij.
+            </p>
+            <div className="h-72">
+              <ResponsiveContainer>
+                <ComposedChart data={charts.importExportCostChart}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="label" label={{ value: 'Kostenvergelijking', position: 'insideBottom', offset: -5 }} />
+                  <YAxis label={{ value: 'Waarde (EUR)', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip formatter={(value) => formatEur(value)} />
+                  <Bar dataKey="costEur" fill="#16a34a" name="Waarde / kosten" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">X-as: kosten zonder batterij, met batterij en netto waarde. Y-as: euro.</p>
+          </div>
+        </div>
+      )}
+
+      {charts.monthlyValueChart.length > 0 && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="wx-card">
+            <h3 className="wx-title">Waarde per maand</h3>
+            <p className="mb-3 text-sm text-slate-600">
+              Deze grafiek laat zien in welke maanden de batterij financieel het meeste effect heeft.
+            </p>
+            <div className="h-72">
+              <ResponsiveContainer>
+                <ComposedChart data={charts.monthlyValueChart}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" label={{ value: 'Maand', position: 'insideBottom', offset: -5 }} />
+                  <YAxis yAxisId="left" label={{ value: 'Kosten (EUR)', angle: -90, position: 'insideLeft' }} />
+                  <YAxis yAxisId="right" orientation="right" label={{ value: 'Netto waarde (EUR)', angle: 90, position: 'insideRight' }} />
+                  <Tooltip formatter={(value) => formatEur(value)} />
+                  <Legend />
+                  <Bar yAxisId="left" dataKey="baselineCostEur" fill="#94a3b8" name="Kosten zonder batterij" />
+                  <Bar yAxisId="left" dataKey="batteryCostEur" fill="#16a34a" name="Kosten met batterij" />
+                  <Line yAxisId="right" type="monotone" dataKey="valueEur" stroke="#2563eb" name="Netto waarde" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">X-as: maand. Linker Y-as: energiekosten in euro. Rechter Y-as: netto waarde in euro.</p>
+          </div>
+
+          <div className="wx-card">
+            <h3 className="wx-title">Voorbeelddag: prijs en batterij-SOC</h3>
+            <p className="mb-3 text-sm text-slate-600">
+              Deze grafiek laat zien hoe de batterijlading zich verhoudt tot import- en exportprijzen op een representatieve dag.
+            </p>
+            <div className="h-72">
+              <ResponsiveContainer>
+                <ComposedChart data={charts.exampleDayChart}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="timestamp"
+                    tickFormatter={(value) => formatTimestamp(value).slice(11)}
+                    minTickGap={24}
+                    label={{ value: 'Tijdstip binnen de dag', position: 'insideBottom', offset: -5 }}
+                  />
+                  <YAxis yAxisId="left" label={{ value: 'Prijs (EUR/kWh)', angle: -90, position: 'insideLeft' }} />
+                  <YAxis yAxisId="right" orientation="right" label={{ value: 'Batterij-SOC (kWh)', angle: 90, position: 'insideRight' }} />
+                  <Tooltip
+                    labelFormatter={(value) => formatTimestamp(String(value))}
+                    formatter={(value, name) => (name?.toString().includes('prijs') ? formatEur(value) : formatKwh(value))}
+                  />
+                  <Legend />
+                  <Line yAxisId="left" type="monotone" dataKey="importPriceEurPerKwh" stroke="#dc2626" dot={false} name="Importprijs" />
+                  <Line yAxisId="left" type="monotone" dataKey="exportPriceEurPerKwh" stroke="#f59e0b" dot={false} name="Exportprijs" />
+                  <Area yAxisId="right" type="monotone" dataKey="batterySocKwh" fill="#93c5fd" stroke="#2563eb" name="Batterij-SOC" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">X-as: kwartiermomenten binnen een representatieve dag. Linker Y-as: prijs in EUR/kWh. Rechter Y-as: batterijlading in kWh.</p>
+          </div>
+        </div>
+      )}
 
       {charts.warnings.length > 0 && (
         <div className="wx-card text-sm text-amber-700">

@@ -40,7 +40,11 @@ export function KpiCards({
           },
           {
             label: 'Aanbevolen',
-            value: sizing.recommendedProduct ? `${sizing.recommendedProduct.capacityKwh} kWh` : 'Geen haalbare optie'
+            value: sizing.recommendedProduct ? `${sizing.recommendedProduct.capacityKwh} kWh` : 'Geen haalbare optie',
+            subtext:
+              sizing.pvSelfConsumptionAdvice != null
+                ? `${sizing.pvSelfConsumptionAdvice.simulationAdvice.recommended.dischargePowerKw.toFixed(1)} kW / ${sizing.pvSelfConsumptionAdvice.simulationAdvice.recommended.cyclesPerYear.toFixed(0)} cycli/jaar`
+                : undefined
           }
         ]
       : [

@@ -76,6 +76,14 @@ export interface ScenarioResult {
   remainingExportKwhAnnualized?: number;
   chargedKwhAnnualized?: number;
   dischargedKwhAnnualized?: number;
+  annualValueEur?: number;
+  paybackYears?: number;
+  yearlyCostsEur?: number;
+  netAnnualSavingsEur?: number;
+  paybackIndicative?: boolean;
+  baselineEnergyCostEur?: number;
+  batteryEnergyCostEur?: number;
+  dynamicValueEur?: number;
   scenarioScore?: number;
   isEligible?: boolean;
   excludedReason?: string;

@@ -31,10 +31,24 @@ export function parseCsv(content: string): ParseResult {
 
 export function parseXlsx(arrayBuffer: ArrayBuffer): ParseResult {
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null });
-  const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
-  return { rows, headers };
+  let bestRows: Record<string, unknown>[] = [];
+  let bestHeaders: string[] = [];
+  let bestScore = -1;
+
+  workbook.SheetNames.forEach((sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null });
+    const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
+    const score = headers.length * 1000 + rows.length;
+
+    if (score > bestScore) {
+      bestRows = rows;
+      bestHeaders = headers;
+      bestScore = score;
+    }
+  });
+
+  return { rows: bestRows, headers: bestHeaders };
 }
 
 function normalizeHeader(header: string): string {

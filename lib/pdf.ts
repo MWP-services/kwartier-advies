@@ -1,6 +1,13 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { AnalysisType } from './analysis';
-import type { DataQualityReport, PeakEvent, PeakMoment, ProcessedInterval, SizingResult } from './calculations';
+import type {
+  DataQualityReport,
+  PeakEvent,
+  PeakMoment,
+  ProcessedInterval,
+  PvAdviceChartsData,
+  SizingResult
+} from './calculations';
 import { formatTimestamp } from './datetime';
 import type { PvSummary, ScenarioResult } from './simulation';
 import type { PvStrategy } from './pvSimulation';
@@ -23,6 +30,7 @@ export interface PdfPayload {
   intervals?: ProcessedInterval[];
   highestPeakDay?: string | null;
   pvSummary?: PvSummary | null;
+  pvAdviceCharts?: PvAdviceChartsData | null;
   scenarios: ScenarioResult[];
 }
 

@@ -107,6 +107,8 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
   };
   const scenarioChartData = payload.scenarios.map((scenario) => ({
     optionLabel: scenario.optionLabel,
+    capacityKwh: scenario.capacityKwh,
+    powerKw: scenario.maxDischargeKw ?? 0,
     exportBefore: scenario.exportedEnergyBeforeKwh ?? 0,
     exportAfter: scenario.exportedEnergyAfterKwh ?? 0,
     immediateExport: scenario.immediateExportedKwh ?? 0,
@@ -115,8 +117,12 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
     selfSufficiency: ((scenario.selfSufficiency ?? 0) * 100),
     captureUtilization: ((scenario.batteryUtilizationAgainstExport ?? 0) * 100),
     totalUsefulDischarged: scenario.totalUsefulDischargedEnergyKwh ?? 0,
-    importReduction: scenario.importReductionKwh ?? 0,
-    economicValue: scenario.totalEconomicValueEur ?? null
+    importReduction: scenario.importReductionKwhAnnualized ?? scenario.importReductionKwh ?? 0,
+    exportReductionAnnualized: scenario.exportReductionKwhAnnualized ?? 0,
+    cyclesPerYear: scenario.cyclesPerYear ?? 0,
+    economicValue: scenario.annualValueEur ?? scenario.totalEconomicValueEur ?? null,
+    paybackYears: scenario.paybackYears ?? null,
+    marginalGainPerAddedKwh: scenario.marginalGainPerAddedKwh ?? 0
   }));
   const formulaAdvice = payload.sizing.pvFormulaAdvice;
   const kpiCards =
@@ -479,9 +485,338 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
 </html>`;
 }
 
+function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
+  const embeddedLogoSrc = getEmbeddedLogoSrc();
+  const brochure = getRecommendedBrochureInfo(payload);
+  const formulaAdvice = payload.sizing.pvFormulaAdvice;
+  const hybridAdvice = payload.sizing.pvSelfConsumptionAdvice;
+  const pvCharts = payload.pvAdviceCharts;
+  const recommendedScenario = hybridAdvice?.simulationAdvice.recommended ?? null;
+  const pricingMode = hybridAdvice?.configUsed.pricingMode ?? 'average';
+  const pricingStats = hybridAdvice?.configUsed.pricingStats;
+  const scenarioChartData = payload.scenarios.map((scenario) => ({
+    optionLabel: scenario.optionLabel,
+    capacityKwh: scenario.capacityKwh,
+    powerKw: scenario.maxDischargeKw ?? 0,
+    importReductionKwhAnnualized: scenario.importReductionKwhAnnualized ?? scenario.importReductionKwh ?? 0,
+    exportReductionKwhAnnualized: scenario.exportReductionKwhAnnualized ?? 0,
+    cyclesPerYear: scenario.cyclesPerYear ?? 0,
+    economicValue: scenario.annualValueEur ?? scenario.totalEconomicValueEur ?? 0,
+    marginalGainPerAddedKwh: scenario.marginalGainPerAddedKwh ?? 0,
+    isEligible: scenario.isEligible !== false,
+    status:
+      scenario.isEligible === false
+        ? scenario.excludedReason ?? 'Uitgesloten'
+        : scenario.recommendationReason ?? 'Geschikt'
+  }));
+  const impactBeforeAfter = recommendedScenario
+    ? [
+        { label: 'Import zonder batterij', value: recommendedScenario.importBeforeKwh },
+        { label: 'Import met aanbevolen batterij', value: recommendedScenario.importAfterKwh },
+        { label: 'Export zonder batterij', value: recommendedScenario.exportBeforeKwh },
+        { label: 'Export met aanbevolen batterij', value: recommendedScenario.exportAfterKwh }
+      ]
+    : [];
+  const kpiCards = [
+    ['Totale netafname', `${(formulaAdvice?.totals.totalImportKwh ?? 0).toFixed(2)} kWh`],
+    ['Totale teruglevering', `${(formulaAdvice?.totals.totalExportKwh ?? 0).toFixed(2)} kWh`],
+    ['P50 / P75 / P90', formulaAdvice ? `${formulaAdvice.percentiles.p50StorageNeedKwh.toFixed(1)} / ${formulaAdvice.percentiles.p75StorageNeedKwh.toFixed(1)} / ${formulaAdvice.percentiles.p90StorageNeedKwh.toFixed(1)} kWh` : '-'],
+    ['Aanbevolen batterij', `${recommendedScenario?.capacityKwh ?? payload.sizing.kWhNeeded} kWh`],
+    ['Prijsmodus', pricingMode === 'dynamic' ? 'Dynamische prijzen' : 'Gemiddelde tarieven'],
+    ['Jaarlijkse waarde', recommendedScenario?.annualValueEur != null ? `EUR ${recommendedScenario.annualValueEur.toFixed(2)}` : 'Niet berekend']
+  ];
+
+  return `<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WattsNext PV Opslag Rapport</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root { --bg:#fff; --text:#232323; --muted:#8D8D8D; --green:#4E8D3E; --green-dark:#3B812B; --border:#E6E6E6; --header-row:#EEF7EA; --callout:#F7F9F7; --zebra:#FAFAFA; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter, Arial, Calibri, sans-serif; color:var(--text); background:var(--bg); line-height:1.45; }
+    .page { max-width:1200px; margin:0 auto; padding:24px; }
+    .header,.card { background:var(--bg); border:1px solid var(--border); border-radius:14px; box-shadow:0 6px 16px rgba(0,0,0,.05); }
+    .header { padding:14px 18px 12px; display:grid; grid-template-columns:230px 1fr auto; gap:14px; align-items:center; position:relative; }
+    .header::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--green); border-bottom-left-radius:14px; border-bottom-right-radius:14px; }
+    .logoWrap { width:220px; min-height:52px; display:flex; align-items:center; justify-content:center; padding:6px 8px; border:1px solid #5f8e52; border-radius:10px; background:linear-gradient(135deg,#2f5f33 0%,#3b7a3c 58%,#5a9b4a 100%); }
+    .logoWrap img { max-width:204px; max-height:52px; }
+    .logoFallback { display:none; color:#fff; font-weight:700; }
+    .brand h1,.card h3 { margin:0; }
+    .brand p { margin:6px 0 0; color:var(--muted); font-size:10px; letter-spacing:.18em; text-transform:uppercase; }
+    .pill { display:inline-block; padding:5px 9px; border-radius:999px; background:rgba(78,141,62,.16); color:var(--green-dark); font-weight:700; font-size:9.5px; }
+    .grid { display:grid; gap:16px; margin-top:16px; }
+    .grid.kpis { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+    .grid.two { grid-template-columns:1.2fr 1fr; }
+    .card { padding:14px; }
+    .kpi-label { color:var(--muted); font-size:9.5px; }
+    .kpi-value { margin-top:4px; font-weight:700; font-size:12px; color:var(--text); }
+    .plot { width:100%; height:320px; }
+    .brochureFrame { width:100%; height:420px; border:1px solid var(--border); border-radius:10px; background:#fff; }
+    table { width:100%; border-collapse:separate; border-spacing:0; font-size:11px; color:var(--text); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    th,td { border-bottom:1px solid var(--border); padding:9px 10px; text-align:left; vertical-align:top; }
+    th { background:var(--header-row); font-weight:600; border-bottom:1px solid var(--green); }
+    tbody tr:nth-child(even) td { background:var(--zebra); }
+    tbody tr:last-child td { border-bottom:none; }
+    .muted { color:var(--muted); font-size:9.5px; line-height:1.35; margin-top:6px; }
+    .callout { background:var(--callout); border-left:5px solid var(--green); border-radius:8px; padding:10px 12px; margin-top:10px; font-size:10.5px; }
+    .footer { margin-top:18px; padding-top:8px; border-top:1px solid #EDEDED; display:flex; justify-content:space-between; gap:12px; color:var(--muted); font-size:9px; }
+    @media (max-width:900px) { .grid.two { grid-template-columns:1fr; } .header { grid-template-columns:auto 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="header">
+      <div class="logoWrap">
+        ${embeddedLogoSrc ? `<img src="${embeddedLogoSrc}" alt="WattsNext logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" /><div class="logoFallback">WattsNext</div>` : `<div class="logoFallback" style="display:block;">WattsNext</div>`}
+      </div>
+      <div class="brand">
+        <h1>PV Self Consumption Rapport</h1>
+        <p>ENERGIEOPLOSSINGEN</p>
+      </div>
+      <div>
+        <div class="pill">${hybridAdvice?.usedCustomerType ?? formulaAdvice?.usedCustomerType ?? 'PV analyse'}</div>
+        <div class="muted" style="margin-top:8px;">Formulebasis plus kwartiersimulatie</div>
+      </div>
+    </section>
+
+    <section class="grid kpis">
+      ${kpiCards.map(([label, value]) => `<div class="card"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div></div>`).join('')}
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h3>1. Samenvatting batterijadvies</h3>
+        <table><tbody>
+          <tr><th>Aanbevolen configuratie</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
+          <tr><th>Benodigde capaciteit</th><td>${payload.sizing.kWhNeeded.toFixed(2)} kWh</td></tr>
+          <tr><th>Benodigd vermogen</th><td>${payload.sizing.kWNeeded.toFixed(2)} kW</td></tr>
+          <tr><th>Importreductie per jaar</th><td>${recommendedScenario ? `${recommendedScenario.importReductionKwhAnnualized.toFixed(2)} kWh/jaar` : '-'}</td></tr>
+          <tr><th>Exportreductie per jaar</th><td>${recommendedScenario ? `${recommendedScenario.exportReductionKwhAnnualized.toFixed(2)} kWh/jaar` : '-'}</td></tr>
+          <tr><th>Cycli per jaar</th><td>${recommendedScenario ? recommendedScenario.cyclesPerYear.toFixed(1) : '-'}</td></tr>
+          <tr><th>Prijsmodus</th><td>${pricingMode === 'dynamic' ? 'Dynamische prijzen' : 'Gemiddelde tarieven'}</td></tr>
+          <tr><th>Gem. importprijs</th><td>${hybridAdvice?.configUsed.importPriceEurPerKwh != null ? `EUR ${hybridAdvice.configUsed.importPriceEurPerKwh.toFixed(3)}/kWh` : '-'}</td></tr>
+          <tr><th>Gem. exportvergoeding</th><td>${hybridAdvice?.configUsed.exportCompensationEurPerKwh != null ? `EUR ${hybridAdvice.configUsed.exportCompensationEurPerKwh.toFixed(3)}/kWh` : '-'}</td></tr>
+          ${
+            pricingMode === 'dynamic' && pricingStats
+              ? `<tr><th>Exacte prijs-matches</th><td>${pricingStats.exactMatches}</td></tr>
+                 <tr><th>Uurmatches</th><td>${pricingStats.hourlyMatches}</td></tr>
+                 <tr><th>Periode-matches</th><td>${pricingStats.variablePeriodMatches}</td></tr>
+                 <tr><th>Fallbackmatches</th><td>${pricingStats.fallbackMatches}</td></tr>
+                 <tr><th>Ontbrekende prijzen</th><td>${pricingStats.missingPrices}</td></tr>`
+              : ''
+          }
+          <tr><th>Jaarlijkse waarde</th><td>${recommendedScenario?.annualValueEur != null ? `EUR ${recommendedScenario.annualValueEur.toFixed(2)}` : 'Niet berekend'}</td></tr>
+        </tbody></table>
+        <div class="callout">
+          ${recommendedScenario?.recommendationReason ?? 'Deze batterij is gekozen op basis van dagelijkse opslagbehoefte en kwartiersimulatie.'}
+          <br /><br />
+          ${
+            pricingMode === 'dynamic'
+              ? 'De dynamische prijsmodule berekent per interval het verschil tussen de situatie zonder batterij en met batterij. In deze PV-zelfverbruikmodus wordt niet actief geladen vanaf het net voor energiehandel.'
+              : 'De financiële waarde is gebaseerd op gemiddelde import- en exporttarieven en is dus een indicatieve benadering.'
+          }
+        </div>
+      </div>
+      <div class="card">
+        <h3>Productsheet aanbevolen batterij</h3>
+        ${brochure ? (brochure.dataUri.startsWith('data:application/pdf') ? `<object class="brochureFrame" data="${brochure.dataUri}#page=1&zoom=page-width" type="application/pdf"></object>` : `<img class="brochureFrame" src="${brochure.dataUri}" alt="Productsheet batterij ${brochure.key}" style="object-fit:contain;" />`) : `<div class="callout">Productsheet niet gevonden in assets-map.</div>`}
+      </div>
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h3>2. Formulematige basis: P50 / P75 / P90</h3>
+        <div id="pv-daily-storage-chart" class="plot"></div>
+        <div class="muted">X-as: datum per dag. Y-as: nuttige opslagbehoefte in kWh per dag.</div>
+        <div class="callout">Deze grafiek laat zien hoeveel zonne-overschot later op de dag of nacht nuttig gebruikt kan worden. De P50-, P75- en P90-lijnen vormen de formulematige basis van het advies.</div>
+      </div>
+      <div class="card">
+        <h3>3. Scenariovergelijking</h3>
+        <div id="pv-scenario-comparison-chart" class="plot"></div>
+        <div class="muted">X-as: batterijopties. Linker Y-as: kWh per jaar. Rechter Y-as: euro per jaar.</div>
+        <div class="callout">Per batterijoptie zie je capaciteit, vermogen, importreductie, exportreductie, cycli en jaarlijkse waarde. Dit onderbouwt waarom de aanbevolen batterij is gekozen.</div>
+      </div>
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h3>4. Meeropbrengst en afvlakking</h3>
+        <div id="pv-marginal-gain-chart" class="plot"></div>
+        <div class="muted">X-as: batterijgrootte in kWh. Linker Y-as: effect in kWh per jaar. Rechter Y-as: marginale meeropbrengst per extra kWh capaciteit.</div>
+        <div class="callout">Hier wordt zichtbaar waar de meeropbrengst van extra batterijcapaciteit afvlakt. Daardoor is te zien waarom grotere batterijen vaak minder logisch worden.</div>
+      </div>
+      <div class="card">
+        <h3>Dekkingspercentage per batterijgrootte</h3>
+        <div id="pv-coverage-chart" class="plot"></div>
+        <div class="muted">X-as: batterijgrootte in kWh. Y-as: dekking in procenten.</div>
+        <div class="callout">Deze grafiek laat zien welk deel van de PV-actieve dagen volledig wordt gedekt en hoeveel van de dagelijkse opslagbehoefte gemiddeld wordt afgedekt.</div>
+      </div>
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h3>5. Impact vóór/na batterij</h3>
+        <div id="pv-impact-chart" class="plot"></div>
+        <div class="muted">X-as: import en export vóór en na de aanbevolen batterij. Y-as: energie in kWh.</div>
+        <div class="callout">Deze vergelijking laat direct zien hoeveel netafname en teruglevering de aanbevolen batterij in de simulatie verschuift.</div>
+      </div>
+      <div class="card">
+        <h3>Datakwaliteit</h3>
+        <table><tbody>
+          <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
+          <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
+          <tr><th>Ontbrekende intervallen</th><td>${payload.quality.missingIntervalsCount}</td></tr>
+          <tr><th>Duplicaten</th><td>${payload.quality.duplicateCount}</td></tr>
+          <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
+          <tr><th>PV-actieve dagen</th><td>${formulaAdvice ? `${formulaAdvice.totals.numberOfPvActiveDays} / ${formulaAdvice.totals.numberOfDays}` : '-'}</td></tr>
+        </tbody></table>
+      </div>
+    </section>
+
+    ${
+      pricingMode === 'dynamic'
+        ? `<section class="grid two">
+      <div class="card">
+        <h3>Financiële impact per batterijgrootte</h3>
+        <div id="pv-annual-value-chart" class="plot"></div>
+        <div class="muted">X-as: batterijgrootte in kWh. Y-as: jaarlijkse waarde in euro.</div>
+        <div class="callout">Hier zie je hoe de jaarlijkse waarde verandert per batterijgrootte op basis van gekoppelde dynamische prijzen.</div>
+      </div>
+      <div class="card">
+        <h3>Kosten voor en na aanbevolen batterij</h3>
+        <div id="pv-cost-chart" class="plot"></div>
+        <div class="muted">X-as: kosten zonder batterij, met batterij en netto waarde. Y-as: euro.</div>
+        <div class="callout">Deze vergelijking laat zien wat de aanbevolen batterij financieel verandert over de geanalyseerde periode.</div>
+      </div>
+    </section>
+
+    <section class="grid two">
+      <div class="card">
+        <h3>Waarde per maand</h3>
+        <div id="pv-monthly-value-chart" class="plot"></div>
+        <div class="muted">X-as: maand. Linker Y-as: kosten in euro. Rechter Y-as: netto waarde in euro.</div>
+        <div class="callout">Zo wordt zichtbaar in welke maanden de batterij financieel de meeste waarde toevoegt.</div>
+      </div>
+      <div class="card">
+        <h3>Voorbeelddag: prijs en batterij-SOC</h3>
+        <div id="pv-price-soc-chart" class="plot"></div>
+        <div class="muted">X-as: kwartieren binnen een representatieve dag. Linker Y-as: prijs in EUR/kWh. Rechter Y-as: batterijlading in kWh.</div>
+        <div class="callout">Deze grafiek combineert prijsniveaus met batterijlading op een representatieve dag, zonder actieve netstroomhandel.</div>
+      </div>
+    </section>`
+        : ''
+    }
+
+    <section class="grid two">
+      <div class="card">
+        <h3>6. Voorbeelddag met batterij-SOC</h3>
+        <div id="pv-example-day-chart" class="plot"></div>
+        <div class="muted">X-as: kwartieren binnen een representatieve dag. Linker Y-as: import en export in kWh per kwartier. Rechter Y-as: batterijlading in kWh.</div>
+        <div class="callout">Deze grafiek laat zien hoe de aanbevolen batterij overdag laadt op zonne-overschot en later ontlaadt om eigen verbruik te ondersteunen.</div>
+      </div>
+      <div class="card">
+        <h3>7. Conclusie en advies</h3>
+        <table><tbody>
+          <tr><th>Aanbevolen batterij</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
+          <tr><th>Waarom gekozen</th><td>${recommendedScenario?.recommendationReason ?? 'Beste balans tussen praktische opslag, benutting en waarde.'}</td></tr>
+          <tr><th>Waarom groter niet altijd beter is</th><td>De meeropbrengst per extra kWh batterijcapaciteit vlakt af. Daardoor leveren grotere batterijen relatief minder extra importreductie en benutting op.</td></tr>
+          <tr><th>Zelfstandig te begrijpen</th><td>Dit rapport combineert de formulematige basis met kwartiersimulatie, zodat een klant zonder applicatie kan volgen waarom de aanbevolen batterij is gekozen.</td></tr>
+        </tbody></table>
+        ${(hybridAdvice?.warnings.length ?? 0) > 0 ? `<div class="callout">${hybridAdvice?.warnings.join('<br />')}</div>` : ''}
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div>WattsNext Energieoplossingen</div>
+      <div>PV self-consumption rapport</div>
+    </footer>
+  </div>
+
+  <script>
+    const scenarioData = ${safeJson(scenarioChartData)};
+    const pvCharts = ${safeJson(pvCharts)};
+    const impactBeforeAfter = ${safeJson(impactBeforeAfter)};
+    const wattsTheme = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFFFF', font: { family: 'Inter, Arial, Calibri, sans-serif', color: '#232323' }, margin: { t: 12, r: 12, b: 70, l: 55 } };
+
+    if (pvCharts?.dailyStorageChart?.length) {
+      Plotly.newPlot('pv-daily-storage-chart', [
+        { type: 'bar', name: 'Dagelijkse opslagbehoefte', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.dailyStorageNeedKwh), marker: { color: '#0ea5e9' } },
+        { type: 'scatter', mode: 'lines', name: 'P50', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p50), line: { color: '#64748b', dash: 'dot' } },
+        { type: 'scatter', mode: 'lines', name: 'P75', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p75), line: { color: '#16a34a', dash: 'dot' } },
+        { type: 'scatter', mode: 'lines', name: 'P90', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p90), line: { color: '#f97316', dash: 'dot' } }
+      ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20 }, yaxis: { title: 'kWh per dag' } }, { responsive: true, displaylogo: false });
+    }
+
+    Plotly.newPlot('pv-scenario-comparison-chart', [
+      { type: 'bar', name: 'Importreductie', x: scenarioData.map(d => d.optionLabel), y: scenarioData.map(d => d.importReductionKwhAnnualized), marker: { color: '#22c55e' } },
+      { type: 'bar', name: 'Exportreductie', x: scenarioData.map(d => d.optionLabel), y: scenarioData.map(d => d.exportReductionKwhAnnualized), marker: { color: '#f59e0b' } },
+      { type: 'scatter', mode: 'lines+markers', name: 'Jaarlijkse waarde', x: scenarioData.map(d => d.optionLabel), y: scenarioData.map(d => d.economicValue), yaxis: 'y2', line: { color: '#2563eb' } }
+    ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20, title: 'Batterijopties' }, yaxis: { title: 'kWh per jaar' }, yaxis2: { title: 'EUR per jaar', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 90, l: 55 } }, { responsive: true, displaylogo: false });
+
+    if (pvCharts?.marginalGainChart?.length) {
+      Plotly.newPlot('pv-marginal-gain-chart', [
+        { type: 'bar', name: 'Gedekte opslag / extra effect', x: pvCharts.marginalGainChart.map(d => d.capacityKwh), y: pvCharts.marginalGainChart.map(d => d.coveredStorageKwhPerYear), marker: { color: '#0ea5e9' } },
+        { type: 'scatter', mode: 'lines+markers', name: 'Marginal gain per extra kWh', x: pvCharts.marginalGainChart.map(d => d.capacityKwh), y: pvCharts.marginalGainChart.map(d => d.marginalGainPerAddedKwh), yaxis: 'y2', line: { color: '#f97316' } }
+      ], { ...wattsTheme, xaxis: { title: 'Batterijcapaciteit (kWh)' }, yaxis: { title: 'kWh per jaar' }, yaxis2: { title: 'Marginale gain', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 70, l: 55 } }, { responsive: true, displaylogo: false });
+    }
+
+    if (pvCharts?.coverageByCapacityChart?.length) {
+      Plotly.newPlot('pv-coverage-chart', [
+        { type: 'bar', name: 'Volledig gedekte dagen', x: pvCharts.coverageByCapacityChart.map(d => d.capacityKwh), y: pvCharts.coverageByCapacityChart.map(d => d.fullyCoveredDaysPercentage), marker: { color: '#22c55e' } },
+        { type: 'scatter', mode: 'lines+markers', name: 'Gemiddelde dekking', x: pvCharts.coverageByCapacityChart.map(d => d.capacityKwh), y: pvCharts.coverageByCapacityChart.map(d => d.averageCoveragePercentage), line: { color: '#2563eb' } }
+      ], { ...wattsTheme, xaxis: { title: 'Batterijcapaciteit (kWh)' }, yaxis: { title: 'Dekking (%)', range: [0, 100] } }, { responsive: true, displaylogo: false });
+    }
+
+    Plotly.newPlot('pv-impact-chart', [{ type: 'bar', x: impactBeforeAfter.map(d => d.label), y: impactBeforeAfter.map(d => d.value), marker: { color: ['#64748b', '#22c55e', '#f59e0b', '#2563eb'] } }], { ...wattsTheme, xaxis: { tickangle: -10 }, yaxis: { title: 'kWh' } }, { responsive: true, displaylogo: false });
+
+    if (pvCharts?.annualValueByCapacityChart?.length) {
+      Plotly.newPlot('pv-annual-value-chart', [
+        { type: 'bar', x: pvCharts.annualValueByCapacityChart.map(d => d.capacityKwh), y: pvCharts.annualValueByCapacityChart.map(d => d.annualValueEur), marker: { color: '#2563eb' }, name: 'Jaarlijkse waarde' }
+      ], { ...wattsTheme, xaxis: { title: 'Batterijcapaciteit (kWh)' }, yaxis: { title: 'EUR per jaar' } }, { responsive: true, displaylogo: false });
+    }
+
+    if (pvCharts?.importExportCostChart?.length) {
+      Plotly.newPlot('pv-cost-chart', [
+        { type: 'bar', x: pvCharts.importExportCostChart.map(d => d.label), y: pvCharts.importExportCostChart.map(d => d.costEur), marker: { color: ['#94a3b8', '#16a34a', '#2563eb'] } }
+      ], { ...wattsTheme, xaxis: { tickangle: -10 }, yaxis: { title: 'EUR' } }, { responsive: true, displaylogo: false });
+    }
+
+    if (pvCharts?.monthlyValueChart?.length) {
+      Plotly.newPlot('pv-monthly-value-chart', [
+        { type: 'bar', name: 'Kosten zonder batterij', x: pvCharts.monthlyValueChart.map(d => d.month), y: pvCharts.monthlyValueChart.map(d => d.baselineCostEur), marker: { color: '#94a3b8' } },
+        { type: 'bar', name: 'Kosten met batterij', x: pvCharts.monthlyValueChart.map(d => d.month), y: pvCharts.monthlyValueChart.map(d => d.batteryCostEur), marker: { color: '#16a34a' } },
+        { type: 'scatter', mode: 'lines+markers', name: 'Netto waarde', x: pvCharts.monthlyValueChart.map(d => d.month), y: pvCharts.monthlyValueChart.map(d => d.valueEur), yaxis: 'y2', line: { color: '#2563eb' } }
+      ], { ...wattsTheme, barmode: 'group', xaxis: { title: 'Maand' }, yaxis: { title: 'Kosten (EUR)' }, yaxis2: { title: 'Waarde (EUR)', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 70, l: 55 } }, { responsive: true, displaylogo: false });
+    }
+
+    if (pvCharts?.exampleDayChart?.length) {
+      Plotly.newPlot('pv-example-day-chart', [
+        { type: 'bar', name: 'Export', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.exportKwh), marker: { color: '#f59e0b' } },
+        { type: 'bar', name: 'Import', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.importKwh), marker: { color: '#22c55e' } },
+        { type: 'scatter', mode: 'lines', name: 'Batterij-SOC', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.batterySocKwh), yaxis: 'y2', line: { color: '#2563eb' } }
+      ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20, title: 'Kwartieren binnen de dag' }, yaxis: { title: 'Import/export (kWh per kwartier)' }, yaxis2: { title: 'Batterij-SOC (kWh)', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 90, l: 55 } }, { responsive: true, displaylogo: false });
+    }
+
+    if (pvCharts?.exampleDayChart?.some(d => d.importPriceEurPerKwh != null || d.exportPriceEurPerKwh != null)) {
+      Plotly.newPlot('pv-price-soc-chart', [
+        { type: 'scatter', mode: 'lines', name: 'Importprijs', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.importPriceEurPerKwh ?? null), line: { color: '#dc2626' } },
+        { type: 'scatter', mode: 'lines', name: 'Exportprijs', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.exportPriceEurPerKwh ?? null), line: { color: '#f59e0b' } },
+        { type: 'scatter', mode: 'lines', name: 'Batterij-SOC', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.batterySocKwh), yaxis: 'y2', line: { color: '#2563eb' } }
+      ], { ...wattsTheme, xaxis: { tickangle: -20, title: 'Kwartieren binnen de dag' }, yaxis: { title: 'EUR/kWh' }, yaxis2: { title: 'Batterij-SOC (kWh)', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 90, l: 55 } }, { responsive: true, displaylogo: false });
+    }
+  </script>
+</body>
+</html>`;
+}
+
+void generatePvInteractiveReportHtml;
+
 export function generateInteractiveReportHtml(payload: PdfPayload): string {
   if (payload.analysisType === 'PV_SELF_CONSUMPTION') {
-    return generatePvInteractiveReportHtml(payload);
+    return generatePvInteractiveReportHtmlV2(payload);
   }
 
   const embeddedLogoSrc = getEmbeddedLogoSrc();

@@ -10,6 +10,7 @@ import type {
 import type { NormalizationDiagnostics, InterpretationMode } from './normalization';
 import type { PvSummary, ScenarioResult } from './simulation';
 import type { PvAnalysisMode, PvStrategy } from './pvSimulation';
+import type { PricingMode } from './pricing';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
@@ -24,6 +25,13 @@ export interface AnalysisSettings {
   interpretationMode: InterpretationMode;
   pvStrategy: PvStrategy;
   pvCustomerType: 'auto' | 'home' | 'business';
+  pvPricingMode: PricingMode;
+  pvFallbackToAveragePrices: boolean;
+  pvImportPriceEurPerKwh: number;
+  pvExportCompensationEurPerKwh: number;
+  pvFeedInCostEurPerKwh: number;
+  pvInstallationCostEur?: number;
+  pvYearlyMaintenanceEur?: number;
   includeHistogram?: boolean;
   includePeakEventsTable?: boolean;
   includeScenarioSection?: boolean;
@@ -59,6 +67,13 @@ export const defaultAnalysisSettings: AnalysisSettings = {
   interpretationMode: 'AUTO',
   pvStrategy: 'SELF_CONSUMPTION_ONLY',
   pvCustomerType: 'auto',
+  pvPricingMode: 'dynamic',
+  pvFallbackToAveragePrices: true,
+  pvImportPriceEurPerKwh: 0.3,
+  pvExportCompensationEurPerKwh: 0.05,
+  pvFeedInCostEurPerKwh: 0,
+  pvInstallationCostEur: undefined,
+  pvYearlyMaintenanceEur: 0,
   includeHistogram: true,
   includePeakEventsTable: true,
   includeScenarioSection: true
@@ -75,6 +90,13 @@ export function analysisSettingsEqual(a: AnalysisSettings, b: AnalysisSettings):
     a.interpretationMode === b.interpretationMode &&
     a.pvStrategy === b.pvStrategy &&
     a.pvCustomerType === b.pvCustomerType &&
+    a.pvPricingMode === b.pvPricingMode &&
+    a.pvFallbackToAveragePrices === b.pvFallbackToAveragePrices &&
+    a.pvImportPriceEurPerKwh === b.pvImportPriceEurPerKwh &&
+    a.pvExportCompensationEurPerKwh === b.pvExportCompensationEurPerKwh &&
+    a.pvFeedInCostEurPerKwh === b.pvFeedInCostEurPerKwh &&
+    (a.pvInstallationCostEur ?? 0) === (b.pvInstallationCostEur ?? 0) &&
+    (a.pvYearlyMaintenanceEur ?? 0) === (b.pvYearlyMaintenanceEur ?? 0) &&
     (a.includeHistogram ?? true) === (b.includeHistogram ?? true) &&
     (a.includePeakEventsTable ?? true) === (b.includePeakEventsTable ?? true) &&
     (a.includeScenarioSection ?? true) === (b.includeScenarioSection ?? true)

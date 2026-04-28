@@ -14,17 +14,19 @@ import { ScenarioCharts } from '@/components/ScenarioCharts';
 import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
 import {
+  buildSizingResultFromPvSelfConsumptionAdvice,
   buildDataQualityReport,
   buildPvAdviceChartsData,
-  computePvSizingFromScenarioResults,
+  computePvSelfConsumptionAdvice,
   computePvStorageFormulaAdvice,
-  computeSizing,
   derivePvIntervalFlow,
+  computeSizing,
   findMaxObserved,
   groupPeakEvents,
   listPeakMoments,
   processIntervals,
-  selectTopExceededIntervals
+  selectTopExceededIntervals,
+  toScenarioResult
 } from '@/lib/calculations';
 import {
   autoDetectColumns,
@@ -33,9 +35,10 @@ import {
   parseXlsx,
   type ColumnMapping
 } from '@/lib/parsing';
+import { attachPricesToIntervals, parsePriceFile, type PriceInterval } from '@/lib/pricing';
 import { normalizeConsumptionSeries } from '@/lib/normalization';
-import { buildPvSummaryFromScenario, findHighestPeakDay, simulateAllPvScenarios, simulateAllScenarios } from '@/lib/simulation';
-import { buildDefaultTradingConfig, determinePvAnalysisMode } from '@/lib/pvSimulation';
+import { buildPvSummaryFromScenario, findHighestPeakDay, simulateAllScenarios } from '@/lib/simulation';
+import { determinePvAnalysisMode } from '@/lib/pvSimulation';
 
 const OUTLIER_KW_THRESHOLD = 5000;
 
@@ -51,9 +54,9 @@ function mappingEqual(a: ColumnMapping | null, b: ColumnMapping): boolean {
 
 function runAnalysis(
   rawRows: Record<string, unknown>[],
-  headers: string[],
   mapping: ColumnMapping,
-  settings: AnalysisSettings
+  settings: AnalysisSettings,
+  priceIntervals: PriceInterval[]
 ): AnalysisResult | null {
   const mappedRows = mapRows(rawRows, mapping);
   if (mappedRows.length === 0) return null;
@@ -66,39 +69,50 @@ function runAnalysis(
   });
   if (normalized.normalizedRows.length === 0) return null;
 
-  const intervals = processIntervals(normalized.normalizedRows, settings.contractedPowerKw);
+  const baseIntervals = processIntervals(normalized.normalizedRows, settings.contractedPowerKw);
   const quality = buildDataQualityReport(normalized.normalizedRows);
+  const pricingAttachment =
+    settings.analysisType === 'PV_SELF_CONSUMPTION' && settings.pvPricingMode !== 'average'
+      ? attachPricesToIntervals(baseIntervals, priceIntervals, {
+          pricingMode: settings.pvPricingMode,
+          averageImportPriceEurPerKwh: settings.pvImportPriceEurPerKwh,
+          averageExportPriceEurPerKwh: settings.pvExportCompensationEurPerKwh,
+          averageFeedInCostEurPerKwh: settings.pvFeedInCostEurPerKwh,
+          priceIntervals,
+          fallbackToAveragePrices: settings.pvFallbackToAveragePrices
+        })
+      : null;
+  const intervals = pricingAttachment?.intervalsWithPrices ?? baseIntervals;
   const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
 
   if (settings.analysisType === 'PV_SELF_CONSUMPTION') {
     const pvAnalysisMode = determinePvAnalysisMode(normalized.normalizedRows);
     if (!pvAnalysisMode) return null;
-    const pvSizingSettings = {
-      compliance: settings.compliance,
-      safetyFactor: settings.safetyFactor,
-      efficiency: settings.efficiency,
-      strategy: settings.pvStrategy,
-      trading: buildDefaultTradingConfig(settings.pvStrategy),
-      customerType: settings.pvCustomerType
-    };
     const formulaAdvice = computePvStorageFormulaAdvice(intervals, {
       customerType: settings.pvCustomerType
     });
-    const scenarioTargetCapacityKwh = Math.max(
-      formulaAdvice.roundedAdvice.spaciousKwh,
-      formulaAdvice.roundedAdvice.recommendedKwh,
-      5
+    const hybridAdvice = computePvSelfConsumptionAdvice(intervals, {
+      customerType: settings.pvCustomerType,
+      economics: {
+        importPriceEurPerKwh: settings.pvImportPriceEurPerKwh,
+        exportCompensationEurPerKwh: settings.pvExportCompensationEurPerKwh,
+        feedInCostEurPerKwh: settings.pvFeedInCostEurPerKwh,
+        installationCostEur: settings.pvInstallationCostEur,
+        yearlyMaintenanceEur: settings.pvYearlyMaintenanceEur,
+        pricingMode: settings.pvPricingMode,
+        fallbackToAveragePrices: settings.pvFallbackToAveragePrices,
+        priceIntervals,
+        pricingStats: pricingAttachment?.pricingStats
+      }
+    });
+    const sizing = buildSizingResultFromPvSelfConsumptionAdvice(formulaAdvice, hybridAdvice);
+    const scenarios = hybridAdvice.simulationAdvice.allScenarios.map((scenario) =>
+      toScenarioResult({
+        ...scenario,
+        optionLabel: `${scenario.capacityKwh} kWh / ${scenario.dischargePowerKw.toFixed(1)} kW`
+      })
     );
-    const scenarioProfile = formulaAdvice.usedCustomerType === 'business' ? 'BUSINESS_PV' : 'HOME_PV';
-    const scenarios = simulateAllPvScenarios(intervals, scenarioTargetCapacityKwh, {
-      dischargeEfficiency: settings.efficiency,
-      initialSocRatio: 0,
-      strategy: settings.pvStrategy,
-      trading: buildDefaultTradingConfig(settings.pvStrategy),
-      captureSocSeries: false
-    }, scenarioProfile);
-    const sizing = computePvSizingFromScenarioResults(intervals, scenarios, pvSizingSettings);
-    const pvAdviceCharts = buildPvAdviceChartsData(sizing.pvFormulaAdvice ?? formulaAdvice, intervals);
+    const pvAdviceCharts = buildPvAdviceChartsData(sizing.pvFormulaAdvice ?? formulaAdvice, intervals, hybridAdvice);
     const recommendedScenario =
       scenarios.find((scenario) => scenario.capacityKwh === sizing.recommendedProduct?.capacityKwh) ?? scenarios[0] ?? null;
     const pvSummary = buildPvSummaryFromScenario(recommendedScenario);
@@ -121,7 +135,7 @@ function runAnalysis(
       pvSummary,
       pvAdviceCharts,
       pvAnalysisMode,
-      pvWarnings: pvSummary?.warnings ?? []
+      pvWarnings: [...(pricingAttachment?.warnings ?? []), ...hybridAdvice.warnings]
     };
   }
 
@@ -175,6 +189,18 @@ export default function HomePage() {
   const [appliedSettings, setAppliedSettings] = useState<AnalysisSettings | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
+  const [priceIntervals, setPriceIntervals] = useState<PriceInterval[]>([]);
+  const [variablePricePeriods, setVariablePricePeriods] = useState<PriceInterval[]>([
+    {
+      startTs: '',
+      endTs: '',
+      importPriceEurPerKwh: 0.3,
+      exportPriceEurPerKwh: 0.05,
+      feedInCostEurPerKwh: 0,
+      source: 'variable_period'
+    }
+  ]);
+  const [priceFileName, setPriceFileName] = useState<string | null>(null);
   const [selectedScenario, setSelectedScenario] = useState(64);
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -188,7 +214,13 @@ export default function HomePage() {
     draftSettings.efficiency > 0 &&
     (isPvMode || draftSettings.contractedPowerKw > 0) &&
     (isPvMode || (draftSettings.compliance >= 0.7 && draftSettings.compliance <= 1)) &&
-    (draftSettings.analysisType === 'PEAK_SHAVING' || hasPvInputs);
+    (draftSettings.analysisType === 'PEAK_SHAVING' || hasPvInputs) &&
+    (draftSettings.analysisType !== 'PV_SELF_CONSUMPTION' ||
+      draftSettings.pvPricingMode === 'average' ||
+      (draftSettings.pvPricingMode === 'dynamic' &&
+        (priceIntervals.length > 0 || draftSettings.pvFallbackToAveragePrices)) ||
+      (draftSettings.pvPricingMode === 'variable' &&
+        variablePricePeriods.some((period) => !!period.startTs && !!period.endTs)));
 
   const hasPendingChanges =
     !!appliedSettings &&
@@ -233,6 +265,23 @@ export default function HomePage() {
       setError('Voor PV-analyse is een pv_kwh- of export_kwh-kolom nodig.');
       return;
     }
+    if (
+      draftSettings.analysisType === 'PV_SELF_CONSUMPTION' &&
+      draftSettings.pvPricingMode === 'dynamic' &&
+      priceIntervals.length === 0 &&
+      !draftSettings.pvFallbackToAveragePrices
+    ) {
+      setError('Upload een prijsbestand of zet fallback naar gemiddelde prijzen aan.');
+      return;
+    }
+    if (
+      draftSettings.analysisType === 'PV_SELF_CONSUMPTION' &&
+      draftSettings.pvPricingMode === 'variable' &&
+      !variablePricePeriods.some((period) => !!period.startTs && !!period.endTs)
+    ) {
+      setError('Vul minimaal één geldige tariefperiode in.');
+      return;
+    }
     if (!canAnalyze) {
       setError('Controleer instellingen en data voordat je analyseert.');
       return;
@@ -243,7 +292,11 @@ export default function HomePage() {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
-      const result = runAnalysis(rawRows, headers, draftMapping, draftSettings);
+      const effectivePriceIntervals =
+        draftSettings.pvPricingMode === 'variable'
+          ? variablePricePeriods.filter((period) => period.startTs && period.endTs)
+          : priceIntervals;
+      const result = runAnalysis(rawRows, draftMapping, draftSettings, effectivePriceIntervals);
       if (!result) {
         setError('Geen bruikbare rijen na normalisatie of filtering.');
         return;
@@ -256,6 +309,48 @@ export default function HomePage() {
       setAnalyzedAt(new Date().toISOString());
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const updateVariablePricePeriod = (index: number, patch: Partial<PriceInterval>) => {
+    setVariablePricePeriods((prev) => prev.map((period, periodIndex) => (periodIndex === index ? { ...period, ...patch } : period)));
+    setAppliedSettings(null);
+    setAnalysisResult(null);
+  };
+
+  const addVariablePricePeriod = () => {
+    setVariablePricePeriods((prev) => [
+      ...prev,
+      {
+        startTs: '',
+        endTs: '',
+        importPriceEurPerKwh: draftSettings.pvImportPriceEurPerKwh,
+        exportPriceEurPerKwh: draftSettings.pvExportCompensationEurPerKwh,
+        feedInCostEurPerKwh: draftSettings.pvFeedInCostEurPerKwh,
+        source: 'variable_period'
+      }
+    ]);
+    setAppliedSettings(null);
+    setAnalysisResult(null);
+  };
+
+  const removeVariablePricePeriod = (index: number) => {
+    setVariablePricePeriods((prev) => prev.filter((_, periodIndex) => periodIndex !== index));
+    setAppliedSettings(null);
+    setAnalysisResult(null);
+  };
+
+  const handlePriceFile = async (file: File) => {
+    setError(null);
+    try {
+      const result = await parsePriceFile(file);
+      setPriceIntervals(result.rows);
+      setPriceFileName(file.name);
+      setAppliedSettings(null);
+      setAnalysisResult(null);
+      setAnalyzedAt(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Prijsbestand kon niet worden ingelezen');
     }
   };
 
@@ -295,9 +390,21 @@ export default function HomePage() {
       storedPvUsedOnsiteKwh: scenario.storedPvUsedOnsiteKwh,
       totalUsefulDischargedEnergyKwh: scenario.totalUsefulDischargedEnergyKwh,
       importReductionKwh: scenario.importReductionKwh,
+      importReductionKwhAnnualized: scenario.importReductionKwhAnnualized,
+      exportReductionKwhAnnualized: scenario.exportReductionKwhAnnualized,
       achievedSelfConsumption: scenario.achievedSelfConsumption,
       selfSufficiency: scenario.selfSufficiency,
       exportReduction: scenario.exportReduction,
+      cyclesPerYear: scenario.cyclesPerYear,
+      marginalGainPerAddedKwh: scenario.marginalGainPerAddedKwh,
+      annualValueEur: scenario.annualValueEur,
+      paybackYears: scenario.paybackYears,
+      yearlyCostsEur: scenario.yearlyCostsEur,
+      netAnnualSavingsEur: scenario.netAnnualSavingsEur,
+      paybackIndicative: scenario.paybackIndicative,
+      isEligible: scenario.isEligible,
+      excludedReason: scenario.excludedReason,
+      recommendationReason: scenario.recommendationReason,
       totalEconomicValueEur: scenario.totalEconomicValueEur,
       pvStrategy: scenario.pvStrategy,
       // Excluded on purpose to keep report payload small for large datasets.
@@ -322,6 +429,7 @@ export default function HomePage() {
       intervals: analysisResult.intervals,
       highestPeakDay: analysisResult.highestPeakDay,
       pvSummary: analysisResult.pvSummary,
+      pvAdviceCharts: analysisResult.pvAdviceCharts,
       scenarios: reportScenarios
     };
 
@@ -468,6 +576,252 @@ export default function HomePage() {
                 <option value="business">Business</option>
               </select>
             </label>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm lg:col-span-3">
+              <h3 className="font-semibold text-slate-900">Financiële berekening</h3>
+              <p className="mt-1 text-slate-600">
+                Bij dynamische prijzen wordt de waarde van de batterij per interval berekend. De batterij laadt in PV_SELF_CONSUMPTION nog steeds alleen met zonne-overschot en wordt niet gebruikt voor actieve handel met netstroom.
+              </p>
+              <div className="mt-3 grid gap-4 lg:grid-cols-3">
+                <label className="text-sm">
+                  Contracttype
+                  <select
+                    className="wx-input"
+                    value={draftSettings.pvPricingMode}
+                    onChange={(event) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        pvPricingMode: event.target.value as AnalysisSettings['pvPricingMode']
+                      }))
+                    }
+                  >
+                    <option value="average">Vast tarief</option>
+                    <option value="variable">Variabel contract</option>
+                    <option value="dynamic">Dynamische prijzen</option>
+                  </select>
+                </label>
+                <label className="text-sm">
+                  Importprijs / fallback (EUR/kWh)
+                  <input
+                    className="wx-input"
+                    type="number"
+                    step="0.01"
+                    value={draftSettings.pvImportPriceEurPerKwh}
+                    onChange={(event) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        pvImportPriceEurPerKwh: Number(event.target.value)
+                      }))
+                    }
+                  />
+                </label>
+                <label className="text-sm">
+                  Terugleververgoeding / fallback (EUR/kWh)
+                  <input
+                    className="wx-input"
+                    type="number"
+                    step="0.01"
+                    value={draftSettings.pvExportCompensationEurPerKwh}
+                    onChange={(event) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        pvExportCompensationEurPerKwh: Number(event.target.value)
+                      }))
+                    }
+                  />
+                </label>
+                <label className="text-sm">
+                  Terugleverkosten / fallback (EUR/kWh)
+                  <input
+                    className="wx-input"
+                    type="number"
+                    step="0.01"
+                    value={draftSettings.pvFeedInCostEurPerKwh}
+                    onChange={(event) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        pvFeedInCostEurPerKwh: Number(event.target.value)
+                      }))
+                    }
+                  />
+                </label>
+                <label className="text-sm">
+                  Installatiekosten (optioneel, EUR)
+                  <input
+                    className="wx-input"
+                    type="number"
+                    step="100"
+                    value={draftSettings.pvInstallationCostEur ?? ''}
+                    onChange={(event) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        pvInstallationCostEur:
+                          event.target.value === '' ? undefined : Number(event.target.value)
+                      }))
+                    }
+                  />
+                </label>
+                <label className="text-sm">
+                  Jaarlijks onderhoud / kosten (EUR)
+                  <input
+                    className="wx-input"
+                    type="number"
+                    step="10"
+                    value={draftSettings.pvYearlyMaintenanceEur ?? 0}
+                    onChange={(event) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        pvYearlyMaintenanceEur: Number(event.target.value)
+                      }))
+                    }
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draftSettings.pvFallbackToAveragePrices}
+                    onChange={(event) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        pvFallbackToAveragePrices: event.target.checked
+                      }))
+                    }
+                  />
+                  Fallback naar gemiddelde prijzen toestaan
+                </label>
+                {draftSettings.pvPricingMode === 'variable' && (
+                  <div className="lg:col-span-3">
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="text-sm font-medium text-slate-900">Tariefperiodes</p>
+                        <button className="wx-btn-secondary" type="button" onClick={addVariablePricePeriod}>
+                          Periode toevoegen
+                        </button>
+                      </div>
+                      <div className="grid gap-3">
+                        {variablePricePeriods.map((period, index) => (
+                          <div
+                            key={`${index}-${period.startTs}-${period.endTs}`}
+                            className="grid gap-3 rounded-lg border border-slate-200 p-3 lg:grid-cols-5"
+                          >
+                            <label className="text-xs">
+                              Startdatum
+                              <input
+                                className="wx-input"
+                                type="datetime-local"
+                                value={period.startTs ? period.startTs.slice(0, 16) : ''}
+                                onChange={(event) =>
+                                  updateVariablePricePeriod(index, {
+                                    startTs: event.target.value ? new Date(event.target.value).toISOString() : ''
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="text-xs">
+                              Einddatum
+                              <input
+                                className="wx-input"
+                                type="datetime-local"
+                                value={period.endTs ? period.endTs.slice(0, 16) : ''}
+                                onChange={(event) =>
+                                  updateVariablePricePeriod(index, {
+                                    endTs: event.target.value ? new Date(event.target.value).toISOString() : ''
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="text-xs">
+                              Importprijs
+                              <input
+                                className="wx-input"
+                                type="number"
+                                step="0.01"
+                                value={period.importPriceEurPerKwh}
+                                onChange={(event) =>
+                                  updateVariablePricePeriod(index, {
+                                    importPriceEurPerKwh: Number(event.target.value)
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="text-xs">
+                              Exportvergoeding
+                              <input
+                                className="wx-input"
+                                type="number"
+                                step="0.01"
+                                value={period.exportPriceEurPerKwh}
+                                onChange={(event) =>
+                                  updateVariablePricePeriod(index, {
+                                    exportPriceEurPerKwh: Number(event.target.value)
+                                  })
+                                }
+                              />
+                            </label>
+                            <div className="flex items-end gap-2">
+                              <label className="text-xs">
+                                Terugleverkosten
+                                <input
+                                  className="wx-input"
+                                  type="number"
+                                  step="0.01"
+                                  value={period.feedInCostEurPerKwh ?? 0}
+                                  onChange={(event) =>
+                                    updateVariablePricePeriod(index, {
+                                      feedInCostEurPerKwh: Number(event.target.value),
+                                      source: 'variable_period'
+                                    })
+                                  }
+                                />
+                              </label>
+                              {variablePricePeriods.length > 1 && (
+                                <button
+                                  className="wx-btn-secondary"
+                                  type="button"
+                                  onClick={() => removeVariablePricePeriod(index)}
+                                >
+                                  Verwijderen
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {draftSettings.pvPricingMode === 'dynamic' && (
+                  <label className="text-sm">
+                    Upload prijsbestand (CSV/XLSX)
+                    <input
+                      className="wx-input"
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                          void handlePriceFile(file);
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+              {draftSettings.pvPricingMode !== 'average' && (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600">
+                  <p>Prijsbestand: {priceFileName ?? 'Nog niet geüpload'}</p>
+                  <p>Gekoppelde prijspunten: {draftSettings.pvPricingMode === 'dynamic' ? priceIntervals.length : variablePricePeriods.length}</p>
+                  {analysisResult?.sizing.pvSelfConsumptionAdvice?.configUsed.pricingStats && (
+                    <>
+                      <p>Exacte matches: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.exactMatches}</p>
+                      <p>Uurmatches: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.hourlyMatches}</p>
+                      <p>Periode-matches: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.variablePeriodMatches}</p>
+                      <p>Fallbackmatches: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.fallbackMatches}</p>
+                      <p>Ontbrekende prijzen: {analysisResult.sizing.pvSelfConsumptionAdvice.configUsed.pricingStats.missingPrices}</p>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </>
         )}
 
@@ -520,7 +874,7 @@ export default function HomePage() {
 
         {isPvMode && (
           <div className="rounded-lg border border-lime-200 bg-lime-50 px-3 py-3 text-sm text-lime-900 lg:col-span-3">
-            In PV-modus zijn alleen de instellingen zichtbaar die direct nodig zijn voor de batterijsimulatie.
+            In PV-modus wordt eerst een formulebasis berekend en daarna een kwartiersimulatie uitgevoerd. Het eindadvies kiest dus niet simpelweg de grootste batterij, maar de beste balans tussen importreductie, benutting, cycli en economische waarde.
           </div>
         )}
 
@@ -606,8 +960,7 @@ export default function HomePage() {
                 opwekprofiel berekenen we hoeveel opslagcapaciteit nodig is om relevant PV-overschot te verschuiven.
               </p>
               <p>
-                Benodigde opslag uit formule: {analysisResult.sizing.kWhNeededRaw.toFixed(2)} kWh. Afgerond aanbevolen
-                batterijadvies: {analysisResult.sizing.kWhNeeded.toFixed(2)} kWh.
+                Formulebasis: {analysisResult.sizing.kWhNeededRaw.toFixed(2)} kWh. Simulatieadvies: {analysisResult.sizing.kWhNeeded.toFixed(2)} kWh.
               </p>
               <p>
                 Batterijmodus: {analysisResult.pvSummary?.strategy === 'PV_WITH_TRADING' ? 'PV + trading' : 'Self-consumption only'}.
@@ -649,6 +1002,7 @@ export default function HomePage() {
           {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && analysisResult.sizing.pvFormulaAdvice && (
             (() => {
               const advice = analysisResult.sizing.pvFormulaAdvice;
+              const hybrid = analysisResult.sizing.pvSelfConsumptionAdvice;
               const pvActiveDays = advice.totals.numberOfPvActiveDays;
               const confidenceLabel =
                 pvActiveDays >= 90 ? 'Hoog vertrouwen' : pvActiveDays >= 30 ? 'Goed onderbouwd' : 'Indicatief';
@@ -659,12 +1013,12 @@ export default function HomePage() {
                     <div className="max-w-3xl">
                       <h3 className="wx-title">Waarom dit batterijadvies?</h3>
                       <p className="text-base font-semibold text-slate-900">
-                        Aanbevolen batterij: {advice.roundedAdvice.recommendedKwh} kWh
+                        Aanbevolen batterij: {hybrid?.simulationAdvice.recommended.capacityKwh ?? advice.roundedAdvice.recommendedKwh} kWh
                       </p>
                       <p className="mt-1">
                         Dit advies is gebaseerd op P75 van de dagelijkse nuttige opslagbehoefte over{' '}
-                        {advice.totals.numberOfPvActiveDays} PV-actieve dagen, met veiligheidsfactor en correctie voor
-                        bruikbare batterijcapaciteit.
+                        {advice.totals.numberOfPvActiveDays} PV-actieve dagen, gevolgd door een kwartiersimulatie die
+                        capaciteit, laad-/ontlaadvermogen, cycli en economische waarde meeweegt.
                       </p>
                     </div>
                     <div className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -689,9 +1043,9 @@ export default function HomePage() {
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <div className="text-xs uppercase tracking-wide text-slate-500">Balans van opties</div>
                       <div className="mt-1 text-lg font-semibold text-slate-900">
-                        {advice.roundedAdvice.conservativeKwh} / {advice.roundedAdvice.recommendedKwh} / {advice.roundedAdvice.spaciousKwh} kWh
+                        {hybrid?.simulationAdvice.conservative.capacityKwh ?? advice.roundedAdvice.conservativeKwh} / {hybrid?.simulationAdvice.recommended.capacityKwh ?? advice.roundedAdvice.recommendedKwh} / {hybrid?.simulationAdvice.spacious.capacityKwh ?? advice.roundedAdvice.spaciousKwh} kWh
                       </div>
-                      <div className="mt-1 text-xs text-slate-600">Conservatief, aanbevolen en ruim advies op basis van P50, P75 en P90.</div>
+                      <div className="mt-1 text-xs text-slate-600">Conservatief, aanbevolen en ruim advies na formulebasis plus kwartiersimulatie.</div>
                     </div>
                   </div>
                   <div className="mt-4 grid gap-2 text-sm">
@@ -699,8 +1053,24 @@ export default function HomePage() {
                       Klanttype: {advice.usedCustomerType}. Totale teruglevering {advice.totals.totalExportKwh.toFixed(1)} kWh en
                       totale netafname {advice.totals.totalImportKwh.toFixed(1)} kWh.
                     </p>
+                    {hybrid && (
+                      <>
+                        <p>
+                          Simulatieadvies: {hybrid.simulationAdvice.recommended.capacityKwh} kWh met circa{' '}
+                          {hybrid.simulationAdvice.recommended.dischargePowerKw.toFixed(1)} kW,{' '}
+                          {hybrid.simulationAdvice.recommended.importReductionKwhAnnualized.toFixed(1)} kWh/jaar minder netafname en{' '}
+                          {hybrid.simulationAdvice.recommended.cyclesPerYear.toFixed(1)} cycli/jaar.
+                        </p>
+                        <p>
+                          Jaarlijkse waarde: EUR {hybrid.simulationAdvice.recommended.annualValueEur?.toFixed(2) ?? '0.00'}.
+                          {hybrid.simulationAdvice.recommended.paybackYears != null
+                            ? ` Terugverdientijd: ${hybrid.simulationAdvice.recommended.paybackYears.toFixed(1)} jaar.`
+                            : ''}
+                        </p>
+                      </>
+                    )}
                     {advice.rawAdvice.capReason && <p>{advice.rawAdvice.capReason}</p>}
-                    {advice.warnings.map((warning) => (
+                    {(hybrid?.warnings ?? advice.warnings).map((warning) => (
                       <p key={warning} className="text-amber-700">
                         {warning}
                       </p>
@@ -778,8 +1148,23 @@ export default function HomePage() {
                 ? analysisResult.sizing.recommendedProduct.label
                 : 'Geen haalbare batterijconfiguratie op basis van kWh + kW'}
             </p>
+            {analysisResult.sizing.pvSelfConsumptionAdvice && (
+              <>
+                <p>
+                  Simulatiebasis: {analysisResult.sizing.pvSelfConsumptionAdvice.simulationAdvice.recommended.importReductionKwhAnnualized.toFixed(1)} kWh/jaar minder netafname,
+                  {` `}{analysisResult.sizing.pvSelfConsumptionAdvice.simulationAdvice.recommended.exportReductionKwhAnnualized.toFixed(1)} kWh/jaar minder teruglevering en
+                  {` `}{analysisResult.sizing.pvSelfConsumptionAdvice.simulationAdvice.recommended.cyclesPerYear.toFixed(1)} cycli/jaar.
+                </p>
+                <p>
+                  Aanbevolen laad-/ontlaadvermogen: circa {analysisResult.sizing.pvSelfConsumptionAdvice.simulationAdvice.recommended.dischargePowerKw.toFixed(1)} kW.
+                </p>
+              </>
+            )}
             {analysisResult.sizing.pvFormulaAdvice && analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && (
-              <p>Conservatief: {analysisResult.sizing.pvFormulaAdvice.roundedAdvice.conservativeKwh} kWh</p>
+              <p>
+                Formulebasis: {analysisResult.sizing.pvFormulaAdvice.rawAdvice.recommendedKwh.toFixed(1)} kWh.
+                Conservatief / aanbevolen / ruim: {analysisResult.sizing.pvSelfConsumptionAdvice?.simulationAdvice.conservative.capacityKwh ?? analysisResult.sizing.pvFormulaAdvice.roundedAdvice.conservativeKwh} / {analysisResult.sizing.pvSelfConsumptionAdvice?.simulationAdvice.recommended.capacityKwh ?? analysisResult.sizing.pvFormulaAdvice.roundedAdvice.recommendedKwh} / {analysisResult.sizing.pvSelfConsumptionAdvice?.simulationAdvice.spacious.capacityKwh ?? analysisResult.sizing.pvFormulaAdvice.roundedAdvice.spaciousKwh} kWh.
+              </p>
             )}
             <p>
               Alternatief:{' '}
@@ -787,10 +1172,10 @@ export default function HomePage() {
                 ? analysisResult.sizing.alternativeProduct.label
                 : 'Geen grotere productoptie beschikbaar'}
             </p>
-            {analysisResult.sizing.pvFormulaAdvice?.warnings.map((line) => (
-              <p key={line} className="mt-1 text-xs text-amber-700">
-                {line}
-              </p>
+              {(analysisResult.sizing.pvSelfConsumptionAdvice?.warnings ?? analysisResult.sizing.pvFormulaAdvice?.warnings ?? []).map((line) => (
+                <p key={line} className="mt-1 text-xs text-amber-700">
+                  {line}
+                </p>
             ))}
             {analyzedAt && <p className="mt-1 text-xs text-slate-500">Laatst geanalyseerd: {analyzedAt}</p>}
             <p className="mt-2 text-xs text-slate-500">

@@ -1,4 +1,5 @@
 import { getLocalDayIso, getLocalHourMinute, parseTimestamp } from './datetime';
+import type { PriceInterval, PricingMode, PricingStats, PriceSource } from './pricing';
 import {
   derivePvIntervalFlow as derivePvIntervalFlowBase,
   type PvAnalysisMode,
@@ -15,6 +16,12 @@ export interface IntervalRecord {
   consumptionKwh: number;
   exportKwh?: number;
   pvKwh?: number;
+  importPriceEurPerKwh?: number;
+  exportPriceEurPerKwh?: number;
+  feedInCostEurPerKwh?: number;
+  fixedEnergyTaxEurPerKwh?: number;
+  priceSource?: PriceSource;
+  pricingIndicative?: boolean;
 }
 
 export interface ProcessedInterval extends IntervalRecord {
@@ -57,6 +64,7 @@ export interface SizingResult {
   alternativeProduct: BatteryProduct | null;
   noFeasibleBatteryByPower: boolean;
   pvFormulaAdvice?: PvStorageFormulaAdviceResult | null;
+  pvSelfConsumptionAdvice?: PvSelfConsumptionAdviceResult | null;
 }
 
 export interface PvSizingSettings {
@@ -128,6 +136,156 @@ export interface PvStorageFormulaAdviceResult {
   configUsed: PvStorageFormulaAdviceConfig;
 }
 
+export interface PvBatteryConfig {
+  capacityKwh: number;
+  usableFraction: number;
+  chargePowerKw: number;
+  dischargePowerKw: number;
+  roundTripEfficiency: number;
+}
+
+export interface PvSimulationConfig {
+  intervalMinutesFallback: number;
+  startSocFraction: number;
+  minSocFraction: number;
+  maxSocFraction: number;
+  resetSocDaily: boolean;
+  allowCarryOver: boolean;
+}
+
+export interface PvEconomicsConfig {
+  importPriceEurPerKwh: number;
+  exportCompensationEurPerKwh: number;
+  feedInCostEurPerKwh?: number;
+  fixedEnergyTaxEurPerKwh?: number;
+  batteryPrices?: Record<number, number>;
+  installationCostEur?: number;
+  yearlyMaintenanceEur?: number;
+  pricingMode?: PricingMode;
+  fallbackToAveragePrices?: boolean;
+  priceIntervals?: PriceInterval[];
+  pricingStats?: PricingStats;
+}
+
+export interface PvBatterySimulationResult {
+  optionLabel: string;
+  capacityKwh: number;
+  usableCapacityKwh: number;
+  chargePowerKw: number;
+  dischargePowerKw: number;
+  importBeforeKwh: number;
+  importAfterKwh: number;
+  exportBeforeKwh: number;
+  exportAfterKwh: number;
+  gridImportReductionKwh: number;
+  exportReductionKwh: number;
+  chargedFromPvKwh: number;
+  dischargedToLoadKwh: number;
+  selfConsumptionIncreaseKwh: number;
+  selfConsumptionRatioBefore: number | null;
+  selfConsumptionRatioAfter: number | null;
+  cyclesPerYear: number;
+  equivalentFullCycles: number;
+  fullBatteryEvents: number;
+  emptyBatteryEvents: number;
+  unusedPvBecauseBatteryFullKwh: number;
+  unusedPvBecausePowerLimitKwh: number;
+  averageSocKwh: number;
+  maxSocKwh: number;
+  endingSocKwh: number;
+  chargedFromPvKwhAnnualized: number;
+  dischargedToLoadKwhAnnualized: number;
+  importReductionKwhAnnualized: number;
+  exportReductionKwhAnnualized: number;
+  remainingExportKwhAnnualized: number;
+  baselineEnergyCostEur?: number;
+  batteryEnergyCostEur?: number;
+  dynamicValueEur?: number;
+  yearlyCostsEur?: number;
+  netAnnualSavingsEur?: number;
+  annualValueEur?: number;
+  paybackYears?: number;
+  paybackIndicative?: boolean;
+  pricingStats?: PricingStats;
+  valueByInterval?: Array<{
+    ts: string;
+    importPriceEurPerKwh: number;
+    exportPriceEurPerKwh: number;
+    feedInCostEurPerKwh: number;
+    importBeforeKwh: number;
+    importAfterKwh: number;
+    exportBeforeKwh: number;
+    exportAfterKwh: number;
+    baselineCostEur: number;
+    batteryCostEur: number;
+    intervalValueEur: number;
+    priceSource: string;
+  }>;
+  marginalGainKwh?: number;
+  marginalGainPerAddedKwh?: number;
+  isEligible: boolean;
+  excludedReason?: string;
+  recommendationReason?: string;
+  socSeries?: Array<{ timestamp: string; socKwh: number }>;
+}
+
+export interface PvSelfConsumptionAdviceConfig {
+  formula?: Partial<PvStorageFormulaAdviceConfig>;
+  customerType?: 'auto' | 'home' | 'business';
+  maxHomeBatteryKwh?: number;
+  allowHome64AsSpacious?: boolean;
+  usableFraction?: number;
+  roundTripEfficiency?: number;
+  resetSocDailyForHome?: boolean;
+  allowCarryOverForBusiness?: boolean;
+  minCyclesPerYearHome?: number;
+  minCyclesPerYearBusiness?: number;
+  minMarginalGainPerAddedKwhHome?: number;
+  minMarginalGainPerAddedKwhBusiness?: number;
+  economics?: Partial<PvEconomicsConfig>;
+}
+
+export interface PvSelfConsumptionAdviceResult {
+  customerTypeDetected: 'home' | 'business';
+  usedCustomerType: 'home' | 'business';
+  formulaAdvice: {
+    p50StorageNeedKwh: number;
+    p75StorageNeedKwh: number;
+    p90StorageNeedKwh: number;
+    conservativeFormulaKwh: number;
+    recommendedFormulaKwh: number;
+    spaciousFormulaKwh: number;
+  };
+  simulationAdvice: {
+    conservative: PvBatterySimulationResult;
+    recommended: PvBatterySimulationResult;
+    spacious: PvBatterySimulationResult;
+    allScenarios: PvBatterySimulationResult[];
+  };
+  totals: {
+    numberOfIntervals: number;
+    numberOfDays: number;
+    numberOfPvActiveDays: number;
+    totalImportKwh: number;
+    totalExportKwh: number;
+    maxDailyExportKwh: number;
+  };
+  configUsed: {
+    usableFraction: number;
+    roundTripEfficiency: number;
+    resetSocDaily: boolean;
+    pricingMode?: PricingMode;
+    fallbackToAveragePrices?: boolean;
+    pricingStats?: PricingStats;
+    importPriceEurPerKwh?: number;
+    exportCompensationEurPerKwh?: number;
+    feedInCostEurPerKwh?: number;
+    fixedEnergyTaxEurPerKwh?: number;
+  };
+  warnings: string[];
+  explanation: string[];
+}
+
 export interface PvAdviceChartsData {
   dailyStorageChart: Array<{
     date: string;
@@ -173,6 +331,22 @@ export interface PvAdviceChartsData {
     importKwh: number;
     exportKwh: number;
     batterySocKwh: number;
+    importPriceEurPerKwh?: number;
+    exportPriceEurPerKwh?: number;
+  }>;
+  annualValueByCapacityChart: Array<{
+    capacityKwh: number;
+    annualValueEur: number;
+  }>;
+  importExportCostChart: Array<{
+    label: string;
+    costEur: number;
+  }>;
+  monthlyValueChart: Array<{
+    month: string;
+    baselineCostEur: number;
+    batteryCostEur: number;
+    valueEur: number;
   }>;
   warnings: string[];
 }
@@ -439,8 +613,155 @@ export const DEFAULT_PV_STORAGE_FORMULA_CONFIG: PvStorageFormulaAdviceConfig = {
   availableBusinessOptionsKwh: [64, 96, 261, 522, 783, 1044, 1305, 1566, 1827, 2090, 5015]
 };
 
+const DEFAULT_PV_ECONOMICS_CONFIG: PvEconomicsConfig = {
+  importPriceEurPerKwh: 0.3,
+  exportCompensationEurPerKwh: 0.05,
+  feedInCostEurPerKwh: 0,
+  fixedEnergyTaxEurPerKwh: 0,
+  yearlyMaintenanceEur: 0,
+  pricingMode: 'average',
+  fallbackToAveragePrices: true
+};
+
+const DEFAULT_PV_SELF_CONSUMPTION_CONFIG: Required<
+  Omit<PvSelfConsumptionAdviceConfig, 'formula' | 'economics' | 'customerType'>
+> = {
+  maxHomeBatteryKwh: 40,
+  allowHome64AsSpacious: true,
+  usableFraction: 0.9,
+  roundTripEfficiency: 0.9,
+  resetSocDailyForHome: true,
+  allowCarryOverForBusiness: true,
+  minCyclesPerYearHome: 80,
+  minCyclesPerYearBusiness: 20,
+  minMarginalGainPerAddedKwhHome: 30,
+  minMarginalGainPerAddedKwhBusiness: 10
+};
+
+const HOME_PV_POWER_MAP: Record<number, number> = {
+  5: 3,
+  10: 5,
+  15: 7.5,
+  20: 10,
+  25: 10,
+  30: 12.5,
+  40: 15,
+  64: 32
+};
+
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function clampNonNegative(value: number | undefined | null): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, value ?? 0);
+}
+
+function normalizeAnnual(value: number, numberOfDays: number): number {
+  if (!Number.isFinite(value) || numberOfDays <= 0) return 0;
+  return value * (365 / numberOfDays);
+}
+
+function deriveIntervalMinutes(intervals: ProcessedInterval[], fallback = 15): number {
+  for (let index = 1; index < intervals.length; index += 1) {
+    const previous = parseTimestamp(intervals[index - 1].timestamp);
+    const current = parseTimestamp(intervals[index].timestamp);
+    const diffMinutes = (current.getTime() - previous.getTime()) / 60000;
+    if (Number.isFinite(diffMinutes) && diffMinutes > 0) {
+      return diffMinutes;
+    }
+  }
+  return fallback;
+}
+
+function createBatteryConfig(capacityKwh: number, usableFraction: number, roundTripEfficiency: number): PvBatteryConfig {
+  const baseSpec = getBatterySpecForCapacity(capacityKwh);
+  const mappedPowerKw = HOME_PV_POWER_MAP[capacityKwh];
+  const chargePowerKw = mappedPowerKw ?? baseSpec.maxChargeKw;
+  const dischargePowerKw = mappedPowerKw ?? baseSpec.maxDischargeKw;
+
+  return {
+    capacityKwh,
+    usableFraction,
+    chargePowerKw,
+    dischargePowerKw,
+    roundTripEfficiency
+  };
+}
+
+function generatePvBatteryScenarioOptions(
+  customerType: 'home' | 'business',
+  formulaAdvice: PvStorageFormulaAdviceResult,
+  config: PvSelfConsumptionAdviceConfig
+): number[] {
+  if (customerType === 'business') {
+    return [...formulaAdvice.configUsed.availableBusinessOptionsKwh];
+  }
+
+  const homeOptions = [...formulaAdvice.configUsed.availableHomeOptionsKwh].filter(
+    (option) => option <= (config.maxHomeBatteryKwh ?? DEFAULT_PV_SELF_CONSUMPTION_CONFIG.maxHomeBatteryKwh)
+  );
+  if (config.allowHome64AsSpacious ?? DEFAULT_PV_SELF_CONSUMPTION_CONFIG.allowHome64AsSpacious) {
+    return [...homeOptions, 64];
+  }
+  return homeOptions;
+}
+
+export function toScenarioResult(simulation: PvBatterySimulationResult): ScenarioResult {
+  return {
+    optionLabel: simulation.optionLabel,
+    capacityKwh: simulation.capacityKwh,
+    usableCapacityKwh: simulation.usableCapacityKwh,
+    pvAnalysisMode: simulation.selfConsumptionRatioAfter == null ? 'EXPORT_ONLY' : 'FULL_PV',
+    pvStrategy: 'SELF_CONSUMPTION_ONLY',
+    exceedanceIntervalsBefore: 0,
+    exceedanceIntervalsAfter: 0,
+    exceedanceEnergyKwhBefore: simulation.exportBeforeKwh,
+    exceedanceEnergyKwhAfter: simulation.exportAfterKwh,
+    achievedComplianceDataset:
+      simulation.exportBeforeKwh > 0 ? simulation.exportReductionKwh / simulation.exportBeforeKwh : 0,
+    achievedComplianceDailyAverage:
+      simulation.exportBeforeKwh > 0 ? simulation.exportReductionKwh / simulation.exportBeforeKwh : 0,
+    achievedCompliance: simulation.exportBeforeKwh > 0 ? simulation.exportReductionKwh / simulation.exportBeforeKwh : 0,
+    maxRemainingExcessKw: 0,
+    maxChargeKw: simulation.chargePowerKw,
+    maxDischargeKw: simulation.dischargePowerKw,
+    endingSocKwh: simulation.endingSocKwh,
+    shavedSeries: [],
+    importedEnergyBeforeKwh: simulation.importBeforeKwh,
+    importedEnergyAfterKwh: simulation.importAfterKwh,
+    exportedEnergyBeforeKwh: simulation.exportBeforeKwh,
+    exportedEnergyAfterKwh: simulation.exportAfterKwh,
+    capturedExportEnergyKwh: simulation.chargedFromPvKwh,
+    storedPvUsedOnsiteKwh: simulation.dischargedToLoadKwh,
+    totalUsefulDischargedEnergyKwh: simulation.dischargedToLoadKwh,
+    importReductionKwh: simulation.gridImportReductionKwh,
+    exportReduction:
+      simulation.exportBeforeKwh > 0 ? simulation.exportReductionKwh / simulation.exportBeforeKwh : 0,
+    totalEconomicValueEur: simulation.annualValueEur ?? null,
+    peakSocKwh: simulation.maxSocKwh,
+    socSeries: simulation.socSeries,
+    cyclesPerYear: simulation.cyclesPerYear,
+    marginalGainPerAddedKwh: simulation.marginalGainPerAddedKwh,
+    importReductionKwhAnnualized: simulation.importReductionKwhAnnualized,
+    exportReductionKwhAnnualized: simulation.exportReductionKwhAnnualized,
+    remainingExportKwhAnnualized: simulation.remainingExportKwhAnnualized,
+    chargedKwhAnnualized: simulation.chargedFromPvKwhAnnualized,
+    dischargedKwhAnnualized: simulation.dischargedToLoadKwhAnnualized,
+    annualValueEur: simulation.annualValueEur,
+    paybackYears: simulation.paybackYears,
+    yearlyCostsEur: simulation.yearlyCostsEur,
+    netAnnualSavingsEur: simulation.netAnnualSavingsEur,
+    paybackIndicative: simulation.paybackIndicative,
+    baselineEnergyCostEur: simulation.baselineEnergyCostEur,
+    batteryEnergyCostEur: simulation.batteryEnergyCostEur,
+    dynamicValueEur: simulation.dynamicValueEur,
+    scenarioScore: undefined,
+    isEligible: simulation.isEligible,
+    excludedReason: simulation.excludedReason,
+    recommendationReason: simulation.recommendationReason
+  };
 }
 
 function percentile(values: number[], p: number): number {
@@ -677,6 +998,447 @@ export function computePvStorageFormulaAdvice(
   };
 }
 
+export function simulatePvBatteryScenario(
+  intervals: ProcessedInterval[],
+  batteryConfig: PvBatteryConfig,
+  simulationConfig: PvSimulationConfig,
+  economicsConfig?: PvEconomicsConfig
+): PvBatterySimulationResult {
+  const intervalMinutes = deriveIntervalMinutes(intervals, simulationConfig.intervalMinutesFallback);
+  const intervalHours = intervalMinutes / 60;
+  const chargeEfficiency = Math.sqrt(batteryConfig.roundTripEfficiency);
+  const dischargeEfficiency = Math.sqrt(batteryConfig.roundTripEfficiency);
+  const usableCapacityKwh = batteryConfig.capacityKwh * batteryConfig.usableFraction;
+  const numberOfDays = new Set(intervals.map((interval) => getLocalDayIso(interval.timestamp, 'Europe/Amsterdam'))).size || 1;
+  const startSocKwh = usableCapacityKwh * simulationConfig.startSocFraction;
+  const minSocKwh = usableCapacityKwh * simulationConfig.minSocFraction;
+  const maxSocKwh = usableCapacityKwh * simulationConfig.maxSocFraction;
+  const maxChargeKwhThisInterval = batteryConfig.chargePowerKw * intervalHours;
+  const maxDischargeKwhThisInterval = batteryConfig.dischargePowerKw * intervalHours;
+
+  let socKwh = Math.min(maxSocKwh, Math.max(minSocKwh, startSocKwh));
+  let currentDay: string | null = null;
+  let importBeforeKwh = 0;
+  let importAfterKwh = 0;
+  let exportBeforeKwh = 0;
+  let exportAfterKwh = 0;
+  let chargedFromPvKwh = 0;
+  let dischargedToLoadKwh = 0;
+  let fullBatteryEvents = 0;
+  let emptyBatteryEvents = 0;
+  let unusedPvBecauseBatteryFullKwh = 0;
+  let unusedPvBecausePowerLimitKwh = 0;
+  let socTotalKwh = 0;
+  let maxSocObservedKwh = socKwh;
+  let totalPvKwh: number | null = 0;
+  let directSelfConsumptionBeforeKwh = 0;
+  const socSeries: Array<{ timestamp: string; socKwh: number }> = [];
+  const valueByInterval: NonNullable<PvBatterySimulationResult['valueByInterval']> = [];
+  let baselineEnergyCostEur = 0;
+  let batteryEnergyCostEur = 0;
+
+  for (const interval of intervals) {
+    const day = getLocalDayIso(interval.timestamp, 'Europe/Amsterdam');
+    if (currentDay !== null && day !== currentDay && simulationConfig.resetSocDaily) {
+      socKwh = simulationConfig.allowCarryOver ? socKwh : startSocKwh;
+    }
+    currentDay = day;
+
+    const flow = derivePvIntervalFlow(interval);
+    const importKwh = clampNonNegative(flow.loadDeficitKwh);
+    const exportKwh = clampNonNegative(flow.surplusKwh);
+    const pvKwh = typeof interval.pvKwh === 'number' ? clampNonNegative(interval.pvKwh) : null;
+
+    importBeforeKwh += importKwh;
+    exportBeforeKwh += exportKwh;
+    if (pvKwh != null) {
+      totalPvKwh = (totalPvKwh ?? 0) + pvKwh;
+      directSelfConsumptionBeforeKwh += clampNonNegative(flow.directSelfConsumptionKwh);
+    } else {
+      totalPvKwh = null;
+    }
+
+    let remainingExportKwh = exportKwh;
+    let remainingImportKwh = importKwh;
+
+    if (exportKwh > 0) {
+      const availableSpaceKwh = Math.max(0, maxSocKwh - socKwh);
+      const powerLimitedChargeKwh = Math.min(exportKwh, maxChargeKwhThisInterval);
+      const possibleChargeFromPvKwh = Math.min(
+        powerLimitedChargeKwh,
+        chargeEfficiency > 0 ? availableSpaceKwh / chargeEfficiency : 0
+      );
+      const socIncreaseKwh = possibleChargeFromPvKwh * chargeEfficiency;
+      socKwh = Math.min(maxSocKwh, socKwh + socIncreaseKwh);
+      chargedFromPvKwh += possibleChargeFromPvKwh;
+      remainingExportKwh = Math.max(0, exportKwh - possibleChargeFromPvKwh);
+      unusedPvBecausePowerLimitKwh += Math.max(0, exportKwh - powerLimitedChargeKwh);
+      unusedPvBecauseBatteryFullKwh += Math.max(0, powerLimitedChargeKwh - possibleChargeFromPvKwh);
+      if (availableSpaceKwh <= 1e-6 || maxSocKwh - socKwh <= 1e-6) {
+        fullBatteryEvents += 1;
+      }
+    }
+
+    if (importKwh > 0) {
+      const deliverableFromSocKwh = Math.max(0, socKwh - minSocKwh) * dischargeEfficiency;
+      const possibleDischargeToLoadKwh = Math.min(importKwh, maxDischargeKwhThisInterval, deliverableFromSocKwh);
+      const socDecreaseKwh = dischargeEfficiency > 0 ? possibleDischargeToLoadKwh / dischargeEfficiency : 0;
+      socKwh = Math.max(minSocKwh, socKwh - socDecreaseKwh);
+      dischargedToLoadKwh += possibleDischargeToLoadKwh;
+      remainingImportKwh = Math.max(0, importKwh - possibleDischargeToLoadKwh);
+      if (deliverableFromSocKwh <= 1e-6 || socKwh <= minSocKwh + 1e-6) {
+        emptyBatteryEvents += 1;
+      }
+    }
+
+    importAfterKwh += remainingImportKwh;
+    exportAfterKwh += remainingExportKwh;
+    socTotalKwh += socKwh;
+    maxSocObservedKwh = Math.max(maxSocObservedKwh, socKwh);
+    socSeries.push({ timestamp: interval.timestamp, socKwh: round2(socKwh) });
+
+    const importPriceEurPerKwh = interval.importPriceEurPerKwh ?? economicsConfig?.importPriceEurPerKwh ?? 0;
+    const exportPriceEurPerKwh = interval.exportPriceEurPerKwh ?? economicsConfig?.exportCompensationEurPerKwh ?? 0;
+    const feedInCostEurPerKwh = interval.feedInCostEurPerKwh ?? economicsConfig?.feedInCostEurPerKwh ?? 0;
+    const fixedEnergyTaxEurPerKwh = interval.fixedEnergyTaxEurPerKwh ?? economicsConfig?.fixedEnergyTaxEurPerKwh ?? 0;
+    const baselineCostForInterval =
+      importKwh * (importPriceEurPerKwh + fixedEnergyTaxEurPerKwh) -
+      exportKwh * exportPriceEurPerKwh +
+      exportKwh * feedInCostEurPerKwh;
+    const batteryCostForInterval =
+      remainingImportKwh * (importPriceEurPerKwh + fixedEnergyTaxEurPerKwh) -
+      remainingExportKwh * exportPriceEurPerKwh +
+      remainingExportKwh * feedInCostEurPerKwh;
+    const intervalValueEur = baselineCostForInterval - batteryCostForInterval;
+    baselineEnergyCostEur += baselineCostForInterval;
+    batteryEnergyCostEur += batteryCostForInterval;
+    valueByInterval.push({
+      ts: interval.timestamp,
+      importPriceEurPerKwh: round2(importPriceEurPerKwh),
+      exportPriceEurPerKwh: round2(exportPriceEurPerKwh),
+      feedInCostEurPerKwh: round2(feedInCostEurPerKwh),
+      importBeforeKwh: round2(importKwh),
+      importAfterKwh: round2(remainingImportKwh),
+      exportBeforeKwh: round2(exportKwh),
+      exportAfterKwh: round2(remainingExportKwh),
+      baselineCostEur: round2(baselineCostForInterval),
+      batteryCostEur: round2(batteryCostForInterval),
+      intervalValueEur: round2(intervalValueEur),
+      priceSource: interval.priceSource ?? 'missing'
+    });
+  }
+
+  const gridImportReductionKwh = Math.max(0, importBeforeKwh - importAfterKwh);
+  const exportReductionKwh = Math.max(0, exportBeforeKwh - exportAfterKwh);
+  const equivalentFullCycles = usableCapacityKwh > 0 ? dischargedToLoadKwh / usableCapacityKwh : 0;
+  const cyclesPerYear = normalizeAnnual(equivalentFullCycles, numberOfDays);
+  const grossSavingsEur = gridImportReductionKwh * (economicsConfig?.importPriceEurPerKwh ?? 0);
+  const lostExportRevenueEur =
+    exportReductionKwh * ((economicsConfig?.exportCompensationEurPerKwh ?? 0) - (economicsConfig?.feedInCostEurPerKwh ?? 0));
+  const dynamicValueEur = baselineEnergyCostEur - batteryEnergyCostEur;
+  const grossAnnualSavingsEur =
+    economicsConfig?.pricingMode === 'dynamic'
+      ? dynamicValueEur
+      : grossSavingsEur - lostExportRevenueEur;
+  const yearlyCostsEur = economicsConfig?.yearlyMaintenanceEur ?? 0;
+  const annualValueEur = grossAnnualSavingsEur - yearlyCostsEur;
+  const batteryCostEur =
+    (economicsConfig?.batteryPrices?.[batteryConfig.capacityKwh] ?? 0) + (economicsConfig?.installationCostEur ?? 0);
+  const paybackYears =
+      batteryCostEur > 0 && annualValueEur > 0 ? batteryCostEur / annualValueEur : undefined;
+  const selfConsumptionIncreaseKwh = gridImportReductionKwh;
+
+  return {
+    optionLabel: `${batteryConfig.capacityKwh} kWh / ${round2(batteryConfig.dischargePowerKw)} kW`,
+    capacityKwh: batteryConfig.capacityKwh,
+    usableCapacityKwh: round2(usableCapacityKwh),
+    chargePowerKw: round2(batteryConfig.chargePowerKw),
+    dischargePowerKw: round2(batteryConfig.dischargePowerKw),
+    importBeforeKwh: round2(importBeforeKwh),
+    importAfterKwh: round2(importAfterKwh),
+    exportBeforeKwh: round2(exportBeforeKwh),
+    exportAfterKwh: round2(exportAfterKwh),
+    gridImportReductionKwh: round2(gridImportReductionKwh),
+    exportReductionKwh: round2(exportReductionKwh),
+    chargedFromPvKwh: round2(chargedFromPvKwh),
+    dischargedToLoadKwh: round2(dischargedToLoadKwh),
+    selfConsumptionIncreaseKwh: round2(selfConsumptionIncreaseKwh),
+    selfConsumptionRatioBefore:
+      totalPvKwh != null && totalPvKwh > 0 ? round2(directSelfConsumptionBeforeKwh / totalPvKwh) : null,
+    selfConsumptionRatioAfter:
+      totalPvKwh != null && totalPvKwh > 0
+        ? round2((directSelfConsumptionBeforeKwh + dischargedToLoadKwh) / totalPvKwh)
+        : null,
+    cyclesPerYear: round2(cyclesPerYear),
+    equivalentFullCycles: round2(equivalentFullCycles),
+    fullBatteryEvents,
+    emptyBatteryEvents,
+    unusedPvBecauseBatteryFullKwh: round2(unusedPvBecauseBatteryFullKwh),
+    unusedPvBecausePowerLimitKwh: round2(unusedPvBecausePowerLimitKwh),
+    averageSocKwh: round2(socTotalKwh / Math.max(1, intervals.length)),
+    maxSocKwh: round2(maxSocObservedKwh),
+    endingSocKwh: round2(socKwh),
+    chargedFromPvKwhAnnualized: round2(normalizeAnnual(chargedFromPvKwh, numberOfDays)),
+    dischargedToLoadKwhAnnualized: round2(normalizeAnnual(dischargedToLoadKwh, numberOfDays)),
+    importReductionKwhAnnualized: round2(normalizeAnnual(gridImportReductionKwh, numberOfDays)),
+    exportReductionKwhAnnualized: round2(normalizeAnnual(exportReductionKwh, numberOfDays)),
+    remainingExportKwhAnnualized: round2(normalizeAnnual(exportAfterKwh, numberOfDays)),
+    baselineEnergyCostEur: round2(baselineEnergyCostEur),
+    batteryEnergyCostEur: round2(batteryEnergyCostEur),
+    dynamicValueEur: round2(dynamicValueEur),
+    yearlyCostsEur: round2(yearlyCostsEur),
+    netAnnualSavingsEur: round2(annualValueEur),
+    annualValueEur: round2(annualValueEur),
+    paybackYears: paybackYears == null ? undefined : round2(paybackYears),
+    paybackIndicative:
+      intervals.some((interval) => interval.pricingIndicative) ||
+      (economicsConfig?.pricingStats?.missingPrices ?? 0) > 0 ||
+      (economicsConfig?.pricingStats?.fallbackMatches ?? 0) > 0,
+    pricingStats: economicsConfig?.pricingStats,
+    valueByInterval,
+    isEligible: true,
+    socSeries
+  };
+}
+
+export function computePvSelfConsumptionAdvice(
+  intervals: ProcessedInterval[],
+  config: PvSelfConsumptionAdviceConfig = {}
+): PvSelfConsumptionAdviceResult {
+  const formulaAdvice = computePvStorageFormulaAdvice(intervals, {
+    ...config.formula,
+    customerType: config.customerType ?? config.formula?.customerType ?? 'auto',
+    maxHomeBatteryKwh: config.maxHomeBatteryKwh ?? DEFAULT_PV_SELF_CONSUMPTION_CONFIG.maxHomeBatteryKwh
+  });
+  const customerTypeDetected = formulaAdvice.customerTypeDetected;
+  const usedCustomerType = formulaAdvice.usedCustomerType;
+  const resolvedEconomics: PvEconomicsConfig = {
+    ...DEFAULT_PV_ECONOMICS_CONFIG,
+    ...config.economics
+  };
+  const resolvedHybridConfig = {
+    ...DEFAULT_PV_SELF_CONSUMPTION_CONFIG,
+    ...config
+  };
+  const scenarioOptions = generatePvBatteryScenarioOptions(usedCustomerType, formulaAdvice, resolvedHybridConfig);
+  const simulationConfig: PvSimulationConfig = {
+    intervalMinutesFallback: 15,
+    startSocFraction: 0,
+    minSocFraction: 0,
+    maxSocFraction: 1,
+    resetSocDaily:
+      usedCustomerType === 'home'
+        ? resolvedHybridConfig.resetSocDailyForHome
+        : !resolvedHybridConfig.allowCarryOverForBusiness,
+    allowCarryOver: usedCustomerType === 'business' && resolvedHybridConfig.allowCarryOverForBusiness
+  };
+
+  const allScenarios = scenarioOptions
+    .map((capacityKwh) =>
+      simulatePvBatteryScenario(
+        intervals,
+        createBatteryConfig(
+          capacityKwh,
+          resolvedHybridConfig.usableFraction,
+          resolvedHybridConfig.roundTripEfficiency
+        ),
+        simulationConfig,
+        resolvedEconomics
+      )
+    )
+    .sort((a, b) => a.capacityKwh - b.capacityKwh);
+
+  const formulaReferenceCapacity = formulaAdvice.roundedAdvice.recommendedKwh;
+  const formulaReferenceScenario =
+    allScenarios.find((scenario) => scenario.capacityKwh >= formulaReferenceCapacity) ??
+    allScenarios[allScenarios.length - 1];
+  const targetImportReductionAnnualized = formulaReferenceScenario?.importReductionKwhAnnualized ?? 0;
+  const minCyclesPerYear =
+    usedCustomerType === 'business'
+      ? resolvedHybridConfig.minCyclesPerYearBusiness
+      : resolvedHybridConfig.minCyclesPerYearHome;
+  const minMarginalGain =
+    usedCustomerType === 'business'
+      ? resolvedHybridConfig.minMarginalGainPerAddedKwhBusiness
+      : resolvedHybridConfig.minMarginalGainPerAddedKwhHome;
+
+  const maxImportReduction = Math.max(0, ...allScenarios.map((scenario) => scenario.importReductionKwhAnnualized));
+  const maxCycles = Math.max(0, ...allScenarios.map((scenario) => scenario.cyclesPerYear));
+  const maxMarginal = Math.max(
+    0,
+    ...allScenarios.map((scenario, index) => {
+      if (index === 0) return 0;
+      const previous = allScenarios[index - 1];
+      return (scenario.importReductionKwhAnnualized - previous.importReductionKwhAnnualized) / (scenario.capacityKwh - previous.capacityKwh);
+    })
+  );
+  const maxAnnualValue = Math.max(0, ...allScenarios.map((scenario) => scenario.annualValueEur ?? 0));
+
+  allScenarios.forEach((scenario, index) => {
+    const previous = index > 0 ? allScenarios[index - 1] : undefined;
+    if (previous) {
+      const marginalGainKwh = scenario.importReductionKwhAnnualized - previous.importReductionKwhAnnualized;
+      const addedCapacityKwh = scenario.capacityKwh - previous.capacityKwh;
+      scenario.marginalGainKwh = round2(marginalGainKwh);
+      scenario.marginalGainPerAddedKwh = addedCapacityKwh > 0 ? round2(marginalGainKwh / addedCapacityKwh) : 0;
+    } else {
+      scenario.marginalGainKwh = round2(scenario.importReductionKwhAnnualized);
+      scenario.marginalGainPerAddedKwh =
+        scenario.capacityKwh > 0 ? round2(scenario.importReductionKwhAnnualized / scenario.capacityKwh) : 0;
+    }
+
+    const excludedReasons: string[] = [];
+    if (usedCustomerType === 'home' && scenario.capacityKwh > resolvedHybridConfig.maxHomeBatteryKwh && scenario.capacityKwh !== 64) {
+      excludedReasons.push('Boven maximale thuisbatterijcapaciteit');
+    }
+    if (usedCustomerType === 'home' && scenario.capacityKwh >= 2090) {
+      excludedReasons.push('Industriële batterij niet toegestaan in thuisadvies');
+    }
+    if (scenario.cyclesPerYear < minCyclesPerYear) {
+      excludedReasons.push('Te weinig cycli per jaar');
+    }
+    if ((scenario.marginalGainPerAddedKwh ?? 0) < minMarginalGain && index > 0) {
+      excludedReasons.push('Marginale meeropbrengst te laag');
+    }
+    if ((scenario.annualValueEur ?? 0) <= 0) {
+      excludedReasons.push('Jaarlijkse waarde niet positief');
+    }
+    if (usedCustomerType === 'business' && scenario.capacityKwh === 5015 && (formulaAdvice.rawAdvice.recommendedKwh <= 2090)) {
+      excludedReasons.push('5015 kWh niet logisch zolang behoefte onder 2090 kWh blijft');
+    }
+    if (usedCustomerType === 'home' && scenario.capacityKwh === 64) {
+      excludedReasons.push('64 kWh alleen als zeer ruime thuisoptie');
+    }
+
+    scenario.isEligible = excludedReasons.length === 0;
+    scenario.excludedReason = excludedReasons[0];
+  });
+
+  const eligibleScenarios = allScenarios.filter((scenario) => scenario.isEligible);
+  const fallbackScenario = eligibleScenarios[0] ?? allScenarios[0];
+  const conservativeScenario =
+    eligibleScenarios.find(
+      (scenario) => scenario.importReductionKwhAnnualized >= targetImportReductionAnnualized * 0.7
+    ) ?? fallbackScenario;
+
+  const recommendedScenario =
+    eligibleScenarios
+      .map((scenario) => {
+        const normalizedImportReduction = maxImportReduction > 0 ? scenario.importReductionKwhAnnualized / maxImportReduction : 0;
+        const normalizedCycles = maxCycles > 0 ? Math.min(scenario.cyclesPerYear / maxCycles, 1) : 0;
+        const normalizedMarginalGain = maxMarginal > 0 ? Math.min((scenario.marginalGainPerAddedKwh ?? 0) / maxMarginal, 1) : 0;
+        const normalizedEconomicValue = maxAnnualValue > 0 ? Math.max(0, (scenario.annualValueEur ?? 0) / maxAnnualValue) : 0;
+        const oversizeRatio =
+          formulaAdvice.rawAdvice.recommendedKwh > 0 ? scenario.capacityKwh / formulaAdvice.rawAdvice.recommendedKwh : 1;
+        let score =
+          normalizedImportReduction * 0.4 +
+          normalizedCycles * 0.2 +
+          normalizedMarginalGain * 0.2 +
+          normalizedEconomicValue * 0.2;
+        if (oversizeRatio > 3) score -= 0.5;
+        else if (oversizeRatio > 2) score -= 0.25;
+        else if (oversizeRatio > 1.5) score -= 0.1;
+        return { scenario, score };
+      })
+      .sort((a, b) => b.score - a.score || a.scenario.capacityKwh - b.scenario.capacityKwh)[0]?.scenario ?? fallbackScenario;
+
+  const spaciousCandidates = allScenarios.filter((scenario) => {
+    if (usedCustomerType === 'home' && scenario.capacityKwh > resolvedHybridConfig.maxHomeBatteryKwh && scenario.capacityKwh !== 64) {
+      return false;
+    }
+    if (usedCustomerType === 'business' && scenario.capacityKwh === 5015 && formulaAdvice.rawAdvice.recommendedKwh <= 2090) {
+      return false;
+    }
+    return (scenario.marginalGainPerAddedKwh ?? 0) >= minMarginalGain * 0.6;
+  });
+  const spaciousScenario =
+    spaciousCandidates[spaciousCandidates.length - 1] ??
+    eligibleScenarios[eligibleScenarios.length - 1] ??
+    fallbackScenario;
+
+  conservativeScenario.recommendationReason =
+    'Kleinste zinvolle optie die al een groot deel van de praktische importreductie pakt.';
+  recommendedScenario.recommendationReason =
+    'Deze batterij is gekozen omdat hij de beste balans geeft tussen extra eigen verbruik, benutting, jaarlijkse besparing en afvlakking van meeropbrengst.';
+  spaciousScenario.recommendationReason =
+    'Ruimste zinvolle optie voordat de meeropbrengst duidelijk afvlakt.';
+
+  const warnings = [...formulaAdvice.warnings];
+  if (formulaAdvice.totals.numberOfDays < 365) {
+    warnings.push('Dataset korter dan 12 maanden; jaarlijkse waarden zijn opgeschaald en dus indicatief.');
+  }
+  if (resolvedEconomics.pricingMode === 'dynamic') {
+    const stats = resolvedEconomics.pricingStats;
+    warnings.push(
+      'Bij dynamische prijzen wordt de economische waarde per interval berekend. In PV-zelfverbruik laadt de batterij nog steeds alleen met zonne-overschot en niet voor actieve handel met netstroom.'
+    );
+    if (stats) {
+      if (stats.hourlyMatches > 0) {
+        warnings.push('Prijsdata is per uur gekoppeld aan kwartierdata.');
+      }
+      if (stats.fallbackMatches > 0) {
+        warnings.push(`Gemiddelde fallbackprijzen gebruikt voor ${stats.fallbackMatches} intervallen.`);
+      }
+      if (stats.missingPrices > 0) {
+        warnings.push(`Prijsdata ontbreekt voor ${stats.missingPrices} intervallen.`);
+      }
+    }
+  }
+  if (Math.abs(recommendedScenario.capacityKwh - formulaAdvice.roundedAdvice.recommendedKwh) >= 10) {
+    warnings.push('De kwartiersimulatie wijkt duidelijk af van de formulebasis; simulatieadvies is leidend.');
+  }
+  if (usedCustomerType === 'home' && formulaAdvice.rawAdvice.capReason) {
+    warnings.push(formulaAdvice.rawAdvice.capReason);
+  }
+
+  const explanation = [
+    ...formulaAdvice.explanation,
+    `De formule geeft ${formulaAdvice.rawAdvice.recommendedKwh.toFixed(1)} kWh als basisinschatting.`,
+    `De kwartiersimulatie laat zien dat ${recommendedScenario.capacityKwh} kWh met circa ${recommendedScenario.dischargePowerKw.toFixed(1)} kW de beste balans geeft tussen importreductie, benutting en marginale meeropbrengst.`
+  ];
+
+  return {
+    customerTypeDetected,
+    usedCustomerType,
+    formulaAdvice: {
+      p50StorageNeedKwh: formulaAdvice.percentiles.p50StorageNeedKwh,
+      p75StorageNeedKwh: formulaAdvice.percentiles.p75StorageNeedKwh,
+      p90StorageNeedKwh: formulaAdvice.percentiles.p90StorageNeedKwh,
+      conservativeFormulaKwh: formulaAdvice.rawAdvice.conservativeKwh,
+      recommendedFormulaKwh: formulaAdvice.rawAdvice.recommendedKwh,
+      spaciousFormulaKwh: formulaAdvice.rawAdvice.spaciousKwh
+    },
+    simulationAdvice: {
+      conservative: conservativeScenario,
+      recommended: recommendedScenario,
+      spacious: spaciousScenario,
+      allScenarios
+    },
+    totals: {
+      numberOfIntervals: intervals.length,
+      numberOfDays: formulaAdvice.totals.numberOfDays,
+      numberOfPvActiveDays: formulaAdvice.totals.numberOfPvActiveDays,
+      totalImportKwh: formulaAdvice.totals.totalImportKwh,
+      totalExportKwh: formulaAdvice.totals.totalExportKwh,
+      maxDailyExportKwh: formulaAdvice.totals.maxDailyExportKwh
+    },
+    configUsed: {
+      usableFraction: resolvedHybridConfig.usableFraction,
+      roundTripEfficiency: resolvedHybridConfig.roundTripEfficiency,
+      resetSocDaily: simulationConfig.resetSocDaily,
+      pricingMode: resolvedEconomics.pricingMode,
+      fallbackToAveragePrices: resolvedEconomics.fallbackToAveragePrices,
+      pricingStats: resolvedEconomics.pricingStats,
+      importPriceEurPerKwh: resolvedEconomics.importPriceEurPerKwh,
+      exportCompensationEurPerKwh: resolvedEconomics.exportCompensationEurPerKwh,
+      feedInCostEurPerKwh: resolvedEconomics.feedInCostEurPerKwh,
+      fixedEnergyTaxEurPerKwh: resolvedEconomics.fixedEnergyTaxEurPerKwh
+    },
+    warnings,
+    explanation
+  };
+}
+
 function formatMonthLabel(dayIso: string): string {
   return dayIso.slice(0, 7);
 }
@@ -709,7 +1471,8 @@ function buildDistributionBuckets(customerType: 'home' | 'business'): Array<{ mi
 
 export function buildPvAdviceChartsData(
   adviceResult: PvStorageFormulaAdviceResult,
-  intervals: ProcessedInterval[]
+  intervals: ProcessedInterval[],
+  simulationAdvice?: PvSelfConsumptionAdviceResult | null
 ): PvAdviceChartsData {
   const activeDays = adviceResult.dailyRows.filter((row) => row.isPvActiveDay);
   const daysForDistribution = activeDays.length > 0 ? activeDays : adviceResult.dailyRows;
@@ -746,20 +1509,27 @@ export function buildPvAdviceChartsData(
   const adviceComparisonChart = [
     {
       label: 'Conservatief',
-      capacityKwh: adviceResult.roundedAdvice.conservativeKwh
+      capacityKwh: simulationAdvice?.simulationAdvice.conservative.capacityKwh ?? adviceResult.roundedAdvice.conservativeKwh
     },
     {
       label: 'Aanbevolen',
-      capacityKwh: adviceResult.roundedAdvice.recommendedKwh,
+      capacityKwh: simulationAdvice?.simulationAdvice.recommended.capacityKwh ?? adviceResult.roundedAdvice.recommendedKwh,
       emphasis: true
     },
     {
       label: 'Ruim',
-      capacityKwh: adviceResult.roundedAdvice.spaciousKwh
+      capacityKwh: simulationAdvice?.simulationAdvice.spacious.capacityKwh ?? adviceResult.roundedAdvice.spaciousKwh
     }
   ];
 
-  const marginalGainChart = capacityOptions.map((capacityKwh, index) => {
+  const marginalGainChart = simulationAdvice
+    ? simulationAdvice.simulationAdvice.allScenarios.map((scenario) => ({
+        capacityKwh: scenario.capacityKwh,
+        coveredStorageKwhPerYear: round2(scenario.importReductionKwhAnnualized),
+        marginalGainKwh: round2(scenario.marginalGainKwh ?? 0),
+        marginalGainPerAddedKwh: round2(scenario.marginalGainPerAddedKwh ?? 0)
+      }))
+    : capacityOptions.map((capacityKwh, index) => {
     const coveredStorageKwhPerYear = round2(
       daysForDistribution.reduce((sum, row) => sum + Math.min(row.dailyStorageNeedKwh, capacityKwh), 0)
     );
@@ -779,7 +1549,7 @@ export function buildPvAdviceChartsData(
     };
   });
 
-  const coverageByCapacityChart = capacityOptions.map((capacityKwh) => {
+  const coverageByCapacityChart = (simulationAdvice?.simulationAdvice.allScenarios.map((scenario) => scenario.capacityKwh) ?? capacityOptions).map((capacityKwh) => {
     const nonZeroDays = daysForDistribution.filter((row) => row.dailyStorageNeedKwh > 0);
     const fullyCoveredDays =
       nonZeroDays.length === 0
@@ -817,6 +1587,49 @@ export function buildPvAdviceChartsData(
     }))
     .sort((a, b) => a.month.localeCompare(b.month));
 
+  const annualValueByCapacityChart = simulationAdvice
+    ? simulationAdvice.simulationAdvice.allScenarios.map((scenario) => ({
+        capacityKwh: scenario.capacityKwh,
+        annualValueEur: round2(scenario.annualValueEur ?? 0)
+      }))
+    : [];
+
+  const importExportCostChart =
+    simulationAdvice?.simulationAdvice.recommended == null
+      ? []
+      : [
+          {
+            label: 'Kosten zonder batterij',
+            costEur: round2(simulationAdvice.simulationAdvice.recommended.baselineEnergyCostEur ?? 0)
+          },
+          {
+            label: 'Kosten met aanbevolen batterij',
+            costEur: round2(simulationAdvice.simulationAdvice.recommended.batteryEnergyCostEur ?? 0)
+          },
+          {
+            label: 'Waarde batterij',
+            costEur: round2(simulationAdvice.simulationAdvice.recommended.annualValueEur ?? 0)
+          }
+        ];
+
+  const monthlyValueMap = new Map<string, { baselineCostEur: number; batteryCostEur: number; valueEur: number }>();
+  (simulationAdvice?.simulationAdvice.recommended.valueByInterval ?? []).forEach((row) => {
+    const month = formatMonthLabel(getLocalDayIso(row.ts, 'Europe/Amsterdam'));
+    const current = monthlyValueMap.get(month) ?? { baselineCostEur: 0, batteryCostEur: 0, valueEur: 0 };
+    current.baselineCostEur += row.baselineCostEur;
+    current.batteryCostEur += row.batteryCostEur;
+    current.valueEur += row.intervalValueEur;
+    monthlyValueMap.set(month, current);
+  });
+  const monthlyValueChart = Array.from(monthlyValueMap.entries())
+    .map(([month, values]) => ({
+      month,
+      baselineCostEur: round2(values.baselineCostEur),
+      batteryCostEur: round2(values.batteryCostEur),
+      valueEur: round2(values.valueEur)
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
   const targetDay =
     activeDays.length === 0
       ? null
@@ -826,7 +1639,9 @@ export function buildPvAdviceChartsData(
               Math.abs(b.dailyStorageNeedKwh - adviceResult.percentiles.p75StorageNeedKwh) ||
             b.dailyExportKwh - a.dailyExportKwh
         )[0];
-  const recommendedCapacityKwh = adviceResult.roundedAdvice.recommendedKwh;
+  const recommendedCapacityKwh =
+    simulationAdvice?.simulationAdvice.recommended.capacityKwh ?? adviceResult.roundedAdvice.recommendedKwh;
+  const simulatedSocSeries = simulationAdvice?.simulationAdvice.recommended.socSeries ?? [];
   let batterySocKwh = 0;
   const exampleDayChart =
     targetDay == null
@@ -860,11 +1675,16 @@ export function buildPvAdviceChartsData(
               batterySocKwh -= dischargeKwh;
             }
 
+            const simulatedSocKwh =
+              simulatedSocSeries.find((point) => point.timestamp === interval.timestamp)?.socKwh;
+
             return {
               timestamp: interval.timestamp,
               importKwh: round2(inEveningNight ? Math.max(0, flow.loadDeficitKwh - dischargeKwh) : flow.loadDeficitKwh),
               exportKwh: round2(Math.max(0, flow.surplusKwh - chargeKwh)),
-              batterySocKwh: round2(batterySocKwh)
+              batterySocKwh: round2(simulatedSocKwh ?? batterySocKwh),
+              importPriceEurPerKwh: interval.importPriceEurPerKwh,
+              exportPriceEurPerKwh: interval.exportPriceEurPerKwh
             };
           });
 
@@ -877,6 +1697,9 @@ export function buildPvAdviceChartsData(
     coverageByCapacityChart,
     monthlyStorageChart,
     exampleDayChart,
+    annualValueByCapacityChart,
+    importExportCostChart,
+    monthlyValueChart,
     warnings: adviceResult.warnings
   };
 }
@@ -1050,6 +1873,30 @@ export function computePvSizing(params: {
     alternativeProduct,
     noFeasibleBatteryByPower: false,
     pvFormulaAdvice: formulaAdvice
+  };
+}
+
+export function buildSizingResultFromPvSelfConsumptionAdvice(
+  formulaAdvice: PvStorageFormulaAdviceResult,
+  hybridAdvice: PvSelfConsumptionAdviceResult
+): SizingResult {
+  const recommendedScenario = hybridAdvice.simulationAdvice.recommended;
+  const spaciousScenario = hybridAdvice.simulationAdvice.spacious;
+
+  return {
+    kWhNeededRaw: formulaAdvice.rawAdvice.rawRecommendedKwh,
+    kWNeededRaw: recommendedScenario.dischargePowerKw,
+    kWhNeeded: recommendedScenario.capacityKwh,
+    kWNeeded: recommendedScenario.dischargePowerKw,
+    recommendedProduct: buildAdviceProduct(
+      recommendedScenario.capacityKwh,
+      hybridAdvice.usedCustomerType,
+      'Aanbevolen'
+    ),
+    alternativeProduct: buildAdviceProduct(spaciousScenario.capacityKwh, hybridAdvice.usedCustomerType, 'Ruim'),
+    noFeasibleBatteryByPower: false,
+    pvFormulaAdvice: formulaAdvice,
+    pvSelfConsumptionAdvice: hybridAdvice
   };
 }
 

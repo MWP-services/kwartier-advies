@@ -4,6 +4,8 @@ import {
   buildDayProfile,
   buildDataQualityReport,
   buildPvAdviceChartsData,
+  buildSizingResultFromPvSelfConsumptionAdvice,
+  computePvSelfConsumptionAdvice,
   computePvSizing,
   computePvStorageFormulaAdvice,
   computeSizing,
@@ -238,6 +240,65 @@ describe('calculations', () => {
     expect(charts.marginalGainChart[0].capacityKwh).toBe(5);
     expect(charts.coverageByCapacityChart[0].fullyCoveredDaysPercentage).toBeGreaterThanOrEqual(0);
     expect(charts.monthlyStorageChart).toHaveLength(1);
+  });
+
+  it('computes hybrid PV self-consumption advice with simulated recommendations', () => {
+    const rows = Array.from({ length: 40 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 4, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 12 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 4 },
+        { timestamp: new Date(base + 12.25 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 4 },
+        { timestamp: new Date(base + 19 * 60 * 60 * 1000).toISOString(), consumptionKwh: 4, exportKwh: 0 },
+        { timestamp: new Date(base + 19.25 * 60 * 60 * 1000).toISOString(), consumptionKwh: 4, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(rows, 500);
+    const hybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'home' });
+    const sizing = buildSizingResultFromPvSelfConsumptionAdvice(
+      computePvStorageFormulaAdvice(intervals, { customerType: 'home', minActiveDays: 1 }),
+      hybrid
+    );
+
+    expect(hybrid.usedCustomerType).toBe('home');
+    expect(hybrid.simulationAdvice.recommended.capacityKwh).toBeLessThanOrEqual(40);
+    expect(hybrid.simulationAdvice.recommended.cyclesPerYear).toBeGreaterThan(80);
+    expect(hybrid.simulationAdvice.recommended.importReductionKwhAnnualized).toBeGreaterThan(0);
+    expect(sizing.pvSelfConsumptionAdvice?.simulationAdvice.recommended.capacityKwh).toBe(
+      hybrid.simulationAdvice.recommended.capacityKwh
+    );
+  });
+
+  it('does not allow 2090 or 5015 kWh as home recommendations in hybrid PV advice', () => {
+    const rows = Array.from({ length: 60 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 5, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 11 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 20 },
+        { timestamp: new Date(base + 19 * 60 * 60 * 1000).toISOString(), consumptionKwh: 10, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(rows, 500);
+    const hybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'home' });
+
+    expect([2090, 5015]).not.toContain(hybrid.simulationAdvice.recommended.capacityKwh);
+    expect(hybrid.simulationAdvice.allScenarios.some((scenario) => scenario.capacityKwh === 2090)).toBe(false);
+  });
+
+  it('does not select 5015 kWh in business mode when the practical need stays below 2090 kWh', () => {
+    const rows = Array.from({ length: 45 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 6, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 12 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 140 },
+        { timestamp: new Date(base + 18 * 60 * 60 * 1000).toISOString(), consumptionKwh: 120, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(rows, 500);
+    const hybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'business' });
+
+    expect(hybrid.usedCustomerType).toBe('business');
+    expect(hybrid.simulationAdvice.recommended.capacityKwh).not.toBe(5015);
+    expect(
+      hybrid.simulationAdvice.allScenarios.find((scenario) => scenario.capacityKwh === 5015)?.isEligible
+    ).toBe(false);
   });
 
   it('selects earliest timestamp when max observed kW ties', () => {
