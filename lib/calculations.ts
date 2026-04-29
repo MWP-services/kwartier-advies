@@ -404,20 +404,21 @@ export const BATTERY_OPTIONS: BatteryProduct[] = [
     capacityKwh: 64,
     powerKw: 30,
     modular: true,
-    unitPriceEur: 15689.33
+    unitPriceEur: 19309
   },
   {
     label: 'WattsNext ESS Cabinet 96 kWh',
     capacityKwh: 96,
     powerKw: 48,
     modular: true,
-    unitPriceEur: 22225.98
+    unitPriceEur: 27335
   },
   {
     label: 'ES232_115K-A 232 kWh',
     capacityKwh: 232,
     powerKw: 115,
-    modular: true
+    modular: true,
+    unitPriceEur: 46247
   },
   {
     label: 'ESS All-in-one Cabinet 261 kWh',
@@ -453,6 +454,7 @@ interface BatteryConfigurationCandidate {
   unitCapacityKwh: number;
   unitPowerKw: number;
   unitPriceEur?: number;
+  breakdown?: BatteryBreakdown[];
 }
 
 function roundCurrency(value: number): number {
@@ -461,6 +463,17 @@ function roundCurrency(value: number): number {
 
 function toBatteryProduct(candidate: BatteryConfigurationCandidate): BatteryProduct {
   const totalPriceEur = candidate.totalPriceEur == null ? undefined : roundCurrency(candidate.totalPriceEur);
+  const breakdown =
+    candidate.breakdown ??
+    [
+      {
+        type: `${candidate.unitCapacityKwh} kWh`,
+        count: candidate.count,
+        unitCapacityKwh: candidate.unitCapacityKwh,
+        unitPriceEur: candidate.unitPriceEur == null ? undefined : roundCurrency(candidate.unitPriceEur),
+        totalPriceEur: candidate.totalPriceEur == null ? undefined : totalPriceEur
+      }
+    ];
   return {
     label: candidate.label,
     capacityKwh: candidate.totalCapacityKwh,
@@ -470,16 +483,90 @@ function toBatteryProduct(candidate: BatteryConfigurationCandidate): BatteryProd
     count: candidate.count,
     unitPriceEur: candidate.unitPriceEur == null ? undefined : roundCurrency(candidate.unitPriceEur),
     totalPriceEur: candidate.totalPriceEur == null ? undefined : totalPriceEur,
-    breakdown: [
-      {
-        type: `${candidate.unitCapacityKwh} kWh`,
-        count: candidate.count,
-        unitCapacityKwh: candidate.unitCapacityKwh,
-        unitPriceEur: candidate.unitPriceEur == null ? undefined : roundCurrency(candidate.unitPriceEur),
-        totalPriceEur: candidate.totalPriceEur == null ? undefined : totalPriceEur
-      }
-    ]
+    breakdown
   };
+}
+
+function buildModularCombinationCandidates(
+  modularOptions: BatteryProduct[],
+  requiredKwh: number,
+  requiredKw: number
+): BatteryConfigurationCandidate[] {
+  const pricedOptions = modularOptions
+    .filter((option) => option.unitPriceEur != null)
+    .sort((a, b) => a.capacityKwh - b.capacityKwh);
+  if (pricedOptions.length === 0) return [];
+
+  const maxCapacityKwh = requiredKwh + Math.max(...pricedOptions.map((option) => option.capacityKwh));
+  const maxCountBasis = Math.max(
+    ...pricedOptions.map((option) =>
+      Math.max(
+        Math.ceil(requiredKwh / option.capacityKwh),
+        Math.ceil(requiredKw / option.powerKw)
+      )
+    )
+  );
+  const counts = Array.from({ length: pricedOptions.length }, () => 0);
+  const candidates: BatteryConfigurationCandidate[] = [];
+
+  function visit(index: number, capacityKwh: number, powerKw: number, priceEur: number): void {
+    if (capacityKwh > maxCapacityKwh) return;
+
+    if (index === pricedOptions.length) {
+      if (capacityKwh < requiredKwh || powerKw < requiredKw) return;
+
+      const breakdown = pricedOptions
+        .map((option, optionIndex) => ({
+          option,
+          count: counts[optionIndex]
+        }))
+        .filter((entry) => entry.count > 0)
+        .map(({ option, count }) => ({
+          type: `${option.capacityKwh} kWh`,
+          count,
+          unitCapacityKwh: option.capacityKwh,
+          unitPriceEur: roundCurrency(option.unitPriceEur ?? 0),
+          totalPriceEur: roundCurrency(count * (option.unitPriceEur ?? 0))
+        }));
+      const label = breakdown.map((entry) => `${entry.count}x ${entry.unitCapacityKwh} kWh`).join(' + ');
+      const primary = breakdown[0];
+
+      candidates.push({
+        label: `${label} (modulair)`,
+        totalCapacityKwh: capacityKwh,
+        totalPowerKw: powerKw,
+        totalPriceEur: priceEur,
+        overCapacityKwh: capacityKwh - requiredKwh,
+        overPowerKw: powerKw - requiredKw,
+        count: breakdown.reduce((sum, entry) => sum + entry.count, 0),
+        unitCapacityKwh: primary?.unitCapacityKwh ?? 0,
+        unitPowerKw: 0,
+        unitPriceEur: primary?.unitPriceEur,
+        breakdown
+      });
+      return;
+    }
+
+    const option = pricedOptions[index];
+    const maxCount = Math.max(
+      1,
+      Math.ceil(maxCapacityKwh / option.capacityKwh),
+      maxCountBasis + 1
+    );
+    for (let count = 0; count <= maxCount; count += 1) {
+      counts[index] = count;
+      visit(
+        index + 1,
+        capacityKwh + count * option.capacityKwh,
+        powerKw + count * option.powerKw,
+        priceEur + count * (option.unitPriceEur ?? 0)
+      );
+    }
+    counts[index] = 0;
+  }
+
+  visit(0, 0, 0, 0);
+  return candidates;
 }
 
 export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw = 0): {
@@ -490,32 +577,14 @@ export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw 
   const normalizedRequiredKwh = Math.max(0, requiredKwh);
   const normalizedRequiredKw = Math.max(0, requiredKw);
   const candidates: BatteryConfigurationCandidate[] = [];
+  const modularOptions = BATTERY_OPTIONS.filter((option) => option.modular);
+  candidates.push(
+    ...buildModularCombinationCandidates(modularOptions, normalizedRequiredKwh, normalizedRequiredKw)
+  );
 
   BATTERY_OPTIONS.forEach((option) => {
     const unitPriceEur = option.unitPriceEur;
     if (option.modular) {
-      const minCountByKwh = Math.ceil(normalizedRequiredKwh / option.capacityKwh);
-      const minCountByKw = Math.ceil(normalizedRequiredKw / option.powerKw);
-      const requiredCount = Math.max(1, minCountByKwh, minCountByKw);
-      const maxCount = requiredCount;
-      for (let count = 1; count <= maxCount; count += 1) {
-        const totalCapacityKwh = count * option.capacityKwh;
-        const totalPowerKw = count * option.powerKw;
-        if (totalCapacityKwh < normalizedRequiredKwh || totalPowerKw < normalizedRequiredKw) continue;
-        const totalPriceEur = unitPriceEur == null ? undefined : count * unitPriceEur;
-        candidates.push({
-          label: `${count}x ${option.capacityKwh} kWh (modulair)`,
-          totalCapacityKwh,
-          totalPowerKw,
-          totalPriceEur,
-          overCapacityKwh: totalCapacityKwh - normalizedRequiredKwh,
-          overPowerKw: totalPowerKw - normalizedRequiredKw,
-          count,
-          unitCapacityKwh: option.capacityKwh,
-          unitPowerKw: option.powerKw,
-          unitPriceEur
-        });
-      }
       return;
     }
 

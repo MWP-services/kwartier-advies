@@ -1,6 +1,7 @@
 import type { PdfPayload } from './pdf';
 import { buildDayProfile } from './calculations';
 import { formatTimestamp, getLocalDayIso, getLocalHourMinute } from './datetime';
+import { orderScenariosForRecommendationDisplay } from './simulation';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -841,13 +842,45 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
     { step: 'Eindwaarde (buffer)', value: Math.max(0, payload.sizing.kWhNeeded) }
   ];
 
-  const scenarioChartData = payload.scenarios.map((scenario) => ({
-    optionLabel: scenario.optionLabel,
-    before: scenario.exceedanceEnergyKwhBefore,
-    after: scenario.exceedanceEnergyKwhAfter,
-    compliance: scenario.achievedComplianceDataset * 100,
-    remainingKw: scenario.maxRemainingExcessKw
-  }));
+  const displayScenarios = orderScenariosForRecommendationDisplay(
+    payload.scenarios,
+    payload.sizing.recommendedProduct?.capacityKwh,
+    5
+  );
+  const recommendedScenarioIndex = displayScenarios.findIndex(
+    (scenario) => scenario.capacityKwh === payload.sizing.recommendedProduct?.capacityKwh
+  );
+  const scenarioChartData = displayScenarios.map((scenario, index) => {
+    const isRecommended = index === recommendedScenarioIndex;
+    const comparisonLabel =
+      recommendedScenarioIndex >= 0
+        ? index < recommendedScenarioIndex
+          ? `Te klein ${recommendedScenarioIndex - index}`
+          : index > recommendedScenarioIndex
+            ? `Groter ${index - recommendedScenarioIndex}`
+            : 'Aanbevolen'
+        : `Optie ${index + 1}`;
+
+    return {
+      optionLabel: scenario.optionLabel,
+      chartLabel: `${comparisonLabel}<br>${scenario.optionLabel}`,
+      comparisonLabel,
+      isRecommended,
+      before: scenario.exceedanceEnergyKwhBefore,
+      after: scenario.exceedanceEnergyKwhAfter,
+      reductionKwh: Math.max(0, scenario.exceedanceEnergyKwhBefore - scenario.exceedanceEnergyKwhAfter),
+      reductionPct:
+        scenario.exceedanceEnergyKwhBefore > 0
+          ? (1 - scenario.exceedanceEnergyKwhAfter / scenario.exceedanceEnergyKwhBefore) * 100
+          : 0,
+      remainingPct:
+        scenario.exceedanceEnergyKwhBefore > 0
+          ? (scenario.exceedanceEnergyKwhAfter / scenario.exceedanceEnergyKwhBefore) * 100
+          : 0,
+      compliance: scenario.achievedComplianceDataset * 100,
+      remainingKw: scenario.maxRemainingExcessKw
+    };
+  });
 
   const peakEventsTable = payload.topEvents.map((event) => ({
     peakTimestamp: formatTimestamp(event.peakTimestamp),
@@ -1248,12 +1281,27 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>Overschrijdingsenergie Voor/Na (Datasetsimulatie)</h3>
+        <h3>Overschrijdingsenergie voor/na per batterijoptie</h3>
         <div id="exceedance-chart" class="plot"></div>
         <div id="exceedance-baseline-note" class="muted" style="margin-top:6px;"></div>
+        <table style="margin-top:12px;">
+          <thead>
+            <tr>
+              <th>Optie</th>
+              <th>Rol</th>
+              <th>Voor kWh</th>
+              <th>Na kWh</th>
+              <th>Reductie kWh</th>
+              <th>Reductie</th>
+              <th>Rest</th>
+              <th>Rest max kW</th>
+            </tr>
+          </thead>
+          <tbody id="exceedance-simulation-body"></tbody>
+        </table>
         <div class="callout">
           <p class="callout-title">Uitleg</p>
-          <p class="callout-body">Per batterijoptie zie je overschrijdingsenergie vóór en na inzet, inclusief reductie in kWh en procenten.</p>
+          <p class="callout-body">De grafiek vergelijkt vijf simulaties: twee te kleine opties, het aanbevolen advies in het midden en twee grotere opties. Oranje is de overschrijdingsenergie voor implementatie; blauw/groen is de resterende overschrijding na implementatie.</p>
         </div>
       </div>
       <div class="card">
@@ -1350,37 +1398,79 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       margin: {t: 12, r: 12, b: 70, l: 55}
     };
 
-    const reductionKwh = scenarioData.map(d => Math.max(0, d.before - d.after));
-    const reductionPct = scenarioData.map(d => (d.before > 0 ? ((d.before - d.after) / d.before) * 100 : 0));
+    const recommendedScenario = scenarioData.find(d => d.isRecommended) ?? scenarioData[0] ?? {
+      optionLabel: 'Aanbevolen oplossing',
+      chartLabel: 'Aanbevolen oplossing',
+      comparisonLabel: 'Aanbevolen',
+      before: 0,
+      after: 0,
+      reductionKwh: 0,
+      reductionPct: 0,
+      remainingPct: 0,
+      remainingKw: 0
+    };
     Plotly.newPlot('exceedance-chart', [
-      {
-        type: 'bar',
-        name: 'Voor',
-        x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => d.before),
-        marker: {color: '#F59E0B'},
-        hovertemplate: '%{x}<br>Voor: %{y:.2f} kWh<extra></extra>'
-      },
-      {
-        type: 'bar',
-        name: 'Na',
-        x: scenarioData.map(d => d.optionLabel),
-        y: scenarioData.map(d => d.after),
-        marker: {color: '#22C55E'},
-        customdata: reductionPct.map((pct, i) => [reductionKwh[i], pct]),
-        hovertemplate:
-          '%{x}<br>Na: %{y:.2f} kWh<br>Reductie: %{customdata[0]:.2f} kWh (%{customdata[1]:.1f}%)<extra></extra>'
-      }
-    ], {
+    {
+      type: 'bar',
+      name: 'Voor implementatie',
+      x: scenarioData.map(d => d.chartLabel),
+      y: scenarioData.map(d => d.before),
+      marker: {color: '#F59E0B'},
+      text: scenarioData.map(d => d.before.toFixed(2) + ' kWh'),
+      textposition: 'outside',
+      cliponaxis: false,
+      customdata: scenarioData.map(d => [d.optionLabel, d.comparisonLabel]),
+      hovertemplate: '%{customdata[1]}<br>%{customdata[0]}<br>Voor: %{y:.2f} kWh<extra></extra>'
+    },
+    {
+      type: 'bar',
+      name: 'Na implementatie',
+      x: scenarioData.map(d => d.chartLabel),
+      y: scenarioData.map(d => d.after),
+      marker: {color: scenarioData.map(d => d.isRecommended ? '#22C55E' : '#2563EB')},
+      text: scenarioData.map(d => d.after.toFixed(2) + ' kWh'),
+      textposition: 'outside',
+      cliponaxis: false,
+      customdata: scenarioData.map(d => [d.optionLabel, d.comparisonLabel, d.reductionKwh, d.reductionPct, d.remainingPct]),
+      hovertemplate:
+        '%{customdata[1]}<br>%{customdata[0]}<br>Na: %{y:.2f} kWh<br>Reductie: %{customdata[2]:.2f} kWh (%{customdata[3]:.1f}%)<br>Rest: %{customdata[4]:.2f}%<extra></extra>'
+    }], {
       ...wattsTheme,
       barmode: 'group',
       hovermode: 'x unified',
-      xaxis: {tickangle: -20},
-      yaxis: {title: 'kWh', rangemode: 'tozero'},
-      margin: {t: 30, r: 12, b: 90, l: 55}
+      annotations: [{
+        xref: 'paper',
+        x: 1,
+        y: recommendedScenario.before,
+        xanchor: 'right',
+        yanchor: 'bottom',
+        text: 'Voor implementatie: ' + recommendedScenario.before.toFixed(2) + ' kWh',
+        showarrow: false,
+        font: {size: 11, color: '#92400E'}
+      }],
+      xaxis: {tickangle: 0, automargin: true},
+      yaxis: {title: 'Overschrijdingsenergie kWh', rangemode: 'tozero'},
+      legend: {orientation: 'h', y: 1.12, x: 0},
+      margin: {t: 58, r: 24, b: 95, l: 70}
     }, {responsive: true, displaylogo: false});
 
-    const beforeBaseline = scenarioData.length > 0 ? scenarioData[0].before : 0;
+    const exceedanceSimulationBody = document.getElementById('exceedance-simulation-body');
+    if (exceedanceSimulationBody) {
+      exceedanceSimulationBody.innerHTML = scenarioData.map(d => (
+        '<tr' + (d.isRecommended ? ' style="background:#ECFDF5;font-weight:600;"' : '') + '>' +
+        '<td>' + d.optionLabel + '</td>' +
+        '<td>' + d.comparisonLabel + '</td>' +
+        '<td>' + d.before.toFixed(2) + '</td>' +
+        '<td>' + d.after.toFixed(2) + '</td>' +
+        '<td>' + d.reductionKwh.toFixed(2) + '</td>' +
+        '<td>' + d.reductionPct.toFixed(1) + '%</td>' +
+        '<td>' + d.remainingPct.toFixed(2) + '%</td>' +
+        '<td>' + d.remainingKw.toFixed(2) + '</td>' +
+        '</tr>'
+      )).join('');
+    }
+
+    const beforeBaseline = recommendedScenario.before;
     const exceedanceIntervalsCount = peakMoments.length;
     const baselineNote = document.getElementById('exceedance-baseline-note');
     if (baselineNote) {

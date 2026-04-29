@@ -11,7 +11,7 @@ import {
   YAxis
 } from 'recharts';
 import type { SizingResult } from '@/lib/calculations';
-import type { ScenarioResult } from '@/lib/simulation';
+import { orderScenariosForRecommendationDisplay, type ScenarioResult } from '@/lib/simulation';
 
 interface ScenarioChartsProps {
   analysisType: AnalysisType;
@@ -35,6 +35,10 @@ export function ScenarioCharts({
   compliance
 }: ScenarioChartsProps) {
   const selected = scenarios.find((scenario) => scenario.capacityKwh === selectedScenarioCapacity) ?? scenarios[0];
+  const displayScenarios =
+    analysisType === 'PV_SELF_CONSUMPTION'
+      ? scenarios
+      : orderScenariosForRecommendationDisplay(scenarios, sizing.recommendedProduct?.capacityKwh, 9);
   const pvMode = scenarios[0]?.pvAnalysisMode ?? null;
   const pvStrategy = scenarios[0]?.pvStrategy ?? 'SELF_CONSUMPTION_ONLY';
   const gridAfterComplianceKwh = sizing.kWhNeededRaw;
@@ -74,13 +78,24 @@ export function ScenarioCharts({
         <h3 className="wx-title">{comparisonTitle}</h3>
         <div className="h-64">
           <ResponsiveContainer>
-            <ComposedChart data={scenarios}>
+            <ComposedChart data={displayScenarios}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="optionLabel" interval={0} angle={-20} textAnchor="end" height={60} />
-              <YAxis />
+              <YAxis yAxisId="before" />
+              {analysisType !== 'PV_SELF_CONSUMPTION' && <YAxis yAxisId="after" orientation="right" />}
               <Tooltip />
-              <Bar dataKey={beforeKey} fill="#f97316" name={pvStrategy === 'PV_WITH_TRADING' ? 'Direct export' : 'Voor'} />
-              <Bar dataKey={afterKey} fill="#3b82f6" name={pvStrategy === 'PV_WITH_TRADING' ? 'Later uit batterij' : 'Na'} />
+              <Bar
+                yAxisId="before"
+                dataKey={beforeKey}
+                fill="#f97316"
+                name={pvStrategy === 'PV_WITH_TRADING' ? 'Direct export' : 'Voor'}
+              />
+              <Bar
+                yAxisId={analysisType === 'PV_SELF_CONSUMPTION' ? 'before' : 'after'}
+                dataKey={afterKey}
+                fill="#3b82f6"
+                name={pvStrategy === 'PV_WITH_TRADING' ? 'Later uit batterij' : 'Na'}
+              />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -94,7 +109,7 @@ export function ScenarioCharts({
             onChange={(event) => onSelectScenario(Number(event.target.value))}
             className="wx-input !mt-0 !w-auto !py-1 text-sm"
           >
-            {scenarios.map((scenario) => (
+            {displayScenarios.map((scenario) => (
               <option key={scenario.capacityKwh} value={scenario.capacityKwh}>
                 {scenario.optionLabel}
               </option>

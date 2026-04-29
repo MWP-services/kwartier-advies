@@ -1,5 +1,5 @@
 import type { AnalysisType } from '@/lib/analysis';
-import type { ScenarioResult } from '@/lib/simulation';
+import { orderScenariosForRecommendationDisplay, type ScenarioResult } from '@/lib/simulation';
 
 interface ScenarioTableProps {
   analysisType: AnalysisType;
@@ -8,6 +8,11 @@ interface ScenarioTableProps {
 }
 
 export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh }: ScenarioTableProps) {
+  const displayScenarios =
+    analysisType === 'PV_SELF_CONSUMPTION'
+      ? scenarios
+      : orderScenariosForRecommendationDisplay(scenarios, recommendedCapacityKwh, 9);
+
   return (
     <div className="wx-card">
       <h3 className="wx-title">
@@ -34,6 +39,8 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
                 <>
                   <th className="p-2">Voor kWh</th>
                   <th className="p-2">Na kWh</th>
+                  <th className="p-2">Reductie kWh</th>
+                  <th className="p-2">Rest</th>
                   <th className="p-2">Compliance dataset</th>
                   <th className="p-2">Gem. dagcompliance</th>
                   <th className="p-2">Resterende max kW</th>
@@ -42,7 +49,7 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
             </tr>
           </thead>
           <tbody>
-            {scenarios.map((scenario) => (
+            {displayScenarios.map((scenario) => (
               <tr
                 key={scenario.capacityKwh}
                 className={`border-b ${recommendedCapacityKwh != null && scenario.capacityKwh === recommendedCapacityKwh ? 'bg-emerald-50' : ''}`}
@@ -63,13 +70,27 @@ export function ScenarioTable({ analysisType, scenarios, recommendedCapacityKwh 
                     </td>
                   </>
                 ) : (
-                  <>
-                    <td className="p-2">{scenario.exceedanceEnergyKwhBefore.toFixed(2)}</td>
-                    <td className="p-2">{scenario.exceedanceEnergyKwhAfter.toFixed(2)}</td>
-                    <td className="p-2">{(scenario.achievedComplianceDataset * 100).toFixed(1)}%</td>
-                    <td className="p-2">{(scenario.achievedComplianceDailyAverage * 100).toFixed(1)}%</td>
-                    <td className="p-2">{scenario.maxRemainingExcessKw.toFixed(2)}</td>
-                  </>
+                  (() => {
+                    const reductionKwh = Math.max(
+                      0,
+                      scenario.exceedanceEnergyKwhBefore - scenario.exceedanceEnergyKwhAfter
+                    );
+                    const remainingPct =
+                      scenario.exceedanceEnergyKwhBefore > 0
+                        ? (scenario.exceedanceEnergyKwhAfter / scenario.exceedanceEnergyKwhBefore) * 100
+                        : 0;
+                    return (
+                      <>
+                        <td className="p-2">{scenario.exceedanceEnergyKwhBefore.toFixed(2)}</td>
+                        <td className="p-2">{scenario.exceedanceEnergyKwhAfter.toFixed(2)}</td>
+                        <td className="p-2">{reductionKwh.toFixed(2)}</td>
+                        <td className="p-2">{remainingPct.toFixed(2)}%</td>
+                        <td className="p-2">{(scenario.achievedComplianceDataset * 100).toFixed(1)}%</td>
+                        <td className="p-2">{(scenario.achievedComplianceDailyAverage * 100).toFixed(1)}%</td>
+                        <td className="p-2">{scenario.maxRemainingExcessKw.toFixed(2)}</td>
+                      </>
+                    );
+                  })()
                 )}
               </tr>
             ))}

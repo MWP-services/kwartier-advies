@@ -4,6 +4,7 @@ import {
   buildDayProfile,
   buildDataQualityReport,
   buildPvAdviceChartsData,
+  BATTERY_OPTIONS,
   buildSizingResultFromPvSelfConsumptionAdvice,
   computePvSelfConsumptionAdvice,
   computePvSizing,
@@ -467,15 +468,61 @@ describe('calculations', () => {
     const result = selectMinimumCostBatteryOptions(70);
     expect(result.recommendedProduct?.label).toBe('1x 96 kWh (modulair)');
     expect(result.recommendedProduct?.capacityKwh).toBe(96);
-    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(22225.98, 2);
+    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(27335, 2);
   });
 
-  it('does not treat unpriced 232 kWh module as a free option', () => {
+  it('chooses 261 kWh when it is cheaper than the 232 kWh module', () => {
     const result = selectMinimumCostBatteryOptions(200, 100);
 
     expect(result.noFeasibleBatteryByPower).toBe(false);
     expect(result.recommendedProduct?.label).toBe('1x 261 kWh (modulair)');
     expect(result.recommendedProduct?.capacityKwh).toBe(261);
+    expect(result.recommendedProduct?.powerKw).toBe(125);
+    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(43995.96, 2);
+  });
+
+  it('uses the updated backend prices for 64, 96 and 232 kWh modules', () => {
+    const result64 = selectMinimumCostBatteryOptions(60, 20);
+    const result96 = selectMinimumCostBatteryOptions(70, 40);
+
+    expect(result64.recommendedProduct?.totalPriceEur).toBeCloseTo(19309, 2);
+    expect(result96.recommendedProduct?.totalPriceEur).toBeCloseTo(27335, 2);
+    expect(BATTERY_OPTIONS.find((option) => option.capacityKwh === 232)?.unitPriceEur).toBe(46247);
+  });
+
+  it('selects cheapest modular mix instead of only repeating one battery type', () => {
+    const result = selectMinimumCostBatteryOptions(300, 145);
+
+    expect(result.noFeasibleBatteryByPower).toBe(false);
+    expect(result.recommendedProduct?.label).toBe('1x 64 kWh + 1x 261 kWh (modulair)');
+    expect(result.recommendedProduct?.capacityKwh).toBe(325);
+    expect(result.recommendedProduct?.powerKw).toBe(155);
+    expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(63304.96, 2);
+    expect(result.recommendedProduct?.breakdown).toEqual([
+      {
+        type: '64 kWh',
+        count: 1,
+        unitCapacityKwh: 64,
+        unitPriceEur: 19309,
+        totalPriceEur: 19309
+      },
+      {
+        type: '261 kWh',
+        count: 1,
+        unitCapacityKwh: 261,
+        unitPriceEur: 43995.96,
+        totalPriceEur: 43995.96
+      }
+    ]);
+  });
+
+  it('selects the cheapest purchase option for 74.67 kWh and 62.02 kW sizing need', () => {
+    const result = selectMinimumCostBatteryOptions(74.67, 62.02);
+
+    expect(result.noFeasibleBatteryByPower).toBe(false);
+    expect(result.recommendedProduct?.label).toBe('1x 261 kWh (modulair)');
+    expect(result.recommendedProduct?.capacityKwh).toBe(261);
+    expect(result.recommendedProduct?.powerKw).toBe(125);
     expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(43995.96, 2);
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { processIntervals } from '@/lib/calculations';
 import {
   generateScenarioOptions,
+  orderScenariosForRecommendationDisplay,
   simulateAllScenarios,
   simulateAllPvScenarios,
   simulatePvScenario,
@@ -88,6 +89,17 @@ describe('simulation', () => {
     const options = generateScenarioOptions({ targetKwh: 500, maxTotalOptions: 12 });
     const uniqueCapacities = new Set(options.map((option) => option.capacityKwh));
     expect(uniqueCapacities.size).toBe(options.length);
+  });
+
+  it('orders peak-shaving display scenarios with the recommendation near the middle', () => {
+    const intervals = processIntervals(rows, 500);
+    const scenarios = simulateAllScenarios(intervals, 62.02, 232, { initialSocRatio: 0 });
+    const ordered = orderScenariosForRecommendationDisplay(scenarios, 232, 5);
+    const recommendedIndex = ordered.findIndex((scenario) => scenario.capacityKwh === 232);
+
+    expect(ordered).toHaveLength(5);
+    expect(recommendedIndex).toBe(2);
+    expect(ordered.slice(0, recommendedIndex).some((scenario) => scenario.exceedanceEnergyKwhAfter > 0)).toBe(true);
   });
 
   it('charges 64 kWh battery with its own max charge limit (32 kW)', () => {

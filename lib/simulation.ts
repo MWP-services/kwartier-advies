@@ -90,6 +90,39 @@ export interface ScenarioResult {
   recommendationReason?: string;
 }
 
+export function orderScenariosForRecommendationDisplay(
+  scenarios: ScenarioResult[],
+  recommendedCapacityKwh: number | null | undefined,
+  maxItems = 9
+): ScenarioResult[] {
+  if (scenarios.length <= 1 || recommendedCapacityKwh == null) return scenarios;
+
+  const sortedByCapacity = [...scenarios].sort((a, b) => a.capacityKwh - b.capacityKwh);
+  const recommended =
+    sortedByCapacity.find((scenario) => scenario.capacityKwh === recommendedCapacityKwh) ?? sortedByCapacity[0];
+  const targetBefore = Math.min(2, Math.max(1, Math.floor((maxItems - 1) / 2)));
+  const targetAfter = Math.max(0, maxItems - targetBefore - 1);
+  const smaller = sortedByCapacity.filter((scenario) => scenario.capacityKwh < recommended.capacityKwh).slice(-targetBefore);
+  const larger = sortedByCapacity.filter((scenario) => scenario.capacityKwh > recommended.capacityKwh).slice(0, targetAfter);
+  const selected = [...smaller, recommended, ...larger];
+
+  if (selected.length >= maxItems || sortedByCapacity.length === selected.length) {
+    return selected.slice(0, maxItems);
+  }
+
+  const selectedCapacities = new Set(selected.map((scenario) => scenario.capacityKwh));
+  const fill = sortedByCapacity
+    .filter((scenario) => !selectedCapacities.has(scenario.capacityKwh))
+    .sort(
+      (a, b) =>
+        Math.abs(a.capacityKwh - recommended.capacityKwh) - Math.abs(b.capacityKwh - recommended.capacityKwh) ||
+        a.capacityKwh - b.capacityKwh
+    )
+    .slice(0, maxItems - selected.length);
+
+  return [...selected, ...fill].sort((a, b) => a.capacityKwh - b.capacityKwh);
+}
+
 export interface PvSummary {
   mode: PvAnalysisMode;
   strategy: PvStrategy;
