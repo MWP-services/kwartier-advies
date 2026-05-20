@@ -33,6 +33,12 @@ export interface PricingStats {
   matchedShare: number;
 }
 
+export interface AveragePriceValues {
+  importPriceEurPerKwh?: number;
+  exportPriceEurPerKwh?: number;
+  feedInCostEurPerKwh?: number;
+}
+
 export type PricingConfig = {
   pricingMode: PricingMode;
   averageImportPriceEurPerKwh: number;
@@ -194,6 +200,20 @@ export async function parsePriceFile(file: File): Promise<{ rows: PriceInterval[
   const mapping = autoDetectPriceColumns(parsed.headers);
   if (!mapping) throw new Error('Kon geen prijs-kolommen herkennen in het prijsbestand.');
   return { rows: mapPriceRows(parsed.rows, mapping), headers: parsed.headers };
+}
+
+function averageFinite(values: Array<number | undefined>): number | undefined {
+  const finiteValues = values.filter((value): value is number => Number.isFinite(value));
+  if (finiteValues.length === 0) return undefined;
+  return finiteValues.reduce((sum, value) => sum + value, 0) / finiteValues.length;
+}
+
+export function calculateAveragePriceValues(priceIntervals: PriceInterval[]): AveragePriceValues {
+  return {
+    importPriceEurPerKwh: averageFinite(priceIntervals.map((interval) => interval.importPriceEurPerKwh)),
+    exportPriceEurPerKwh: averageFinite(priceIntervals.map((interval) => interval.exportPriceEurPerKwh)),
+    feedInCostEurPerKwh: averageFinite(priceIntervals.map((interval) => interval.feedInCostEurPerKwh))
+  };
 }
 
 function buildHourlyKey(ts: string): string {

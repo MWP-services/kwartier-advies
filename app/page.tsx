@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import type { AnalysisResult, AnalysisSettings } from '@/lib/analysis';
 import { defaultAnalysisSettings } from '@/lib/analysis';
@@ -36,7 +36,7 @@ import {
   parseXlsx,
   type ColumnMapping
 } from '@/lib/parsing';
-import { attachPricesToIntervals, parsePriceFile, type PriceInterval } from '@/lib/pricing';
+import { attachPricesToIntervals, calculateAveragePriceValues, parsePriceFile, type PriceInterval } from '@/lib/pricing';
 import { normalizeConsumptionSeries } from '@/lib/normalization';
 import { buildPvSummaryFromScenario, findHighestPeakDay, simulateAllScenarios } from '@/lib/simulation';
 import { determinePvAnalysisMode } from '@/lib/pvSimulation';
@@ -339,8 +339,16 @@ export default function HomePage() {
     setError(null);
     try {
       const result = await parsePriceFile(file);
+      const averagePrices = calculateAveragePriceValues(result.rows);
       setPriceIntervals(result.rows);
       setPriceFileName(file.name);
+      setDraftSettings((prev) => ({
+        ...prev,
+        pvPricingMode: 'dynamic',
+        pvImportPriceEurPerKwh: averagePrices.importPriceEurPerKwh ?? prev.pvImportPriceEurPerKwh,
+        pvExportCompensationEurPerKwh: averagePrices.exportPriceEurPerKwh ?? prev.pvExportCompensationEurPerKwh,
+        pvFeedInCostEurPerKwh: averagePrices.feedInCostEurPerKwh ?? prev.pvFeedInCostEurPerKwh
+      }));
       setFinancialResult(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Prijsbestand kon niet worden ingelezen');
@@ -410,6 +418,26 @@ export default function HomePage() {
     setDraftSettings({ ...appliedSettings });
     setDraftMapping({ ...appliedMapping });
   };
+
+  const displayedPvAdviceCharts = useMemo(() => {
+    if (
+      !analysisResult ||
+      analysisResult.analysisType !== 'PV_SELF_CONSUMPTION' ||
+      !analysisResult.sizing.pvFormulaAdvice
+    ) {
+      return null;
+    }
+
+    if (financialResult) {
+      return buildPvAdviceChartsData(
+        analysisResult.sizing.pvFormulaAdvice,
+        analysisResult.intervals,
+        financialResult
+      );
+    }
+
+    return analysisResult.pvAdviceCharts;
+  }, [analysisResult, financialResult]);
 
   const downloadReport = async () => {
     if (!analysisResult || !appliedSettings) return;
@@ -944,10 +972,10 @@ export default function HomePage() {
 
           {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' &&
             analysisResult.sizing.pvFormulaAdvice &&
-            analysisResult.pvAdviceCharts && (
+            displayedPvAdviceCharts && (
               <PvAdviceCharts
                 advice={analysisResult.sizing.pvFormulaAdvice}
-                charts={analysisResult.pvAdviceCharts}
+                charts={displayedPvAdviceCharts}
               />
             )}
 

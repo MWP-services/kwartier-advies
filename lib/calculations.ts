@@ -290,6 +290,7 @@ export interface PvAdviceChartsData {
   dailyStorageChart: Array<{
     date: string;
     dailyStorageNeedKwh: number;
+    simulatedRecommendedImpactKwh?: number;
     p50: number;
     p75: number;
     p90: number;
@@ -747,6 +748,10 @@ const HOME_PV_POWER_MAP: Record<number, number> = {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function round6(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
 }
 
 function clampNonNegative(value: number | undefined | null): number {
@@ -1220,9 +1225,9 @@ export function simulatePvBatteryScenario(
       importAfterKwh: round2(remainingImportKwh),
       exportBeforeKwh: round2(exportKwh),
       exportAfterKwh: round2(remainingExportKwh),
-      baselineCostEur: round2(baselineCostForInterval),
-      batteryCostEur: round2(batteryCostForInterval),
-      intervalValueEur: round2(intervalValueEur),
+      baselineCostEur: round6(baselineCostForInterval),
+      batteryCostEur: round6(batteryCostForInterval),
+      intervalValueEur: round6(intervalValueEur),
       priceSource: interval.priceSource ?? 'missing'
     });
   }
@@ -1583,9 +1588,19 @@ export function buildPvAdviceChartsData(
       ? adviceResult.configUsed.availableBusinessOptionsKwh
       : adviceResult.configUsed.availableHomeOptionsKwh;
 
+  const simulatedImpactByDay = new Map<string, number>();
+  (simulationAdvice?.simulationAdvice.recommended.valueByInterval ?? []).forEach((row) => {
+    const day = getLocalDayIso(row.ts, 'Europe/Amsterdam');
+    const current = simulatedImpactByDay.get(day) ?? 0;
+    simulatedImpactByDay.set(day, current + Math.max(0, row.importBeforeKwh - row.importAfterKwh));
+  });
+
   const dailyStorageChart = adviceResult.dailyRows.map((row) => ({
     date: row.date,
     dailyStorageNeedKwh: round2(row.dailyStorageNeedKwh),
+    simulatedRecommendedImpactKwh: simulatedImpactByDay.has(row.date)
+      ? round2(simulatedImpactByDay.get(row.date) ?? 0)
+      : undefined,
     p50: adviceResult.percentiles.p50StorageNeedKwh,
     p75: adviceResult.percentiles.p75StorageNeedKwh,
     p90: adviceResult.percentiles.p90StorageNeedKwh
@@ -1689,7 +1704,16 @@ export function buildPvAdviceChartsData(
     }))
     .sort((a, b) => a.month.localeCompare(b.month));
 
-  const annualValueByCapacityChart = simulationAdvice
+  const hasFinancialValueData =
+    simulationAdvice != null &&
+    simulationAdvice.simulationAdvice.allScenarios.some(
+      (scenario) =>
+        Math.abs(scenario.annualValueEur ?? 0) > 0 ||
+        Math.abs(scenario.baselineEnergyCostEur ?? 0) > 0 ||
+        Math.abs(scenario.batteryEnergyCostEur ?? 0) > 0 ||
+        Math.abs(scenario.yearlyCostsEur ?? 0) > 0
+    );
+  const annualValueByCapacityChart = hasFinancialValueData && simulationAdvice
     ? simulationAdvice.simulationAdvice.allScenarios.map((scenario) => ({
         capacityKwh: scenario.capacityKwh,
         annualValueEur: round2(scenario.annualValueEur ?? 0)
@@ -1697,7 +1721,7 @@ export function buildPvAdviceChartsData(
     : [];
 
   const importExportCostChart =
-    simulationAdvice?.simulationAdvice.recommended == null
+    !hasFinancialValueData || simulationAdvice?.simulationAdvice.recommended == null
       ? []
       : [
           {
@@ -1732,10 +1756,11 @@ export function buildPvAdviceChartsData(
     }))
     .sort((a, b) => a.month.localeCompare(b.month));
 
+  const exampleCandidateDays = activeDays.length > 0 ? activeDays : adviceResult.dailyRows;
   const targetDay =
-    activeDays.length === 0
+    exampleCandidateDays.length === 0
       ? null
-      : [...activeDays].sort(
+      : [...exampleCandidateDays].sort(
           (a, b) =>
             Math.abs(a.dailyStorageNeedKwh - adviceResult.percentiles.p75StorageNeedKwh) -
               Math.abs(b.dailyStorageNeedKwh - adviceResult.percentiles.p75StorageNeedKwh) ||

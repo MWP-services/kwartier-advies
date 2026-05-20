@@ -8,7 +8,6 @@ import {
   ComposedChart,
   Legend,
   Line,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -34,41 +33,10 @@ function formatEur(value: unknown): string {
   return `EUR ${Number(value ?? 0).toFixed(2)}`;
 }
 
-export function PvAdviceCharts({ charts, advice }: PvAdviceChartsProps) {
+export function PvAdviceCharts({ charts }: PvAdviceChartsProps) {
   return (
     <div className="grid gap-4">
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="wx-card">
-          <h3 className="wx-title">Dagelijkse opslagbehoefte</h3>
-          <p className="mb-3 text-sm text-slate-600">
-            Deze grafiek laat per dag zien hoeveel zonne-overschot later op de dag of nacht nuttig gebruikt kan worden.
-            De P50-, P75- en P90-lijnen vormen de basis voor het conservatieve, aanbevolen en ruime batterijadvies.
-          </p>
-          <div className="h-72">
-            <ResponsiveContainer>
-              <ComposedChart data={charts.dailyStorageChart}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="date"
-                  minTickGap={24}
-                  label={{ value: 'Datum', position: 'insideBottom', offset: -5 }}
-                />
-                <YAxis
-                  tickFormatter={(value) => `${value}`}
-                  label={{ value: 'Opslagbehoefte (kWh)', angle: -90, position: 'insideLeft' }}
-                />
-                <Tooltip formatter={(value) => formatKwh(value)} />
-                <Legend />
-                <Bar dataKey="dailyStorageNeedKwh" fill="#0ea5e9" name="Opslagbehoefte" />
-                <ReferenceLine y={advice.percentiles.p50StorageNeedKwh} stroke="#64748b" strokeDasharray="4 4" label="P50" />
-                <ReferenceLine y={advice.percentiles.p75StorageNeedKwh} stroke="#16a34a" strokeDasharray="4 4" label="P75" />
-                <ReferenceLine y={advice.percentiles.p90StorageNeedKwh} stroke="#f97316" strokeDasharray="4 4" label="P90" />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="mt-2 text-xs text-slate-500">X-as: datum per dag. Y-as: nuttige opslagbehoefte in kWh per dag.</p>
-        </div>
-
         <div className="wx-card">
           <h3 className="wx-title">Verdeling van opslagbehoefte</h3>
           <p className="mb-3 text-sm text-slate-600">

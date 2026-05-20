@@ -498,6 +498,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
   const pricingStats = hybridAdvice?.configUsed.pricingStats;
   const scenarioChartData = payload.scenarios.map((scenario) => ({
     optionLabel: scenario.optionLabel,
+    chartLabel: `${Math.round(scenario.capacityKwh).toLocaleString('nl-NL')} kWh`,
     capacityKwh: scenario.capacityKwh,
     powerKw: scenario.maxDischargeKw ?? 0,
     importReductionKwhAnnualized: scenario.importReductionKwhAnnualized ?? scenario.importReductionKwh ?? 0,
@@ -505,6 +506,9 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
     cyclesPerYear: scenario.cyclesPerYear ?? 0,
     economicValue: scenario.annualValueEur ?? scenario.totalEconomicValueEur ?? 0,
     marginalGainPerAddedKwh: scenario.marginalGainPerAddedKwh ?? 0,
+    isRecommended:
+      scenario.capacityKwh ===
+      (hybridAdvice?.simulationAdvice.recommended.capacityKwh ?? payload.sizing.recommendedProduct?.capacityKwh),
     isEligible: scenario.isEligible !== false,
     status:
       scenario.isEligible === false
@@ -595,8 +599,8 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
           <tr><th>Aanbevolen configuratie</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
           <tr><th>Benodigde capaciteit</th><td>${payload.sizing.kWhNeeded.toFixed(2)} kWh</td></tr>
           <tr><th>Benodigd vermogen</th><td>${payload.sizing.kWNeeded.toFixed(2)} kW</td></tr>
-          <tr><th>Importreductie per jaar</th><td>${recommendedScenario ? `${recommendedScenario.importReductionKwhAnnualized.toFixed(2)} kWh/jaar` : '-'}</td></tr>
-          <tr><th>Exportreductie per jaar</th><td>${recommendedScenario ? `${recommendedScenario.exportReductionKwhAnnualized.toFixed(2)} kWh/jaar` : '-'}</td></tr>
+          <tr><th>Importreductie per jaar</th><td>${recommendedScenario ? `${Math.round(recommendedScenario.importReductionKwhAnnualized).toLocaleString('nl-NL')} kWh/jaar` : '-'}</td></tr>
+          <tr><th>Exportreductie per jaar</th><td>${recommendedScenario ? `${Math.round(recommendedScenario.exportReductionKwhAnnualized).toLocaleString('nl-NL')} kWh/jaar` : '-'}</td></tr>
           <tr><th>Cycli per jaar</th><td>${recommendedScenario ? recommendedScenario.cyclesPerYear.toFixed(1) : '-'}</td></tr>
           ${
             isFinancialReport
@@ -652,27 +656,32 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>4. Meeropbrengst en afvlakking</h3>
-        <div id="pv-marginal-gain-chart" class="plot"></div>
-        <div class="muted">X-as: batterijgrootte in kWh. Linker Y-as: effect in kWh per jaar. Rechter Y-as: marginale meeropbrengst per extra kWh capaciteit.</div>
-        <div class="callout">Hier wordt zichtbaar waar de meeropbrengst van extra batterijcapaciteit afvlakt. Daardoor is te zien waarom grotere batterijen vaak minder logisch worden.</div>
+        <h3>4. Teruglevering versus avond/nachtverbruik</h3>
+        <div id="pv-export-night-chart" class="plot"></div>
+        <div class="muted">X-as: datum per dag. Y-as: energie in kWh per dag.</div>
+        <div class="callout">Deze grafiek vergelijkt per dag hoeveel zonne-overschot beschikbaar is met hoeveel avond- en nachtverbruik daar praktisch tegenover staat.</div>
       </div>
       <div class="card">
-        <h3>Dekkingspercentage per batterijgrootte</h3>
-        <div id="pv-coverage-chart" class="plot"></div>
-        <div class="muted">X-as: batterijgrootte in kWh. Y-as: dekking in procenten.</div>
-        <div class="callout">Deze grafiek laat zien welk deel van de PV-actieve dagen volledig wordt gedekt en hoeveel van de dagelijkse opslagbehoefte gemiddeld wordt afgedekt.</div>
+        <h3>Datakwaliteit</h3>
+        <table><tbody>
+          <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
+          <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
+          <tr><th>Ontbrekende intervallen</th><td>${payload.quality.missingIntervalsCount}</td></tr>
+          <tr><th>Duplicaten</th><td>${payload.quality.duplicateCount}</td></tr>
+          <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
+          <tr><th>PV-actieve dagen</th><td>${formulaAdvice ? `${formulaAdvice.totals.numberOfPvActiveDays} / ${formulaAdvice.totals.numberOfDays}` : '-'}</td></tr>
+        </tbody></table>
       </div>
     </section>
 
-    <section class="grid two">
-      <div class="card">
+    <section class="grid two" style="display:none;">
+      <div class="card" style="display:none;">
         <h3>5. Impact vóór/na batterij</h3>
-        <div id="pv-impact-chart" class="plot"></div>
+        <div id="pv-impact-chart" class="plot" style="display:none;"></div>
         <div class="muted">X-as: import en export vóór en na de aanbevolen batterij. Y-as: energie in kWh.</div>
         <div class="callout">Deze vergelijking laat direct zien hoeveel netafname en teruglevering de aanbevolen batterij in de simulatie verschuift.</div>
       </div>
-      <div class="card">
+      <div class="card" style="display:none;">
         <h3>Datakwaliteit</h3>
         <table><tbody>
           <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
@@ -720,14 +729,14 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
     }
 
     <section class="grid two">
-      <div class="card">
-        <h3>6. Voorbeelddag met batterij-SOC</h3>
+      <div class="card" style="display:none;">
+        <h3>5. Voorbeelddag met batterij-SOC</h3>
         <div id="pv-example-day-chart" class="plot"></div>
         <div class="muted">X-as: kwartieren binnen een representatieve dag. Linker Y-as: import en export in kWh per kwartier. Rechter Y-as: batterijlading in kWh.</div>
         <div class="callout">Deze grafiek laat zien hoe de aanbevolen batterij overdag laadt op zonne-overschot en later ontlaadt om eigen verbruik te ondersteunen.</div>
       </div>
       <div class="card">
-        <h3>7. Conclusie en advies</h3>
+        <h3>5. Conclusie en advies</h3>
         <table><tbody>
           <tr><th>Aanbevolen batterij</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
           <tr><th>Waarom gekozen</th><td>${recommendedScenario?.recommendationReason ?? 'Beste balans tussen praktische opslag, benutting en waarde.'}</td></tr>
@@ -751,35 +760,160 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
     const wattsTheme = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFFFF', font: { family: 'Inter, Arial, Calibri, sans-serif', color: '#232323' }, margin: { t: 12, r: 12, b: 70, l: 55 } };
 
     if (pvCharts?.dailyStorageChart?.length) {
-      Plotly.newPlot('pv-daily-storage-chart', [
+      const dailyStorageTraces = [
         { type: 'bar', name: 'Dagelijkse opslagbehoefte', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.dailyStorageNeedKwh), marker: { color: '#0ea5e9' } },
         { type: 'scatter', mode: 'lines', name: 'P50', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p50), line: { color: '#64748b', dash: 'dot' } },
         { type: 'scatter', mode: 'lines', name: 'P75', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p75), line: { color: '#16a34a', dash: 'dot' } },
         { type: 'scatter', mode: 'lines', name: 'P90', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p90), line: { color: '#f97316', dash: 'dot' } }
-      ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20 }, yaxis: { title: 'kWh per dag' } }, { responsive: true, displaylogo: false });
+      ];
+      Plotly.newPlot('pv-daily-storage-chart', dailyStorageTraces, { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20 }, yaxis: { title: 'kWh per dag' } }, { responsive: true, displaylogo: false });
     }
 
-    Plotly.newPlot('pv-scenario-comparison-chart', [
-      { type: 'bar', name: 'Importreductie', x: scenarioData.map(d => d.optionLabel), y: scenarioData.map(d => d.importReductionKwhAnnualized), marker: { color: '#22c55e' } },
-      { type: 'bar', name: 'Exportreductie', x: scenarioData.map(d => d.optionLabel), y: scenarioData.map(d => d.exportReductionKwhAnnualized), marker: { color: '#f59e0b' } },
-      { type: 'scatter', mode: 'lines+markers', name: 'Jaarlijkse waarde', x: scenarioData.map(d => d.optionLabel), y: scenarioData.map(d => d.economicValue), yaxis: 'y2', line: { color: '#2563eb' } }
-    ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20, title: 'Batterijopties' }, yaxis: { title: 'kWh per jaar' }, yaxis2: { title: 'EUR per jaar', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 90, l: 55 } }, { responsive: true, displaylogo: false });
+    if (pvCharts?.exportVsNightImportChart?.length) {
+      Plotly.newPlot('pv-export-night-chart', [
+        { type: 'bar', name: 'Teruglevering', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyExportKwh), marker: { color: '#f59e0b' } },
+        { type: 'bar', name: 'Avond/nachtverbruik', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.eveningNightImportKwh), marker: { color: '#22c55e' } },
+        { type: 'scatter', mode: 'lines', name: 'Praktische opslagbehoefte', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyStorageNeedKwh), line: { color: '#2563eb', width: 2 } }
+      ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20, automargin: true }, yaxis: { title: 'kWh per dag', rangemode: 'tozero' }, legend: { orientation: 'h', x: 0, y: 1.16, xanchor: 'left', yanchor: 'bottom' }, margin: { t: 70, r: 18, b: 82, l: 58 } }, { responsive: true, displaylogo: false });
+    }
 
-    if (pvCharts?.marginalGainChart?.length) {
+    const formatKwhYear = value => Math.round(value).toLocaleString('nl-NL') + ' kWh/jaar';
+    const formatEurYear = value => 'EUR ' + Math.round(value).toLocaleString('nl-NL') + '/jaar';
+    const hasEconomicValue = scenarioData.some(d => Math.abs(d.economicValue ?? 0) >= 0.01);
+    const scenarioX = scenarioData.map(d => d.chartLabel);
+    const scenarioHover = scenarioData.map(d => [
+      d.optionLabel,
+      d.isRecommended ? 'Aanbevolen advies' : 'Scenario',
+      Math.round(d.powerKw).toLocaleString('nl-NL') + ' kW'
+    ]);
+    const scenarioComparisonTraces = [
+      {
+        type: 'bar',
+        name: 'Importreductie',
+        x: scenarioX,
+        y: scenarioData.map(d => d.importReductionKwhAnnualized),
+        text: scenarioData.map(d => d.isRecommended ? 'Aanbevolen' : ''),
+        textposition: 'inside',
+        insidetextanchor: 'middle',
+        textfont: { size: 10, color: '#0f172a' },
+        cliponaxis: false,
+        marker: {
+          color: scenarioData.map(d => d.isRecommended ? '#16a34a' : '#86efac'),
+          line: { color: scenarioData.map(d => d.isRecommended ? '#14532d' : '#22c55e'), width: scenarioData.map(d => d.isRecommended ? 3 : 1) }
+        },
+        customdata: scenarioData.map((d, index) => [...scenarioHover[index], formatKwhYear(d.importReductionKwhAnnualized)]),
+        hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Vermogen: %{customdata[2]}<br>Importreductie: %{customdata[3]}<extra></extra>'
+      },
+      {
+        type: 'bar',
+        name: 'Exportreductie',
+        x: scenarioX,
+        y: scenarioData.map(d => d.exportReductionKwhAnnualized),
+        text: scenarioData.map(d => d.isRecommended ? 'Aanbevolen' : ''),
+        textposition: 'inside',
+        insidetextanchor: 'middle',
+        textfont: { size: 10, color: '#0f172a' },
+        cliponaxis: false,
+        marker: {
+          color: scenarioData.map(d => d.isRecommended ? '#f59e0b' : '#fed7aa'),
+          line: { color: scenarioData.map(d => d.isRecommended ? '#92400e' : '#f59e0b'), width: scenarioData.map(d => d.isRecommended ? 3 : 1) }
+        },
+        customdata: scenarioData.map((d, index) => [...scenarioHover[index], formatKwhYear(d.exportReductionKwhAnnualized)]),
+        hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Vermogen: %{customdata[2]}<br>Exportreductie: %{customdata[3]}<extra></extra>'
+      }
+    ];
+    if (hasEconomicValue) {
+      scenarioComparisonTraces.push({
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: 'Jaarlijkse waarde',
+        x: scenarioX,
+        y: scenarioData.map(d => d.economicValue),
+        yaxis: 'y2',
+        text: scenarioData.map(d => formatEurYear(d.economicValue)),
+        customdata: scenarioHover,
+        marker: { color: scenarioData.map(d => d.isRecommended ? '#1d4ed8' : '#93c5fd'), size: scenarioData.map(d => d.isRecommended ? 11 : 7) },
+        line: { color: '#2563eb', width: 2 },
+        hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Jaarlijkse waarde: %{text}<extra></extra>'
+      });
+    }
+    Plotly.newPlot(
+      'pv-scenario-comparison-chart',
+      scenarioComparisonTraces,
+      {
+        ...wattsTheme,
+        barmode: 'group',
+        xaxis: { tickangle: -45, title: 'Batterijopties', automargin: true, tickfont: { size: 9 } },
+        yaxis: { title: 'Reductie (kWh/jaar)', tickformat: ',.0f', rangemode: 'tozero' },
+        ...(hasEconomicValue ? { yaxis2: { title: 'EUR/jaar', overlaying: 'y', side: 'right', tickformat: ',.0f' } } : {}),
+        margin: { t: 30, r: hasEconomicValue ? 58 : 18, b: 115, l: 70 },
+        hoverlabel: { align: 'left' }
+      },
+      { responsive: true, displaylogo: false }
+    );
+
+    if (document.getElementById('pv-marginal-gain-chart') && pvCharts?.marginalGainChart?.length) {
       Plotly.newPlot('pv-marginal-gain-chart', [
         { type: 'bar', name: 'Gedekte opslag / extra effect', x: pvCharts.marginalGainChart.map(d => d.capacityKwh), y: pvCharts.marginalGainChart.map(d => d.coveredStorageKwhPerYear), marker: { color: '#0ea5e9' } },
         { type: 'scatter', mode: 'lines+markers', name: 'Marginal gain per extra kWh', x: pvCharts.marginalGainChart.map(d => d.capacityKwh), y: pvCharts.marginalGainChart.map(d => d.marginalGainPerAddedKwh), yaxis: 'y2', line: { color: '#f97316' } }
       ], { ...wattsTheme, xaxis: { title: 'Batterijcapaciteit (kWh)' }, yaxis: { title: 'kWh per jaar' }, yaxis2: { title: 'Marginale gain', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 70, l: 55 } }, { responsive: true, displaylogo: false });
     }
 
-    if (pvCharts?.coverageByCapacityChart?.length) {
+    if (document.getElementById('pv-coverage-chart') && pvCharts?.coverageByCapacityChart?.length) {
+      const recommendedCapacityKwh = ${safeJson(recommendedScenario?.capacityKwh ?? payload.sizing.recommendedProduct?.capacityKwh ?? null)};
+      const coverageData = pvCharts.coverageByCapacityChart.map(d => ({
+        ...d,
+        chartLabel: Math.round(d.capacityKwh).toLocaleString('nl-NL') + ' kWh',
+        isRecommended: recommendedCapacityKwh != null && d.capacityKwh === recommendedCapacityKwh
+      }));
+      const coverageX = coverageData.map(d => d.chartLabel);
+      const coverageHover = coverageData.map(d => [
+        d.chartLabel,
+        d.isRecommended ? 'Aanbevolen advies' : 'Scenario',
+        d.fullyCoveredDaysPercentage.toFixed(1) + '%',
+        d.averageCoveragePercentage.toFixed(1) + '%'
+      ]);
       Plotly.newPlot('pv-coverage-chart', [
-        { type: 'bar', name: 'Volledig gedekte dagen', x: pvCharts.coverageByCapacityChart.map(d => d.capacityKwh), y: pvCharts.coverageByCapacityChart.map(d => d.fullyCoveredDaysPercentage), marker: { color: '#22c55e' } },
-        { type: 'scatter', mode: 'lines+markers', name: 'Gemiddelde dekking', x: pvCharts.coverageByCapacityChart.map(d => d.capacityKwh), y: pvCharts.coverageByCapacityChart.map(d => d.averageCoveragePercentage), line: { color: '#2563eb' } }
-      ], { ...wattsTheme, xaxis: { title: 'Batterijcapaciteit (kWh)' }, yaxis: { title: 'Dekking (%)', range: [0, 100] } }, { responsive: true, displaylogo: false });
+        {
+          type: 'bar',
+          name: 'Volledig gedekte dagen',
+          x: coverageX,
+          y: coverageData.map(d => d.fullyCoveredDaysPercentage),
+          text: coverageData.map(d => d.isRecommended ? 'Aanbevolen' : ''),
+          textposition: 'inside',
+          insidetextanchor: 'middle',
+          textfont: { size: 10, color: '#0f172a' },
+          marker: {
+            color: coverageData.map(d => d.isRecommended ? '#16a34a' : '#86efac'),
+            line: { color: coverageData.map(d => d.isRecommended ? '#14532d' : '#22c55e'), width: coverageData.map(d => d.isRecommended ? 3 : 1) }
+          },
+          customdata: coverageHover,
+          hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Volledig gedekte dagen: %{customdata[2]}<br>Gemiddelde dekking: %{customdata[3]}<extra></extra>'
+        },
+        {
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: 'Gemiddelde dekking',
+          x: coverageX,
+          y: coverageData.map(d => d.averageCoveragePercentage),
+          marker: { color: coverageData.map(d => d.isRecommended ? '#1d4ed8' : '#93c5fd'), size: coverageData.map(d => d.isRecommended ? 11 : 7) },
+          line: { color: '#2563eb', width: 2 },
+          customdata: coverageHover,
+          hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Gemiddelde dekking: %{customdata[3]}<br>Volledig gedekte dagen: %{customdata[2]}<extra></extra>'
+        }
+      ], {
+        ...wattsTheme,
+        xaxis: { title: 'Batterijcapaciteit (kWh)', tickangle: -45, automargin: true, tickfont: { size: 9 } },
+        yaxis: { title: 'Dekking (%)', range: [0, 105], ticksuffix: '%' },
+        legend: { orientation: 'h', x: 0, y: 1.18, xanchor: 'left', yanchor: 'bottom', bgcolor: 'rgba(255,255,255,0.85)' },
+        margin: { t: 72, r: 20, b: 112, l: 58 },
+        hoverlabel: { align: 'left' }
+      }, { responsive: true, displaylogo: false });
     }
 
-    Plotly.newPlot('pv-impact-chart', [{ type: 'bar', x: impactBeforeAfter.map(d => d.label), y: impactBeforeAfter.map(d => d.value), marker: { color: ['#64748b', '#22c55e', '#f59e0b', '#2563eb'] } }], { ...wattsTheme, xaxis: { tickangle: -10 }, yaxis: { title: 'kWh' } }, { responsive: true, displaylogo: false });
+    if (document.getElementById('pv-impact-chart') && impactBeforeAfter.length) {
+      Plotly.newPlot('pv-impact-chart', [{ type: 'bar', x: impactBeforeAfter.map(d => d.label), y: impactBeforeAfter.map(d => d.value), marker: { color: ['#64748b', '#22c55e', '#f59e0b', '#2563eb'] } }], { ...wattsTheme, xaxis: { tickangle: -10 }, yaxis: { title: 'kWh' } }, { responsive: true, displaylogo: false });
+    }
 
     if (pvCharts?.annualValueByCapacityChart?.length) {
       Plotly.newPlot('pv-annual-value-chart', [

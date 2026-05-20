@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { computePvSelfConsumptionAdvice, processIntervals } from '@/lib/calculations';
-import { attachDynamicPricesToIntervals } from '@/lib/pricing';
+import { attachDynamicPricesToIntervals, calculateAveragePriceValues } from '@/lib/pricing';
 
 describe('dynamic pricing', () => {
+  it('calculates average fallback values from uploaded dynamic price rows', () => {
+    const averages = calculateAveragePriceValues([
+      { ts: '2025-01-01T00:00:00.000Z', importPriceEurPerKwh: 0.2, exportPriceEurPerKwh: 0.04 },
+      {
+        ts: '2025-01-01T01:00:00.000Z',
+        importPriceEurPerKwh: 0.4,
+        exportPriceEurPerKwh: 0.08,
+        feedInCostEurPerKwh: 0.02
+      },
+      { ts: '2025-01-01T02:00:00.000Z', importPriceEurPerKwh: 0.3 }
+    ]);
+
+    expect(averages.importPriceEurPerKwh).toBeCloseTo(0.3, 5);
+    expect(averages.exportPriceEurPerKwh).toBeCloseTo(0.06, 5);
+    expect(averages.feedInCostEurPerKwh).toBeCloseTo(0.02, 5);
+  });
+
   it('matches exact and hourly prices and falls back when needed', () => {
     const rows = [
       { timestamp: '2025-01-01T00:00:00.000Z', consumptionKwh: 2, exportKwh: 0 },

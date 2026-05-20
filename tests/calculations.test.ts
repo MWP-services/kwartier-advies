@@ -243,6 +243,101 @@ describe('calculations', () => {
     expect(charts.monthlyStorageChart).toHaveLength(1);
   });
 
+  it('builds an example day chart even when no day passes the active PV threshold', () => {
+    const rows = [
+      { timestamp: '2024-01-01T12:00:00.000Z', consumptionKwh: 0, exportKwh: 0.01 },
+      { timestamp: '2024-01-01T18:00:00.000Z', consumptionKwh: 0.01, exportKwh: 0 },
+      { timestamp: '2024-01-02T12:00:00.000Z', consumptionKwh: 0, exportKwh: 0.02 },
+      { timestamp: '2024-01-02T18:00:00.000Z', consumptionKwh: 0.02, exportKwh: 0 }
+    ];
+    const intervals = processIntervals(rows, 500);
+    const advice = computePvStorageFormulaAdvice(intervals, {
+      customerType: 'home',
+      homeActiveDayThresholdKwh: 1,
+      minActiveDays: 1
+    });
+    const charts = buildPvAdviceChartsData(advice, intervals);
+
+    expect(advice.dailyRows.every((row) => !row.isPvActiveDay)).toBe(true);
+    expect(charts.exampleDayChart.length).toBeGreaterThan(0);
+    expect(charts.exampleDayChart.some((point) => point.batterySocKwh > 0)).toBe(true);
+  });
+
+  it('adds simulated recommended battery impact to the formula basis chart', () => {
+    const rows = Array.from({ length: 10 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 0, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 12 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 4 },
+        { timestamp: new Date(base + 19 * 60 * 60 * 1000).toISOString(), consumptionKwh: 4, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(rows, 500);
+    const advice = computePvStorageFormulaAdvice(intervals, { customerType: 'home', minActiveDays: 1 });
+    const hybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'home' });
+    const charts = buildPvAdviceChartsData(advice, intervals, hybrid);
+
+    expect(charts.dailyStorageChart.length).toBeGreaterThan(0);
+    expect(
+      charts.dailyStorageChart.some((point) => (point.simulatedRecommendedImpactKwh ?? 0) > 0)
+    ).toBe(true);
+  });
+
+  it('only shows annual value chart after financial assumptions are applied', () => {
+    const rows = Array.from({ length: 40 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 0, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 12 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 4 },
+        { timestamp: new Date(base + 12.25 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 4 },
+        { timestamp: new Date(base + 19 * 60 * 60 * 1000).toISOString(), consumptionKwh: 4, exportKwh: 0 },
+        { timestamp: new Date(base + 19.25 * 60 * 60 * 1000).toISOString(), consumptionKwh: 4, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(rows, 500);
+    const advice = computePvStorageFormulaAdvice(intervals, { customerType: 'home', minActiveDays: 1 });
+    const technicalHybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'home' });
+    const technicalCharts = buildPvAdviceChartsData(advice, intervals, technicalHybrid);
+
+    const financialHybrid = computePvSelfConsumptionAdvice(intervals, {
+      customerType: 'home',
+      economics: {
+        pricingMode: 'average',
+        importPriceEurPerKwh: 0.35,
+        exportCompensationEurPerKwh: 0.05,
+        feedInCostEurPerKwh: 0
+      }
+    });
+    const financialCharts = buildPvAdviceChartsData(advice, intervals, financialHybrid);
+
+    expect(technicalCharts.annualValueByCapacityChart).toHaveLength(0);
+    expect(financialCharts.annualValueByCapacityChart.length).toBeGreaterThan(0);
+    expect(financialCharts.annualValueByCapacityChart.some((item) => item.annualValueEur !== 0)).toBe(true);
+  });
+
+  it('builds monthly value chart from unrounded interval economics', () => {
+    const rows = Array.from({ length: 40 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 1, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 12 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 0.01 },
+        { timestamp: new Date(base + 19 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0.01, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(rows, 500);
+    const advice = computePvStorageFormulaAdvice(intervals, { customerType: 'home', minActiveDays: 1 });
+    const financialHybrid = computePvSelfConsumptionAdvice(intervals, {
+      customerType: 'home',
+      economics: {
+        pricingMode: 'average',
+        importPriceEurPerKwh: 0.3,
+        exportCompensationEurPerKwh: 0.05,
+        feedInCostEurPerKwh: 0
+      }
+    });
+    const charts = buildPvAdviceChartsData(advice, intervals, financialHybrid);
+
+    expect(charts.monthlyValueChart.length).toBeGreaterThan(0);
+    expect(charts.monthlyValueChart.some((item) => item.baselineCostEur !== 0 || item.valueEur !== 0)).toBe(true);
+  });
+
   it('computes hybrid PV self-consumption advice with simulated recommendations', () => {
     const rows = Array.from({ length: 40 }, (_, dayIndex) => {
       const base = Date.UTC(2024, 4, 1 + dayIndex, 0, 0);
