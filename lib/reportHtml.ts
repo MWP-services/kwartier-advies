@@ -496,6 +496,96 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
   const recommendedScenario = hybridAdvice?.simulationAdvice.recommended ?? null;
   const pricingMode = hybridAdvice?.configUsed.pricingMode ?? 'average';
   const pricingStats = hybridAdvice?.configUsed.pricingStats;
+  const formatEuro = (value: number): string => `EUR ${value.toFixed(2)}`;
+  const formatSignedEuro = (value: number): string =>
+    `${value < 0 ? '-' : ''}EUR ${Math.abs(value).toFixed(2)}`;
+  const hasFinancialValueData =
+    recommendedScenario?.annualValueEur != null ||
+    (pvCharts?.annualValueByCapacityChart?.length ?? 0) > 0 ||
+    (pvCharts?.importExportCostChart?.length ?? 0) > 0;
+  const yearlyCostsEur = recommendedScenario?.yearlyCostsEur ?? 0;
+  const exportNetPriceEurPerKwh =
+    (hybridAdvice?.configUsed.exportCompensationEurPerKwh ?? 0) -
+    (hybridAdvice?.configUsed.feedInCostEurPerKwh ?? 0);
+  const importValueEur =
+    (recommendedScenario?.importReductionKwhAnnualized ?? 0) *
+    (hybridAdvice?.configUsed.importPriceEurPerKwh ?? 0);
+  const lostExportValueEur =
+    (recommendedScenario?.exportReductionKwhAnnualized ?? 0) * exportNetPriceEurPerKwh;
+  const dynamicGrossValueEur =
+    recommendedScenario?.dynamicValueEur ??
+    ((recommendedScenario?.baselineEnergyCostEur ?? 0) - (recommendedScenario?.batteryEnergyCostEur ?? 0));
+  const tariffGrossValueEur = importValueEur - lostExportValueEur;
+  const grossValueEur = pricingMode === 'dynamic' ? dynamicGrossValueEur : tariffGrossValueEur;
+  const annualValueEur = recommendedScenario?.annualValueEur ?? null;
+  const modelCorrectionEur =
+    annualValueEur == null ? 0 : annualValueEur - (grossValueEur - yearlyCostsEur);
+  const annualValueBreakdownRows = hasFinancialValueData
+    ? pricingMode === 'dynamic'
+      ? [
+          {
+            label: 'Kosten zonder batterij',
+            value: recommendedScenario?.baselineEnergyCostEur ?? 0,
+            explanation: 'Som van importkosten minus terugleververgoeding plus terugleverkosten in de referentiesituatie.'
+          },
+          {
+            label: 'Kosten met batterij',
+            value: -(recommendedScenario?.batteryEnergyCostEur ?? 0),
+            explanation: 'Dezelfde kostenberekening nadat de aanbevolen batterij per kwartier is gesimuleerd.'
+          },
+          {
+            label: 'Bruto waarde batterij',
+            value: grossValueEur,
+            explanation: 'Kosten zonder batterij minus kosten met batterij.'
+          },
+          {
+            label: 'Jaarlijkse onderhoud/kosten',
+            value: -yearlyCostsEur,
+            explanation: 'Handmatig ingevoerde jaarlijkse kosten.'
+          },
+          {
+            label: 'Jaarlijkse waarde',
+            value: annualValueEur ?? 0,
+            explanation: 'Bruto waarde minus jaarlijkse kosten.'
+          }
+        ]
+      : [
+          {
+            label: 'Vermeden importkosten',
+            value: importValueEur,
+            explanation: `${Math.round(recommendedScenario?.importReductionKwhAnnualized ?? 0).toLocaleString('nl-NL')} kWh importreductie x ${formatEuro(hybridAdvice?.configUsed.importPriceEurPerKwh ?? 0)}/kWh.`
+          },
+          {
+            label: 'Misgelopen terugleverwaarde',
+            value: -lostExportValueEur,
+            explanation: `${Math.round(recommendedScenario?.exportReductionKwhAnnualized ?? 0).toLocaleString('nl-NL')} kWh minder export x netto exportwaarde ${formatEuro(exportNetPriceEurPerKwh)}/kWh.`
+          },
+          {
+            label: 'Bruto waarde batterij',
+            value: grossValueEur,
+            explanation: 'Vermeden importkosten minus misgelopen terugleverwaarde.'
+          },
+          {
+            label: 'Jaarlijkse onderhoud/kosten',
+            value: -yearlyCostsEur,
+            explanation: 'Handmatig ingevoerde jaarlijkse kosten.'
+          },
+          ...(Math.abs(modelCorrectionEur) >= 0.01
+            ? [
+                {
+                  label: 'Modelcorrectie / afronding',
+                  value: modelCorrectionEur,
+                  explanation: 'Verschil tussen de scenario-uitkomst en de afgeronde tariefcomponenten hierboven.'
+                }
+              ]
+            : []),
+          {
+            label: 'Jaarlijkse waarde',
+            value: annualValueEur ?? 0,
+            explanation: 'Netto waarde die ook in de scenariovergelijking wordt gebruikt.'
+          }
+        ]
+    : [];
   const scenarioChartData = payload.scenarios.map((scenario) => ({
     optionLabel: scenario.optionLabel,
     chartLabel: `${Math.round(scenario.capacityKwh).toLocaleString('nl-NL')} kWh`,
@@ -603,6 +693,11 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
           <tr><th>Exportreductie per jaar</th><td>${recommendedScenario ? `${Math.round(recommendedScenario.exportReductionKwhAnnualized).toLocaleString('nl-NL')} kWh/jaar` : '-'}</td></tr>
           <tr><th>Cycli per jaar</th><td>${recommendedScenario ? recommendedScenario.cyclesPerYear.toFixed(1) : '-'}</td></tr>
           ${
+            hasFinancialValueData
+              ? `<tr><th>Jaarlijkse waarde</th><td>${annualValueEur != null ? `EUR ${annualValueEur.toFixed(2)}` : 'Niet berekend'}</td></tr>`
+              : ''
+          }
+          ${
             isFinancialReport
               ? `<tr><th>Prijsmodus</th><td>${pricingMode === 'dynamic' ? 'Dynamische prijzen' : 'Gemiddelde tarieven'}</td></tr>
                  <tr><th>Gem. importprijs</th><td>${hybridAdvice?.configUsed.importPriceEurPerKwh != null ? `EUR ${hybridAdvice.configUsed.importPriceEurPerKwh.toFixed(3)}/kWh` : '-'}</td></tr>
@@ -616,7 +711,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
                         <tr><th>Ontbrekende prijzen</th><td>${pricingStats.missingPrices}</td></tr>`
                      : ''
                  }
-                 <tr><th>Jaarlijkse waarde</th><td>${recommendedScenario?.annualValueEur != null ? `EUR ${recommendedScenario.annualValueEur.toFixed(2)}` : 'Niet berekend'}</td></tr>`
+                 ${!hasFinancialValueData ? `<tr><th>Jaarlijkse waarde</th><td>Niet berekend</td></tr>` : ''}`
               : ''
           }
         </tbody></table>
@@ -654,9 +749,47 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
       </div>
     </section>
 
+    ${
+      hasFinancialValueData
+        ? `<section class="grid two">
+      <div class="card">
+        <h3>4. Opbouw jaarlijkse waarde</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Bedrag</th>
+              <th>Berekening / bron</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${annualValueBreakdownRows
+              .map(
+                (row) => `
+            <tr>
+              <td>${row.label}</td>
+              <td>${formatSignedEuro(row.value)}</td>
+              <td>${row.explanation}</td>
+            </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+        <div class="callout">De jaarlijkse waarde is de netto economische bijdrage van de aanbevolen batterij in de gekozen prijsmodus. Positieve componenten verhogen de waarde; negatieve componenten verlagen die.</div>
+      </div>
+      <div class="card">
+        <h3>Waardecomponenten aanbevolen batterij</h3>
+        <div id="pv-value-breakdown-chart" class="plot"></div>
+        <div class="muted">Y-as: euro. De laatste balk is de netto jaarlijkse waarde die in het advies wordt gebruikt.</div>
+        <div class="callout">Deze grafiek maakt zichtbaar of de waarde vooral uit vermeden importkosten, lagere energiekosten per interval of kostenposten komt.</div>
+      </div>
+    </section>`
+        : ''
+    }
+
     <section class="grid two">
       <div class="card">
-        <h3>4. Teruglevering versus avond/nachtverbruik</h3>
+        <h3>${hasFinancialValueData ? '5' : '4'}. Teruglevering versus avond/nachtverbruik</h3>
         <div id="pv-export-night-chart" class="plot"></div>
         <div class="muted">X-as: datum per dag. Y-as: energie in kWh per dag.</div>
         <div class="callout">Deze grafiek vergelijkt per dag hoeveel zonne-overschot beschikbaar is met hoeveel avond- en nachtverbruik daar praktisch tegenover staat.</div>
@@ -757,6 +890,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
     const scenarioData = ${safeJson(scenarioChartData)};
     const pvCharts = ${safeJson(pvCharts)};
     const impactBeforeAfter = ${safeJson(impactBeforeAfter)};
+    const annualValueBreakdownRows = ${safeJson(annualValueBreakdownRows)};
     const wattsTheme = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFFFF', font: { family: 'Inter, Arial, Calibri, sans-serif', color: '#232323' }, margin: { t: 12, r: 12, b: 70, l: 55 } };
 
     if (pvCharts?.dailyStorageChart?.length) {
@@ -851,6 +985,29 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
       },
       { responsive: true, displaylogo: false }
     );
+
+    if (document.getElementById('pv-value-breakdown-chart') && annualValueBreakdownRows.length) {
+      Plotly.newPlot('pv-value-breakdown-chart', [{
+        type: 'bar',
+        x: annualValueBreakdownRows.map(d => d.label),
+        y: annualValueBreakdownRows.map(d => d.value),
+        marker: {
+          color: annualValueBreakdownRows.map((d, index) =>
+            index === annualValueBreakdownRows.length - 1 ? '#2563eb' : d.value >= 0 ? '#16a34a' : '#dc2626'
+          )
+        },
+        text: annualValueBreakdownRows.map(d => (d.value < 0 ? '-' : '') + 'EUR ' + Math.abs(d.value).toFixed(0)),
+        textposition: 'outside',
+        cliponaxis: false,
+        customdata: annualValueBreakdownRows.map(d => d.explanation),
+        hovertemplate: '<b>%{x}</b><br>%{text}<br>%{customdata}<extra></extra>'
+      }], {
+        ...wattsTheme,
+        xaxis: { tickangle: -25, automargin: true },
+        yaxis: { title: 'EUR', zeroline: true, zerolinecolor: '#64748b' },
+        margin: { t: 30, r: 18, b: 105, l: 58 }
+      }, { responsive: true, displaylogo: false });
+    }
 
     if (document.getElementById('pv-marginal-gain-chart') && pvCharts?.marginalGainChart?.length) {
       Plotly.newPlot('pv-marginal-gain-chart', [

@@ -2,44 +2,33 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import type { AnalysisResult, AnalysisSettings } from '@/lib/analysis';
 import { defaultAnalysisSettings } from '@/lib/analysis';
-import { Charts } from '@/components/Charts';
 import { ColumnMapper } from '@/components/ColumnMapper';
 import { ComplianceSlider } from '@/components/ComplianceSlider';
 import { DataQualityPanel } from '@/components/DataQualityPanel';
 import { KpiCards } from '@/components/KpiCards';
-import { PvAdviceCharts } from '@/components/PvAdviceCharts';
-import { ScenarioCharts } from '@/components/ScenarioCharts';
 import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
-import {
-  buildSizingResultFromPvSelfConsumptionAdvice,
-  buildDataQualityReport,
-  buildPvAdviceChartsData,
-  computePvSelfConsumptionAdvice,
-  computePvStorageFormulaAdvice,
-  derivePvIntervalFlow,
-  computeSizing,
-  findMaxObserved,
-  groupPeakEvents,
-  listPeakMoments,
-  processIntervals,
-  selectTopExceededIntervals,
-  toScenarioResult,
-  type PvSelfConsumptionAdviceResult
-} from '@/lib/calculations';
-import {
-  autoDetectColumns,
-  mapRows,
-  parseCsv,
-  parseXlsx,
-  type ColumnMapping
-} from '@/lib/parsing';
-import { attachPricesToIntervals, calculateAveragePriceValues, parsePriceFile, type PriceInterval } from '@/lib/pricing';
-import { normalizeConsumptionSeries } from '@/lib/normalization';
-import { buildPvSummaryFromScenario, findHighestPeakDay, simulateAllScenarios } from '@/lib/simulation';
-import { determinePvAnalysisMode } from '@/lib/pvSimulation';
+import type { PvAdviceChartsData, PvSelfConsumptionAdviceResult } from '@/lib/calculations';
+import type { ColumnMapping } from '@/lib/parsing';
+import type { PriceInterval } from '@/lib/pricing';
+
+const Charts = dynamic(() => import('@/components/Charts').then((module) => module.Charts), {
+  ssr: false,
+  loading: () => <div className="wx-card text-sm text-slate-600">Grafieken laden...</div>
+});
+
+const PvAdviceCharts = dynamic(() => import('@/components/PvAdviceCharts').then((module) => module.PvAdviceCharts), {
+  ssr: false,
+  loading: () => <div className="wx-card text-sm text-slate-600">PV-grafieken laden...</div>
+});
+
+const ScenarioCharts = dynamic(() => import('@/components/ScenarioCharts').then((module) => module.ScenarioCharts), {
+  ssr: false,
+  loading: () => <div className="wx-card text-sm text-slate-600">Scenariografieken laden...</div>
+});
 
 const OUTLIER_KW_THRESHOLD = 5000;
 
@@ -70,111 +59,6 @@ function technicalSettingsEqual(a: AnalysisSettings, b: AnalysisSettings): boole
   );
 }
 
-function runAnalysis(
-  rawRows: Record<string, unknown>[],
-  mapping: ColumnMapping,
-  settings: AnalysisSettings
-): AnalysisResult | null {
-  const mappedRows = mapRows(rawRows, mapping);
-  if (mappedRows.length === 0) return null;
-
-  const normalized = normalizeConsumptionSeries(mappedRows, {
-    intervalMinutes: 15,
-    interpretationMode: settings.interpretationMode,
-    outlierKwThreshold: OUTLIER_KW_THRESHOLD,
-    allowNegativeDeltas: false
-  });
-  if (normalized.normalizedRows.length === 0) return null;
-
-  const baseIntervals = processIntervals(normalized.normalizedRows, settings.contractedPowerKw);
-  const quality = buildDataQualityReport(normalized.normalizedRows);
-  const intervals = baseIntervals;
-  const { maxObservedKw, maxObservedTimestamp } = findMaxObserved(intervals);
-
-  if (settings.analysisType === 'PV_SELF_CONSUMPTION') {
-    const pvAnalysisMode = determinePvAnalysisMode(normalized.normalizedRows);
-    if (!pvAnalysisMode) return null;
-    const formulaAdvice = computePvStorageFormulaAdvice(intervals, {
-      customerType: settings.pvCustomerType
-    });
-    const hybridAdvice = computePvSelfConsumptionAdvice(intervals, {
-      customerType: settings.pvCustomerType
-    });
-    const sizing = buildSizingResultFromPvSelfConsumptionAdvice(formulaAdvice, hybridAdvice);
-    const scenarios = hybridAdvice.simulationAdvice.allScenarios.map((scenario) =>
-      toScenarioResult({
-        ...scenario,
-        optionLabel: `${scenario.capacityKwh} kWh / ${scenario.dischargePowerKw.toFixed(1)} kW`
-      })
-    );
-    const pvAdviceCharts = buildPvAdviceChartsData(sizing.pvFormulaAdvice ?? formulaAdvice, intervals, hybridAdvice);
-    const recommendedScenario =
-      scenarios.find((scenario) => scenario.capacityKwh === sizing.recommendedProduct?.capacityKwh) ?? scenarios[0] ?? null;
-    const pvSummary = buildPvSummaryFromScenario(recommendedScenario);
-    const exportIntervals = recommendedScenario?.exceedanceIntervalsBefore ?? intervals.filter((interval) => derivePvIntervalFlow(interval).surplusKwh > 0).length;
-
-    return {
-      analysisType: settings.analysisType,
-      intervals,
-      events: [],
-      peakMoments: [],
-      sizing,
-      scenarios,
-      highestPeakDay: null,
-      maxObservedKw,
-      maxObservedTimestamp,
-      topExceededIntervals: [],
-      normalizationDiagnostics: normalized.diagnostics,
-      quality,
-      exceedanceIntervals: exportIntervals,
-      pvSummary,
-      pvAdviceCharts,
-      pvAnalysisMode,
-      pvWarnings: hybridAdvice.warnings
-    };
-  }
-
-  const events = groupPeakEvents(intervals);
-  const peakMoments = listPeakMoments(intervals);
-  const sizing = computeSizing({
-    intervals,
-    events,
-    method: settings.method,
-    compliance: settings.compliance,
-    safetyFactor: settings.safetyFactor,
-    efficiency: settings.efficiency
-  });
-  const scenarios = simulateAllScenarios(
-    intervals,
-    sizing.kWNeeded,
-    sizing.recommendedProduct?.capacityKwh ?? 0,
-    { dischargeEfficiency: settings.efficiency }
-  );
-  const highestPeakDay = findHighestPeakDay(intervals);
-  const topExceededIntervals = highestPeakDay ? selectTopExceededIntervals(intervals, highestPeakDay, 20) : [];
-  const exceedanceIntervals = peakMoments.length;
-
-  return {
-    analysisType: settings.analysisType,
-    intervals,
-    events,
-    peakMoments,
-    sizing,
-    scenarios,
-    highestPeakDay,
-    maxObservedKw,
-    maxObservedTimestamp,
-    topExceededIntervals,
-    normalizationDiagnostics: normalized.diagnostics,
-    quality,
-    exceedanceIntervals,
-    pvSummary: null,
-    pvAdviceCharts: null,
-    pvAnalysisMode: null,
-    pvWarnings: []
-  };
-}
-
 export default function HomePage() {
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -184,6 +68,7 @@ export default function HomePage() {
   const [appliedSettings, setAppliedSettings] = useState<AnalysisSettings | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [financialResult, setFinancialResult] = useState<PvSelfConsumptionAdviceResult | null>(null);
+  const [financialPvAdviceCharts, setFinancialPvAdviceCharts] = useState<PvAdviceChartsData | null>(null);
   const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
   const [priceIntervals, setPriceIntervals] = useState<PriceInterval[]>([]);
   const [variablePricePeriods, setVariablePricePeriods] = useState<PriceInterval[]>([
@@ -240,6 +125,7 @@ export default function HomePage() {
       previousFinancialSettingsKeyRef.current = financialSettingsKey;
       if (financialResult) {
         setFinancialResult(null);
+        setFinancialPvAdviceCharts(null);
       }
     }
   }, [financialSettingsKey, financialResult]);
@@ -247,6 +133,7 @@ export default function HomePage() {
   const handleFile = async (file: File) => {
     setError(null);
     try {
+      const { autoDetectColumns, parseCsv, parseXlsx } = await import('@/lib/parsing');
       let detectedMapping: ColumnMapping | null = null;
       if (file.name.toLowerCase().endsWith('.csv')) {
         const content = await file.text();
@@ -268,6 +155,7 @@ export default function HomePage() {
       setAppliedMapping(null);
       setAnalysisResult(null);
       setFinancialResult(null);
+      setFinancialPvAdviceCharts(null);
       setAnalyzedAt(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Bestand kon niet worden ingelezen');
@@ -293,7 +181,12 @@ export default function HomePage() {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
-      const result = runAnalysis(rawRows, draftMapping, draftSettings);
+      const [{ mapRows }, { runAnalysis }] = await Promise.all([
+        import('@/lib/parsing'),
+        import('@/lib/clientAnalysis')
+      ]);
+      const mappedRows = mapRows(rawRows, draftMapping);
+      const result = runAnalysis(mappedRows, draftSettings);
       if (!result) {
         setError('Geen bruikbare rijen na normalisatie of filtering.');
         return;
@@ -303,6 +196,7 @@ export default function HomePage() {
       setAppliedMapping({ ...draftMapping });
       setAnalysisResult(result);
       setFinancialResult(null);
+      setFinancialPvAdviceCharts(null);
       setSelectedScenario(result.sizing.recommendedProduct?.capacityKwh ?? result.scenarios[0]?.capacityKwh ?? 64);
       setAnalyzedAt(new Date().toISOString());
     } finally {
@@ -313,6 +207,7 @@ export default function HomePage() {
   const updateVariablePricePeriod = (index: number, patch: Partial<PriceInterval>) => {
     setVariablePricePeriods((prev) => prev.map((period, periodIndex) => (periodIndex === index ? { ...period, ...patch } : period)));
     setFinancialResult(null);
+    setFinancialPvAdviceCharts(null);
   };
 
   const addVariablePricePeriod = () => {
@@ -328,16 +223,19 @@ export default function HomePage() {
       }
     ]);
     setFinancialResult(null);
+    setFinancialPvAdviceCharts(null);
   };
 
   const removeVariablePricePeriod = (index: number) => {
     setVariablePricePeriods((prev) => prev.filter((_, periodIndex) => periodIndex !== index));
     setFinancialResult(null);
+    setFinancialPvAdviceCharts(null);
   };
 
   const handlePriceFile = async (file: File) => {
     setError(null);
     try {
+      const { calculateAveragePriceValues, parsePriceFile } = await import('@/lib/pricing');
       const result = await parsePriceFile(file);
       const averagePrices = calculateAveragePriceValues(result.rows);
       setPriceIntervals(result.rows);
@@ -350,6 +248,7 @@ export default function HomePage() {
         pvFeedInCostEurPerKwh: averagePrices.feedInCostEurPerKwh ?? prev.pvFeedInCostEurPerKwh
       }));
       setFinancialResult(null);
+      setFinancialPvAdviceCharts(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Prijsbestand kon niet worden ingelezen');
     }
@@ -378,6 +277,11 @@ export default function HomePage() {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
+      const [{ attachPricesToIntervals }, { buildPvAdviceChartsData, computePvSelfConsumptionAdvice }] =
+        await Promise.all([
+          import('@/lib/pricing'),
+          import('@/lib/calculations')
+        ]);
       const effectivePriceIntervals =
         draftSettings.pvPricingMode === 'variable'
           ? variablePricePeriods.filter((period) => period.startTs && period.endTs)
@@ -408,6 +312,11 @@ export default function HomePage() {
         }
       });
       setFinancialResult(financialAdvice);
+      setFinancialPvAdviceCharts(
+        analysisResult.sizing.pvFormulaAdvice
+          ? buildPvAdviceChartsData(analysisResult.sizing.pvFormulaAdvice, analysisResult.intervals, financialAdvice)
+          : null
+      );
     } finally {
       setIsCalculatingFinancials(false);
     }
@@ -429,19 +338,37 @@ export default function HomePage() {
     }
 
     if (financialResult) {
-      return buildPvAdviceChartsData(
-        analysisResult.sizing.pvFormulaAdvice,
-        analysisResult.intervals,
-        financialResult
-      );
+      return financialPvAdviceCharts;
     }
 
     return analysisResult.pvAdviceCharts;
-  }, [analysisResult, financialResult]);
+  }, [analysisResult, financialResult, financialPvAdviceCharts]);
 
   const downloadReport = async () => {
     if (!analysisResult || !appliedSettings) return;
-    const reportScenarios = analysisResult.scenarios.map((scenario) => ({
+    let reportSizing = analysisResult.sizing;
+    let sourceScenarios = analysisResult.scenarios;
+    let reportPvAdviceCharts = analysisResult.pvAdviceCharts;
+
+    if (analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && financialResult) {
+      const { buildSizingResultFromPvSelfConsumptionAdvice, computePvStorageFormulaAdvice, toScenarioResult } =
+        await import('@/lib/calculations');
+      const formulaAdvice =
+        analysisResult.sizing.pvFormulaAdvice ??
+        computePvStorageFormulaAdvice(analysisResult.intervals, {
+          customerType: appliedSettings.pvCustomerType
+        });
+      reportSizing = buildSizingResultFromPvSelfConsumptionAdvice(formulaAdvice, financialResult);
+      sourceScenarios = financialResult.simulationAdvice.allScenarios.map((scenario) =>
+        toScenarioResult({
+          ...scenario,
+          optionLabel: `${scenario.capacityKwh} kWh / ${scenario.dischargePowerKw.toFixed(1)} kW`
+        })
+      );
+      reportPvAdviceCharts = financialPvAdviceCharts ?? analysisResult.pvAdviceCharts;
+    }
+
+    const reportScenarios = sourceScenarios.map((scenario) => ({
       optionLabel: scenario.optionLabel,
       capacityKwh: scenario.capacityKwh,
       exceedanceIntervalsBefore: scenario.exceedanceIntervalsBefore,
@@ -481,6 +408,9 @@ export default function HomePage() {
       yearlyCostsEur: scenario.yearlyCostsEur,
       netAnnualSavingsEur: scenario.netAnnualSavingsEur,
       paybackIndicative: scenario.paybackIndicative,
+      baselineEnergyCostEur: scenario.baselineEnergyCostEur,
+      batteryEnergyCostEur: scenario.batteryEnergyCostEur,
+      dynamicValueEur: scenario.dynamicValueEur,
       isEligible: scenario.isEligible,
       excludedReason: scenario.excludedReason,
       recommendationReason: scenario.recommendationReason,
@@ -502,14 +432,14 @@ export default function HomePage() {
       efficiency: appliedSettings.efficiency,
       safetyFactor: appliedSettings.safetyFactor,
       pvStrategy: appliedSettings.pvStrategy,
-      sizing: analysisResult.sizing,
+      sizing: reportSizing,
       quality: analysisResult.quality,
       topEvents: analysisResult.events,
       peakMoments: analysisResult.peakMoments,
       intervals: analysisResult.intervals,
       highestPeakDay: analysisResult.highestPeakDay,
       pvSummary: analysisResult.pvSummary,
-      pvAdviceCharts: analysisResult.pvAdviceCharts,
+      pvAdviceCharts: reportPvAdviceCharts,
       scenarios: reportScenarios
     };
 
@@ -537,6 +467,12 @@ export default function HomePage() {
 
   const downloadFinancialReport = async () => {
     if (!analysisResult || !appliedSettings || !financialResult || analysisResult.analysisType !== 'PV_SELF_CONSUMPTION') return;
+    const {
+      buildSizingResultFromPvSelfConsumptionAdvice,
+      buildPvAdviceChartsData,
+      computePvStorageFormulaAdvice,
+      toScenarioResult
+    } = await import('@/lib/calculations');
     const formulaAdvice = analysisResult.sizing.pvFormulaAdvice ?? computePvStorageFormulaAdvice(analysisResult.intervals, {
       customerType: appliedSettings.pvCustomerType
     });
@@ -566,7 +502,7 @@ export default function HomePage() {
       intervals: analysisResult.intervals,
       highestPeakDay: analysisResult.highestPeakDay,
       pvSummary: analysisResult.pvSummary,
-      pvAdviceCharts: buildPvAdviceChartsData(formulaAdvice, analysisResult.intervals, financialResult),
+      pvAdviceCharts: financialPvAdviceCharts ?? buildPvAdviceChartsData(formulaAdvice, analysisResult.intervals, financialResult),
       scenarios: reportScenarios
     };
 
