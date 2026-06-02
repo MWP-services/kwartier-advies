@@ -11,7 +11,8 @@ import { DataQualityPanel } from '@/components/DataQualityPanel';
 import { KpiCards } from '@/components/KpiCards';
 import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
-import type { PvAdviceChartsData, PvSelfConsumptionAdviceResult } from '@/lib/calculations';
+import type { PeakMoment, ProcessedInterval, PvAdviceChartsData, PvSelfConsumptionAdviceResult } from '@/lib/calculations';
+import { getLocalDayIso } from '@/lib/datetime';
 import type { ColumnMapping } from '@/lib/parsing';
 import type { PriceInterval } from '@/lib/pricing';
 
@@ -31,6 +32,47 @@ const ScenarioCharts = dynamic(() => import('@/components/ScenarioCharts').then(
 });
 
 const OUTLIER_KW_THRESHOLD = 5000;
+const REPORT_HISTOGRAM_SAMPLE_SIZE = 1200;
+
+function compactReportInterval(interval: ProcessedInterval): ProcessedInterval {
+  return {
+    timestamp: interval.timestamp,
+    consumptionKwh: interval.consumptionKwh,
+    exportKwh: interval.exportKwh,
+    pvKwh: interval.pvKwh,
+    consumptionKw: interval.consumptionKw,
+    excessKw: interval.excessKw,
+    excessKwh: interval.excessKwh
+  };
+}
+
+function selectReportIntervals(intervals: ProcessedInterval[], highestPeakDay: string | null): ProcessedInterval[] {
+  if (intervals.length <= REPORT_HISTOGRAM_SAMPLE_SIZE) {
+    return intervals.map(compactReportInterval);
+  }
+
+  const selectedDayIntervals = highestPeakDay
+    ? intervals.filter((interval) => getLocalDayIso(interval.timestamp, 'Europe/Amsterdam') === highestPeakDay)
+    : [];
+  const sampledIntervals = intervals.filter(
+    (_, index) => index % Math.ceil(intervals.length / REPORT_HISTOGRAM_SAMPLE_SIZE) === 0
+  );
+
+  const byTimestamp = new Map<string, ProcessedInterval>();
+  [...selectedDayIntervals, ...sampledIntervals].forEach((interval) => {
+    byTimestamp.set(interval.timestamp, compactReportInterval(interval));
+  });
+
+  return [...byTimestamp.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+}
+
+function selectReportPeakMoments(peakMoments: PeakMoment[], highestPeakDay: string | null): PeakMoment[] {
+  if (!highestPeakDay) return peakMoments.slice(0, 500);
+  const selectedDayMoments = peakMoments.filter(
+    (moment) => getLocalDayIso(moment.timestamp, 'Europe/Amsterdam') === highestPeakDay
+  );
+  return selectedDayMoments.length > 0 ? selectedDayMoments : peakMoments.slice(0, 500);
+}
 
 function mappingEqual(a: ColumnMapping | null, b: ColumnMapping): boolean {
   if (!a) return false;
@@ -349,6 +391,13 @@ export default function HomePage() {
     let reportSizing = analysisResult.sizing;
     let sourceScenarios = analysisResult.scenarios;
     let reportPvAdviceCharts = analysisResult.pvAdviceCharts;
+    const includePeakReportData = analysisResult.analysisType !== 'PV_SELF_CONSUMPTION';
+    const reportIntervals = includePeakReportData
+      ? selectReportIntervals(analysisResult.intervals, analysisResult.highestPeakDay)
+      : [];
+    const reportPeakMoments = includePeakReportData
+      ? selectReportPeakMoments(analysisResult.peakMoments, analysisResult.highestPeakDay)
+      : [];
 
     if (analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && financialResult) {
       const { buildSizingResultFromPvSelfConsumptionAdvice, computePvStorageFormulaAdvice, toScenarioResult } =
@@ -435,8 +484,8 @@ export default function HomePage() {
       sizing: reportSizing,
       quality: analysisResult.quality,
       topEvents: analysisResult.events,
-      peakMoments: analysisResult.peakMoments,
-      intervals: analysisResult.intervals,
+      peakMoments: reportPeakMoments,
+      intervals: reportIntervals,
       highestPeakDay: analysisResult.highestPeakDay,
       pvSummary: analysisResult.pvSummary,
       pvAdviceCharts: reportPvAdviceCharts,
@@ -498,8 +547,8 @@ export default function HomePage() {
       sizing,
       quality: analysisResult.quality,
       topEvents: analysisResult.events,
-      peakMoments: analysisResult.peakMoments,
-      intervals: analysisResult.intervals,
+      peakMoments: [],
+      intervals: [],
       highestPeakDay: analysisResult.highestPeakDay,
       pvSummary: analysisResult.pvSummary,
       pvAdviceCharts: financialPvAdviceCharts ?? buildPvAdviceChartsData(formulaAdvice, analysisResult.intervals, financialResult),
