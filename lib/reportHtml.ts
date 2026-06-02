@@ -278,7 +278,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
 </head>
 <body>
   <div class="page">
-    <section class="header">
+    <section class="hero">
       <div class="logoWrap">
         ${
           embeddedLogoSrc
@@ -289,9 +289,9 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
       </div>
       <div class="brand">
         <h1>${pvSummary.strategy === 'PV_WITH_TRADING' ? 'PV + Trading Rapport' : 'PV Self Consumption Rapport'}</h1>
-        <p>ENERGIEOPLOSSINGEN</p>
+        <p>Slimme opslagcapaciteit voor meer eigen verbruik, lagere netafname en toekomstbestendige energiecontrole.</p>
       </div>
-      <div>
+      <div class="advice-card">
         <div class="pill">${pvSummary.strategy === 'PV_WITH_TRADING' ? 'PV + trading' : 'PV analyse'}</div>
         <div class="muted" style="margin-top:8px;">${pvSummary.strategy === 'PV_WITH_TRADING' ? 'Trading van opgeslagen PV toegestaan' : `Self-consumption doel: ${(payload.compliance * 100).toFixed(0)}%`}</div>
       </div>
@@ -350,7 +350,8 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
         </div>
       </div>
       <div class="card">
-        <h3>Productsheet aanbevolen batterij</h3>
+        <h2 class="section-title">Aanbevolen batterijconfiguratie</h2>
+        <p class="section-intro">De productsheet hoort bij de aanbevolen batterij of bij de modulaire basisvariant van deze configuratie.</p>
         ${
           brochure
             ? brochure.dataUri.startsWith('data:application/pdf')
@@ -406,7 +407,8 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
         </table>
       </div>
       <div class="card">
-        <h3>Datakwaliteit</h3>
+        <h2 class="section-title">Datakwaliteit</h2>
+        <p class="section-intro">De kwaliteit van de kwartierdata bepaalt hoe robuust het advies kan worden geinterpreteerd.</p>
         <table>
           <tbody>
             <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
@@ -416,6 +418,19 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
             <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Vervolgstappen</h2>
+      <p class="section-intro">Na akkoord op de richting van het advies volgen de technische en commerciele controles richting realisatie.</p>
+      <div class="steps">
+        <div class="step"><div class="step-number">1</div><div class="step-title">Controle netaansluiting</div></div>
+        <div class="step"><div class="step-number">2</div><div class="step-title">Controle omvormer en EMS-integratie</div></div>
+        <div class="step"><div class="step-number">3</div><div class="step-title">Bevestigen tariefstructuur en businesscase</div></div>
+        <div class="step"><div class="step-number">4</div><div class="step-title">Definitieve offerte</div></div>
+        <div class="step"><div class="step-number">5</div><div class="step-title">Installatieplanning</div></div>
+        <div class="step"><div class="step-number">6</div><div class="step-title">Monitoring na oplevering</div></div>
       </div>
     </section>
 
@@ -614,13 +629,27 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
       ]
     : [];
   const kpiCards = [
-    ['Totale netafname', `${(formulaAdvice?.totals.totalImportKwh ?? 0).toFixed(2)} kWh`],
-    ['Totale teruglevering', `${(formulaAdvice?.totals.totalExportKwh ?? 0).toFixed(2)} kWh`],
-    ['P50 / P75 / P90', formulaAdvice ? `${formulaAdvice.percentiles.p50StorageNeedKwh.toFixed(1)} / ${formulaAdvice.percentiles.p75StorageNeedKwh.toFixed(1)} / ${formulaAdvice.percentiles.p90StorageNeedKwh.toFixed(1)} kWh` : '-'],
-    ['Aanbevolen batterij', `${recommendedScenario?.capacityKwh ?? payload.sizing.kWhNeeded} kWh`],
-    ['Prijsmodus', pricingMode === 'dynamic' ? 'Dynamische prijzen' : 'Gemiddelde tarieven'],
-    ['Jaarlijkse waarde', recommendedScenario?.annualValueEur != null ? `EUR ${recommendedScenario.annualValueEur.toFixed(2)}` : 'Niet berekend']
+    ['Aanbevolen batterij', payload.sizing.recommendedProduct?.label ?? `${recommendedScenario?.capacityKwh ?? payload.sizing.kWhNeeded} kWh`],
+    ['Importreductie per jaar', recommendedScenario ? `${Math.round(recommendedScenario.importReductionKwhAnnualized).toLocaleString('nl-NL')} kWh/jaar` : '-'],
+    ['Exportreductie per jaar', recommendedScenario ? `${Math.round(recommendedScenario.exportReductionKwhAnnualized).toLocaleString('nl-NL')} kWh/jaar` : '-'],
+    ['Kwartiermetingen', payload.quality.rows.toLocaleString('nl-NL')],
+    ['Cycli per jaar', recommendedScenario ? recommendedScenario.cyclesPerYear.toFixed(1) : '-'],
+    ['Simulatieperiode', `${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}`]
   ];
+  const scenarioCards = [
+    { label: 'Conservatief', scenario: hybridAdvice?.simulationAdvice.conservative, tone: 'muted' },
+    { label: 'Aanbevolen', scenario: hybridAdvice?.simulationAdvice.recommended, tone: 'recommended' },
+    { label: 'Ruim', scenario: hybridAdvice?.simulationAdvice.spacious, tone: 'muted' }
+  ].filter((item) => item.scenario != null);
+  const recommendedProductLabel = payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie';
+  const recommendedCapacityText =
+    payload.sizing.recommendedProduct != null
+      ? `${payload.sizing.recommendedProduct.capacityKwh} kWh`
+      : `${payload.sizing.kWhNeeded.toFixed(2)} kWh`;
+  const recommendedPowerText =
+    payload.sizing.recommendedProduct != null
+      ? `${payload.sizing.recommendedProduct.powerKw} kW`
+      : `${payload.sizing.kWNeeded.toFixed(2)} kW`;
 
   return `<!doctype html>
 <html lang="nl">
@@ -630,36 +659,201 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
   <title>${isFinancialReport ? 'WattsNext Onderbouwing Terugverdientijd' : 'WattsNext PV Opslag Rapport'}</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
-    :root { --bg:#fff; --text:#232323; --muted:#8D8D8D; --green:#4E8D3E; --green-dark:#3B812B; --border:#E6E6E6; --header-row:#EEF7EA; --callout:#F7F9F7; --zebra:#FAFAFA; }
-    * { box-sizing:border-box; }
-    body { margin:0; font-family:Inter, Arial, Calibri, sans-serif; color:var(--text); background:var(--bg); line-height:1.45; }
-    .page { max-width:1200px; margin:0 auto; padding:24px; }
-    .header,.card { background:var(--bg); border:1px solid var(--border); border-radius:14px; box-shadow:0 6px 16px rgba(0,0,0,.05); }
-    .header { padding:14px 18px 12px; display:grid; grid-template-columns:230px 1fr auto; gap:14px; align-items:center; position:relative; }
-    .header::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--green); border-bottom-left-radius:14px; border-bottom-right-radius:14px; }
-    .logoWrap { width:220px; min-height:52px; display:flex; align-items:center; justify-content:center; padding:6px 8px; border:1px solid #5f8e52; border-radius:10px; background:linear-gradient(135deg,#2f5f33 0%,#3b7a3c 58%,#5a9b4a 100%); }
-    .logoWrap img { max-width:204px; max-height:52px; }
-    .logoFallback { display:none; color:#fff; font-weight:700; }
-    .brand h1,.card h3 { margin:0; }
-    .brand p { margin:6px 0 0; color:var(--muted); font-size:10px; letter-spacing:.18em; text-transform:uppercase; }
-    .pill { display:inline-block; padding:5px 9px; border-radius:999px; background:rgba(78,141,62,.16); color:var(--green-dark); font-weight:700; font-size:9.5px; }
-    .grid { display:grid; gap:16px; margin-top:16px; }
-    .grid.kpis { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
-    .grid.two { grid-template-columns:1.2fr 1fr; }
-    .card { padding:14px; }
-    .kpi-label { color:var(--muted); font-size:9.5px; }
-    .kpi-value { margin-top:4px; font-weight:700; font-size:12px; color:var(--text); }
-    .plot { width:100%; height:320px; }
-    .brochureFrame { width:100%; height:420px; border:1px solid var(--border); border-radius:10px; background:#fff; }
-    table { width:100%; border-collapse:separate; border-spacing:0; font-size:11px; color:var(--text); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
-    th,td { border-bottom:1px solid var(--border); padding:9px 10px; text-align:left; vertical-align:top; }
-    th { background:var(--header-row); font-weight:600; border-bottom:1px solid var(--green); }
-    tbody tr:nth-child(even) td { background:var(--zebra); }
-    tbody tr:last-child td { border-bottom:none; }
-    .muted { color:var(--muted); font-size:9.5px; line-height:1.35; margin-top:6px; }
-    .callout { background:var(--callout); border-left:5px solid var(--green); border-radius:8px; padding:10px 12px; margin-top:10px; font-size:10.5px; }
-    .footer { margin-top:18px; padding-top:8px; border-top:1px solid #EDEDED; display:flex; justify-content:space-between; gap:12px; color:var(--muted); font-size:9px; }
-    @media (max-width:900px) { .grid.two { grid-template-columns:1fr; } .header { grid-template-columns:auto 1fr; } }
+    :root {
+      --wn-green: #4E8D3E;
+      --wn-green-dark: #2F5F33;
+      --wn-green-soft: #EEF7EA;
+      --wn-bg: #F7F9F5;
+      --wn-card: #FFFFFF;
+      --wn-text: #232323;
+      --wn-muted: #7A7F78;
+      --wn-border: #E4E9E1;
+      --wn-warning: #F5B83D;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, Calibri, sans-serif;
+      color: var(--wn-text);
+      background: var(--wn-bg);
+      line-height: 1.5;
+    }
+    .page { max-width: 1180px; margin: 0 auto; padding: 28px; }
+    .header {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr) minmax(300px, .72fr);
+      gap: 28px;
+      align-items: stretch;
+      overflow: hidden;
+      border-radius: 28px;
+      padding: 34px;
+      background:
+        radial-gradient(circle at 90% 10%, rgba(255,255,255,.18), transparent 28%),
+        linear-gradient(135deg, var(--wn-green-dark) 0%, #3D7C37 58%, var(--wn-green) 100%);
+      color: #fff;
+      box-shadow: 0 24px 60px rgba(47,95,51,.22);
+    }
+    .brand { align-self: center; }
+    .brand h1 { margin: 0; font-size: 38px; line-height: 1.08; letter-spacing: 0; }
+    .brand p { max-width: 680px; margin: 14px 0 0; color: rgba(255,255,255,.86); font-size: 16px; }
+    .hero {
+      overflow: hidden;
+      border-radius: 28px;
+      background:
+        radial-gradient(circle at 90% 10%, rgba(255,255,255,.18), transparent 28%),
+        linear-gradient(135deg, var(--wn-green-dark) 0%, #3D7C37 58%, var(--wn-green) 100%);
+      color: #fff;
+      box-shadow: 0 24px 60px rgba(47,95,51,.22);
+    }
+    .hero-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr);
+      gap: 28px;
+      align-items: stretch;
+      padding: 34px;
+    }
+    .logoWrap {
+      width: 210px;
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 7px 10px;
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 14px;
+      background: rgba(255,255,255,.12);
+    }
+    .logoWrap img { max-width: 190px; max-height: 48px; }
+    .logoFallback { display: none; color: #fff; font-weight: 700; }
+    .eyebrow {
+      margin-top: 28px;
+      color: rgba(255,255,255,.78);
+      font-size: 10px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    h1 { margin: 8px 0 0; font-size: 38px; line-height: 1.08; letter-spacing: 0; }
+    .hero-subtitle { max-width: 720px; margin: 14px 0 0; color: rgba(255,255,255,.86); font-size: 16px; }
+    .advice-card {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 260px;
+      padding: 24px;
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 24px;
+      background: rgba(255,255,255,.13);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.16);
+      backdrop-filter: blur(6px);
+    }
+    .advice-label {
+      width: fit-content;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.18);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .advice-title { margin-top: 18px; font-size: 24px; line-height: 1.18; font-weight: 800; }
+    .advice-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 22px; }
+    .advice-metric { border-top: 1px solid rgba(255,255,255,.24); padding-top: 12px; }
+    .advice-metric span { display: block; color: rgba(255,255,255,.7); font-size: 10px; }
+    .advice-metric strong { display: block; margin-top: 3px; font-size: 18px; }
+    .grid { display: grid; gap: 18px; margin-top: 18px; }
+    .grid.kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .grid.two { grid-template-columns: minmax(0, 1.18fr) minmax(320px, .82fr); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      background: var(--wn-card);
+      border: 1px solid var(--wn-border);
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: 0 14px 36px rgba(47,95,51,.08);
+    }
+    .section-title { margin: 0 0 6px; font-size: 20px; line-height: 1.2; color: var(--wn-text); }
+    .section-intro { margin: 0 0 16px; color: var(--wn-muted); font-size: 12.5px; }
+    .kpi-card { min-height: 112px; padding: 18px; }
+    .kpi-label { color: var(--wn-muted); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .kpi-value { margin-top: 10px; font-weight: 800; font-size: 16px; color: var(--wn-text); line-height: 1.25; }
+    .plot { width: 100%; height: 330px; }
+    .plot.tall { height: 380px; }
+    .brochureFrame { width: 100%; height: 420px; border: 1px solid var(--wn-border); border-radius: 16px; background: #fff; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11.5px; color: var(--wn-text); overflow: hidden; border-radius: 14px; border: 1px solid var(--wn-border); }
+    th, td { border-bottom: 1px solid var(--wn-border); padding: 12px 14px; text-align: left; vertical-align: top; }
+    th { background: var(--wn-green-soft); color: var(--wn-green-dark); font-weight: 800; }
+    td strong, tbody tr td:nth-child(2) { font-weight: 700; }
+    tbody tr:nth-child(even) td { background: #FBFCFA; }
+    tbody tr:last-child td { border-bottom: none; }
+    .muted { color: var(--wn-muted); font-size: 10.5px; line-height: 1.45; margin-top: 8px; }
+    .callout {
+      background: var(--wn-green-soft);
+      border: 1px solid #D6E8D0;
+      border-left: 5px solid var(--wn-green);
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin-top: 14px;
+      font-size: 12px;
+      color: #315536;
+    }
+    .warning {
+      background: #FFF8E8;
+      border-color: #F6E4B5;
+      border-left-color: var(--wn-warning);
+      color: #594214;
+    }
+    .scenario-card { position: relative; min-height: 185px; }
+    .scenario-card.recommended {
+      border-color: rgba(78,141,62,.45);
+      box-shadow: 0 18px 44px rgba(78,141,62,.18);
+      transform: translateY(-4px);
+    }
+    .scenario-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--wn-green-soft);
+      color: var(--wn-green-dark);
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .scenario-card.recommended .scenario-pill { background: var(--wn-green); color: #fff; }
+    .scenario-title { margin: 14px 0 4px; font-size: 22px; font-weight: 800; color: var(--wn-green-dark); }
+    .scenario-list { display: grid; gap: 8px; margin-top: 14px; color: var(--wn-muted); font-size: 11px; }
+    .conclusion-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+    .conclusion-item { border-radius: 16px; background: rgba(255,255,255,.72); padding: 14px; }
+    .conclusion-item strong { display: block; margin-bottom: 6px; color: var(--wn-green-dark); }
+    .steps { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+    .step { position: relative; min-height: 118px; border: 1px solid var(--wn-border); border-radius: 16px; padding: 14px; background: #fff; }
+    .step-number { width: 28px; height: 28px; border-radius: 999px; display: grid; place-items: center; background: var(--wn-green); color: #fff; font-weight: 800; font-size: 12px; }
+    .step-title { margin-top: 12px; font-size: 12px; font-weight: 800; color: var(--wn-green-dark); }
+    .footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--wn-border); display: flex; justify-content: space-between; gap: 12px; color: var(--wn-muted); font-size: 10px; }
+    @media (max-width: 980px) {
+      .hero-inner, .grid.two, .grid.three { grid-template-columns: 1fr; }
+      .grid.kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .steps, .conclusion-grid { grid-template-columns: 1fr 1fr; }
+      h1 { font-size: 30px; }
+    }
+    @media print {
+      body { background: #fff; }
+      .page { max-width: none; padding: 14mm; }
+      .hero { box-shadow: none; border-radius: 18px; }
+      .hero-inner { padding: 20px; grid-template-columns: 1.1fr .9fr; }
+      h1 { font-size: 26px; }
+      .card, .kpi-card, .scenario-card, .step { box-shadow: none; page-break-inside: avoid; break-inside: avoid; }
+      .grid { gap: 12px; margin-top: 12px; }
+      .plot { height: 260px; }
+      .brochureFrame { height: 320px; }
+      table, .plot { page-break-inside: avoid; break-inside: avoid; }
+      .footer { display: flex; }
+    }
   </style>
 </head>
 <body>
@@ -669,22 +863,28 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         ${embeddedLogoSrc ? `<img src="${embeddedLogoSrc}" alt="WattsNext logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" /><div class="logoFallback">WattsNext</div>` : `<div class="logoFallback" style="display:block;">WattsNext</div>`}
       </div>
       <div class="brand">
-        <h1>${isFinancialReport ? 'Onderbouwing Terugverdientijd' : 'PV Self Consumption Rapport'}</h1>
-        <p>ENERGIEOPLOSSINGEN</p>
+        <h1>Batterijadvies op basis van kwartierdata</h1>
+        <p>Slimme opslagcapaciteit voor meer eigen verbruik, lagere netafname en toekomstbestendige energiecontrole.</p>
       </div>
-      <div>
-        <div class="pill">${hybridAdvice?.usedCustomerType ?? formulaAdvice?.usedCustomerType ?? 'PV analyse'}</div>
+      <div class="advice-card">
+        <div class="advice-label">${recommendedScenario ? 'Beste balans' : 'Aanbevolen configuratie'}</div>
+        <div class="advice-title">${recommendedProductLabel}</div>
+        <div class="advice-metrics">
+          <div class="advice-metric"><span>Totale opslagcapaciteit</span><strong>${recommendedCapacityText}</strong></div>
+          <div class="advice-metric"><span>Vermogen</span><strong>${recommendedPowerText}</strong></div>
+        </div>
         <div class="muted" style="margin-top:8px;">${isFinancialReport ? 'Financiële doorrekening op basis van bestaand technisch advies' : 'Formulebasis plus kwartiersimulatie'}</div>
       </div>
     </section>
 
     <section class="grid kpis">
-      ${kpiCards.map(([label, value]) => `<div class="card"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div></div>`).join('')}
+      ${kpiCards.map(([label, value]) => `<div class="card kpi-card"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div></div>`).join('')}
     </section>
 
     <section class="grid two">
       <div class="card">
-        <h3>${isFinancialReport ? '1. Samenvatting terugverdientijd' : '1. Samenvatting batterijadvies'}</h3>
+        <h2 class="section-title">Managementsamenvatting</h2>
+        <p class="section-intro">Het advies combineert historische kwartierdata met een simulatie van batterijgedrag. De uitkomst hieronder is bedoeld als praktisch batterijadvies voor dimensionering en vervolgbesluitvorming.</p>
         <table><tbody>
           <tr><th>Aanbevolen configuratie</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
           <tr><th>Benodigde capaciteit</th><td>${payload.sizing.kWhNeeded.toFixed(2)} kWh</td></tr>
@@ -727,22 +927,54 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
               : ''
           }
         </div>
+        ${!hasFinancialValueData ? `<div class="callout warning">De technische configuratie is gebaseerd op historische kwartierdata. De definitieve businesscase moet worden bevestigd met actuele tarieven, investeringskosten, terugleververgoeding, EMS-instellingen en technische aansluitvoorwaarden.</div>` : ''}
       </div>
       <div class="card">
-        <h3>Productsheet aanbevolen batterij</h3>
+        <h2 class="section-title">Aanbevolen batterijconfiguratie</h2>
+        <p class="section-intro">De productsheet hoort bij de aanbevolen batterij of bij de modulaire basisvariant van deze configuratie.</p>
         ${brochure ? (brochure.dataUri.startsWith('data:application/pdf') ? `<object class="brochureFrame" data="${brochure.dataUri}#page=1&zoom=page-width" type="application/pdf"></object>` : `<img class="brochureFrame" src="${brochure.dataUri}" alt="Productsheet batterij ${brochure.key}" style="object-fit:contain;" />`) : `<div class="callout">Productsheet niet gevonden in assets-map.</div>`}
       </div>
     </section>
 
+    <section class="card">
+      <h2 class="section-title">Waarom dit advies?</h2>
+      <p class="section-intro">De aanbevolen configuratie is gekozen omdat deze in de simulatie de beste balans geeft tussen bruikbare opslagcapaciteit, importreductie, exportreductie, cycli en praktische inzetbaarheid.</p>
+      <div class="conclusion-grid">
+        <div class="conclusion-item"><strong>Waarom deze batterij?</strong><span>${recommendedScenario?.recommendationReason ?? 'Deze configuratie sluit het beste aan op het gemeten kwartierprofiel en de praktische opslagbehoefte.'}</span></div>
+        <div class="conclusion-item"><strong>Waarom kleiner minder geschikt is</strong><span>Een kleinere batterij kan minder zonne-overschot of verbruikspieken verschuiven en benut daardoor minder van het beschikbare profiel.</span></div>
+        <div class="conclusion-item"><strong>Waarom groter niet altijd beter is</strong><span>Bij grotere batterijen vlakt de meeropbrengst per extra kWh af. Extra capaciteit levert dan relatief minder extra waarde op.</span></div>
+      </div>
+    </section>
+
+    ${scenarioCards.length > 0 ? `<section class="grid three">
+      ${scenarioCards
+        .map(
+          (item) => `
+      <div class="card scenario-card ${item.tone === 'recommended' ? 'recommended' : ''}">
+        <div class="scenario-pill">${item.tone === 'recommended' ? 'Aanbevolen' : item.label}</div>
+        <div class="scenario-title">${item.scenario?.capacityKwh ?? '-'} kWh</div>
+        <div class="muted">${item.scenario?.optionLabel ?? ''}</div>
+        <div class="scenario-list">
+          <div>Importreductie: <strong>${item.scenario ? Math.round(item.scenario.importReductionKwhAnnualized).toLocaleString('nl-NL') : '-'} kWh/jaar</strong></div>
+          <div>Exportreductie: <strong>${item.scenario ? Math.round(item.scenario.exportReductionKwhAnnualized).toLocaleString('nl-NL') : '-'} kWh/jaar</strong></div>
+          <div>Cycli: <strong>${item.scenario ? item.scenario.cyclesPerYear.toFixed(1) : '-'}</strong></div>
+        </div>
+      </div>`
+        )
+        .join('')}
+    </section>` : ''}
+
     <section class="grid two">
       <div class="card">
-        <h3>2. Formulematige basis: P50 / P75 / P90</h3>
+        <h2 class="section-title">Analyse van kwartierdata</h2>
+        <p class="section-intro">De dagelijkse opslagbehoefte laat zien hoeveel energie praktisch verschoven kan worden binnen het gemeten profiel.</p>
         <div id="pv-daily-storage-chart" class="plot"></div>
         <div class="muted">X-as: datum per dag. Y-as: nuttige opslagbehoefte in kWh per dag.</div>
         <div class="callout">Deze grafiek laat zien hoeveel zonne-overschot later op de dag of nacht nuttig gebruikt kan worden. De P50-, P75- en P90-lijnen vormen de formulematige basis van het advies.</div>
       </div>
       <div class="card">
-        <h3>3. Scenariovergelijking</h3>
+        <h2 class="section-title">Scenariovergelijking</h2>
+        <p class="section-intro">De scenario's tonen het effect van verschillende batterijgroottes op importreductie, exportreductie en eventuele jaarlijkse waarde.</p>
         <div id="pv-scenario-comparison-chart" class="plot"></div>
         <div class="muted">X-as: batterijopties. Linker Y-as: kWh per jaar. Rechter Y-as: euro per jaar.</div>
         <div class="callout">Per batterijoptie zie je capaciteit, vermogen, importreductie, exportreductie, cycli en jaarlijkse waarde. Dit onderbouwt waarom de aanbevolen batterij is gekozen.</div>
@@ -753,7 +985,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
       hasFinancialValueData
         ? `<section class="grid two">
       <div class="card">
-        <h3>4. Opbouw jaarlijkse waarde</h3>
+        <h2 class="section-title">Opbouw jaarlijkse waarde</h2>
         <table>
           <thead>
             <tr>
@@ -778,7 +1010,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         <div class="callout">De jaarlijkse waarde is de netto economische bijdrage van de aanbevolen batterij in de gekozen prijsmodus. Positieve componenten verhogen de waarde; negatieve componenten verlagen die.</div>
       </div>
       <div class="card">
-        <h3>Waardecomponenten aanbevolen batterij</h3>
+        <h2 class="section-title">Waardecomponenten aanbevolen batterij</h2>
         <div id="pv-value-breakdown-chart" class="plot"></div>
         <div class="muted">Y-as: euro. De laatste balk is de netto jaarlijkse waarde die in het advies wordt gebruikt.</div>
         <div class="callout">Deze grafiek maakt zichtbaar of de waarde vooral uit vermeden importkosten, lagere energiekosten per interval of kostenposten komt.</div>
@@ -789,13 +1021,15 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>${hasFinancialValueData ? '5' : '4'}. Teruglevering versus avond/nachtverbruik</h3>
+        <h2 class="section-title">Effect voor en na batterij</h2>
+        <p class="section-intro">Deze grafiek vergelijkt teruglevering met avond- en nachtverbruik, zodat zichtbaar wordt welk deel praktisch kan worden opgeslagen.</p>
         <div id="pv-export-night-chart" class="plot"></div>
         <div class="muted">X-as: datum per dag. Y-as: energie in kWh per dag.</div>
         <div class="callout">Deze grafiek vergelijkt per dag hoeveel zonne-overschot beschikbaar is met hoeveel avond- en nachtverbruik daar praktisch tegenover staat.</div>
       </div>
       <div class="card">
-        <h3>Datakwaliteit</h3>
+        <h2 class="section-title">Datakwaliteit</h2>
+        <p class="section-intro">De kwaliteit van de kwartierdata bepaalt hoe robuust het advies kan worden geinterpreteerd.</p>
         <table><tbody>
           <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
           <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
@@ -807,15 +1041,17 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
       </div>
     </section>
 
-    <section class="grid two" style="display:none;">
-      <div class="card" style="display:none;">
-        <h3>5. Impact vóór/na batterij</h3>
-        <div id="pv-impact-chart" class="plot" style="display:none;"></div>
+    <section class="grid two">
+      <div class="card">
+        <h2 class="section-title">Impact voor en na batterij</h2>
+        <p class="section-intro">Een compacte vergelijking van import en export in de situatie zonder batterij en met de aanbevolen batterij.</p>
+        <div id="pv-impact-chart" class="plot"></div>
         <div class="muted">X-as: import en export vóór en na de aanbevolen batterij. Y-as: energie in kWh.</div>
         <div class="callout">Deze vergelijking laat direct zien hoeveel netafname en teruglevering de aanbevolen batterij in de simulatie verschuift.</div>
       </div>
-      <div class="card" style="display:none;">
-        <h3>Datakwaliteit</h3>
+      <div class="card">
+        <h2 class="section-title">Aannames en aandachtspunten</h2>
+        <p class="section-intro">Deze uitgangspunten helpen om het advies goed te plaatsen bij offerte, techniek en implementatie.</p>
         <table><tbody>
           <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
           <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
@@ -831,13 +1067,13 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
       isFinancialReport && pricingMode === 'dynamic'
         ? `<section class="grid two">
       <div class="card">
-        <h3>Financiële impact per batterijgrootte</h3>
+        <h2 class="section-title">Financiele impact per batterijgrootte</h2>
         <div id="pv-annual-value-chart" class="plot"></div>
         <div class="muted">X-as: batterijgrootte in kWh. Y-as: jaarlijkse waarde in euro.</div>
         <div class="callout">Hier zie je hoe de jaarlijkse waarde verandert per batterijgrootte op basis van gekoppelde dynamische prijzen.</div>
       </div>
       <div class="card">
-        <h3>Kosten voor en na aanbevolen batterij</h3>
+        <h2 class="section-title">Kosten voor en na aanbevolen batterij</h2>
         <div id="pv-cost-chart" class="plot"></div>
         <div class="muted">X-as: kosten zonder batterij, met batterij en netto waarde. Y-as: euro.</div>
         <div class="callout">Deze vergelijking laat zien wat de aanbevolen batterij financieel verandert over de geanalyseerde periode.</div>
@@ -846,13 +1082,13 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
 
     <section class="grid two">
       <div class="card">
-        <h3>Waarde per maand</h3>
+        <h2 class="section-title">Waarde per maand</h2>
         <div id="pv-monthly-value-chart" class="plot"></div>
         <div class="muted">X-as: maand. Linker Y-as: kosten in euro. Rechter Y-as: netto waarde in euro.</div>
         <div class="callout">Zo wordt zichtbaar in welke maanden de batterij financieel de meeste waarde toevoegt.</div>
       </div>
       <div class="card">
-        <h3>Voorbeelddag: prijs en batterij-SOC</h3>
+        <h2 class="section-title">Voorbeelddag: prijs en batterij-SOC</h2>
         <div id="pv-price-soc-chart" class="plot"></div>
         <div class="muted">X-as: kwartieren binnen een representatieve dag. Linker Y-as: prijs in EUR/kWh. Rechter Y-as: batterijlading in kWh.</div>
         <div class="callout">Deze grafiek combineert prijsniveaus met batterijlading op een representatieve dag, zonder actieve netstroomhandel.</div>
@@ -862,14 +1098,15 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
     }
 
     <section class="grid two">
-      <div class="card" style="display:none;">
-        <h3>5. Voorbeelddag met batterij-SOC</h3>
+      <div class="card">
+        <h2 class="section-title">Voorbeelddag met batterij-SOC</h2>
+        <p class="section-intro">De voorbeelddag laat zien hoe de batterij in de simulatie laadt en ontlaadt binnen het profiel.</p>
         <div id="pv-example-day-chart" class="plot"></div>
         <div class="muted">X-as: kwartieren binnen een representatieve dag. Linker Y-as: import en export in kWh per kwartier. Rechter Y-as: batterijlading in kWh.</div>
         <div class="callout">Deze grafiek laat zien hoe de aanbevolen batterij overdag laadt op zonne-overschot en later ontlaadt om eigen verbruik te ondersteunen.</div>
       </div>
       <div class="card">
-        <h3>5. Conclusie en advies</h3>
+        <h2 class="section-title">Conclusie en advies</h2>
         <table><tbody>
           <tr><th>Aanbevolen batterij</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
           <tr><th>Waarom gekozen</th><td>${recommendedScenario?.recommendationReason ?? 'Beste balans tussen praktische opslag, benutting en waarde.'}</td></tr>
@@ -877,6 +1114,19 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
           <tr><th>Zelfstandig te begrijpen</th><td>Dit rapport combineert de formulematige basis met kwartiersimulatie, zodat een klant zonder applicatie kan volgen waarom de aanbevolen batterij is gekozen.</td></tr>
         </tbody></table>
         ${(hybridAdvice?.warnings.length ?? 0) > 0 ? `<div class="callout">${hybridAdvice?.warnings.join('<br />')}</div>` : ''}
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Vervolgstappen</h2>
+      <p class="section-intro">Na akkoord op de richting van het advies volgen de technische en commerciele controles richting realisatie.</p>
+      <div class="steps">
+        <div class="step"><div class="step-number">1</div><div class="step-title">Controle netaansluiting</div></div>
+        <div class="step"><div class="step-number">2</div><div class="step-title">Controle omvormer en EMS-integratie</div></div>
+        <div class="step"><div class="step-number">3</div><div class="step-title">Bevestigen tariefstructuur en businesscase</div></div>
+        <div class="step"><div class="step-number">4</div><div class="step-title">Definitieve offerte</div></div>
+        <div class="step"><div class="step-number">5</div><div class="step-title">Installatieplanning</div></div>
+        <div class="step"><div class="step-number">6</div><div class="step-title">Monitoring na oplevering</div></div>
       </div>
     </section>
 
@@ -895,19 +1145,19 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
 
     if (pvCharts?.dailyStorageChart?.length) {
       const dailyStorageTraces = [
-        { type: 'bar', name: 'Dagelijkse opslagbehoefte', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.dailyStorageNeedKwh), marker: { color: '#0ea5e9' } },
-        { type: 'scatter', mode: 'lines', name: 'P50', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p50), line: { color: '#64748b', dash: 'dot' } },
-        { type: 'scatter', mode: 'lines', name: 'P75', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p75), line: { color: '#16a34a', dash: 'dot' } },
-        { type: 'scatter', mode: 'lines', name: 'P90', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p90), line: { color: '#f97316', dash: 'dot' } }
+        { type: 'bar', name: 'Dagelijkse opslagbehoefte', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.dailyStorageNeedKwh), marker: { color: '#4E8D3E' } },
+        { type: 'scatter', mode: 'lines', name: 'P50', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p50), line: { color: '#7A7F78', dash: 'dot' } },
+        { type: 'scatter', mode: 'lines', name: 'P75', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p75), line: { color: '#2F5F33', dash: 'dot' } },
+        { type: 'scatter', mode: 'lines', name: 'P90', x: pvCharts.dailyStorageChart.map(d => d.date), y: pvCharts.dailyStorageChart.map(d => d.p90), line: { color: '#F5B83D', dash: 'dot' } }
       ];
       Plotly.newPlot('pv-daily-storage-chart', dailyStorageTraces, { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20 }, yaxis: { title: 'kWh per dag' } }, { responsive: true, displaylogo: false });
     }
 
     if (pvCharts?.exportVsNightImportChart?.length) {
       Plotly.newPlot('pv-export-night-chart', [
-        { type: 'bar', name: 'Teruglevering', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyExportKwh), marker: { color: '#f59e0b' } },
-        { type: 'bar', name: 'Avond/nachtverbruik', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.eveningNightImportKwh), marker: { color: '#22c55e' } },
-        { type: 'scatter', mode: 'lines', name: 'Praktische opslagbehoefte', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyStorageNeedKwh), line: { color: '#2563eb', width: 2 } }
+        { type: 'bar', name: 'Teruglevering', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyExportKwh), marker: { color: '#F5B83D' } },
+        { type: 'bar', name: 'Avond/nachtverbruik', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.eveningNightImportKwh), marker: { color: '#4E8D3E' } },
+        { type: 'scatter', mode: 'lines', name: 'Praktische opslagbehoefte', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyStorageNeedKwh), line: { color: '#2F5F33', width: 2 } }
       ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20, automargin: true }, yaxis: { title: 'kWh per dag', rangemode: 'tozero' }, legend: { orientation: 'h', x: 0, y: 1.16, xanchor: 'left', yanchor: 'bottom' }, margin: { t: 70, r: 18, b: 82, l: 58 } }, { responsive: true, displaylogo: false });
     }
 
@@ -932,8 +1182,8 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         textfont: { size: 10, color: '#0f172a' },
         cliponaxis: false,
         marker: {
-          color: scenarioData.map(d => d.isRecommended ? '#16a34a' : '#86efac'),
-          line: { color: scenarioData.map(d => d.isRecommended ? '#14532d' : '#22c55e'), width: scenarioData.map(d => d.isRecommended ? 3 : 1) }
+          color: scenarioData.map(d => d.isRecommended ? '#4E8D3E' : '#CFE4C8'),
+          line: { color: scenarioData.map(d => d.isRecommended ? '#2F5F33' : '#4E8D3E'), width: scenarioData.map(d => d.isRecommended ? 3 : 1) }
         },
         customdata: scenarioData.map((d, index) => [...scenarioHover[index], formatKwhYear(d.importReductionKwhAnnualized)]),
         hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Vermogen: %{customdata[2]}<br>Importreductie: %{customdata[3]}<extra></extra>'
@@ -949,8 +1199,8 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         textfont: { size: 10, color: '#0f172a' },
         cliponaxis: false,
         marker: {
-          color: scenarioData.map(d => d.isRecommended ? '#f59e0b' : '#fed7aa'),
-          line: { color: scenarioData.map(d => d.isRecommended ? '#92400e' : '#f59e0b'), width: scenarioData.map(d => d.isRecommended ? 3 : 1) }
+          color: scenarioData.map(d => d.isRecommended ? '#F5B83D' : '#F8E7B8'),
+          line: { color: scenarioData.map(d => d.isRecommended ? '#8A641C' : '#F5B83D'), width: scenarioData.map(d => d.isRecommended ? 3 : 1) }
         },
         customdata: scenarioData.map((d, index) => [...scenarioHover[index], formatKwhYear(d.exportReductionKwhAnnualized)]),
         hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Vermogen: %{customdata[2]}<br>Exportreductie: %{customdata[3]}<extra></extra>'
@@ -966,8 +1216,8 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         yaxis: 'y2',
         text: scenarioData.map(d => formatEurYear(d.economicValue)),
         customdata: scenarioHover,
-        marker: { color: scenarioData.map(d => d.isRecommended ? '#1d4ed8' : '#93c5fd'), size: scenarioData.map(d => d.isRecommended ? 11 : 7) },
-        line: { color: '#2563eb', width: 2 },
+        marker: { color: scenarioData.map(d => d.isRecommended ? '#2F5F33' : '#A7C9A0'), size: scenarioData.map(d => d.isRecommended ? 11 : 7) },
+        line: { color: '#2F5F33', width: 2 },
         hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Jaarlijkse waarde: %{text}<extra></extra>'
       });
     }
@@ -993,7 +1243,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         y: annualValueBreakdownRows.map(d => d.value),
         marker: {
           color: annualValueBreakdownRows.map((d, index) =>
-            index === annualValueBreakdownRows.length - 1 ? '#2563eb' : d.value >= 0 ? '#16a34a' : '#dc2626'
+            index === annualValueBreakdownRows.length - 1 ? '#2F5F33' : d.value >= 0 ? '#4E8D3E' : '#F5B83D'
           )
         },
         text: annualValueBreakdownRows.map(d => (d.value < 0 ? '-' : '') + 'EUR ' + Math.abs(d.value).toFixed(0)),
@@ -1069,7 +1319,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
     }
 
     if (document.getElementById('pv-impact-chart') && impactBeforeAfter.length) {
-      Plotly.newPlot('pv-impact-chart', [{ type: 'bar', x: impactBeforeAfter.map(d => d.label), y: impactBeforeAfter.map(d => d.value), marker: { color: ['#64748b', '#22c55e', '#f59e0b', '#2563eb'] } }], { ...wattsTheme, xaxis: { tickangle: -10 }, yaxis: { title: 'kWh' } }, { responsive: true, displaylogo: false });
+      Plotly.newPlot('pv-impact-chart', [{ type: 'bar', x: impactBeforeAfter.map(d => d.label), y: impactBeforeAfter.map(d => d.value), marker: { color: ['#7A7F78', '#4E8D3E', '#F5B83D', '#2F5F33'] } }], { ...wattsTheme, xaxis: { tickangle: -10 }, yaxis: { title: 'kWh' } }, { responsive: true, displaylogo: false });
     }
 
     if (pvCharts?.annualValueByCapacityChart?.length) {
