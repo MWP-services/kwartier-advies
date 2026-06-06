@@ -9,6 +9,22 @@ function safeJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, '\\u003c');
 }
 
+function formatReportDate(value: string | null | undefined): string {
+  if (!value) return '-';
+
+  const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch;
+    return `${day}-${month}-${year}`;
+  }
+
+  return formatTimestamp(value);
+}
+
+function formatReportDateRange(startDate: string | null | undefined, endDate: string | null | undefined): string {
+  return `${formatReportDate(startDate)} t/m ${formatReportDate(endDate)}`;
+}
+
 function mimeForExt(filePath: string): string {
   const lower = filePath.toLowerCase();
   if (lower.endsWith('.png')) return 'image/png';
@@ -412,7 +428,7 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
         <table>
           <tbody>
             <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
-            <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
+            <tr><th>Datumbereik</th><td>${formatReportDateRange(payload.quality.startDate, payload.quality.endDate)}</td></tr>
             <tr><th>Ontbrekende intervallen</th><td>${payload.quality.missingIntervalsCount}</td></tr>
             <tr><th>Duplicaten</th><td>${payload.quality.duplicateCount}</td></tr>
             <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
@@ -634,7 +650,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
     ['Exportreductie per jaar', recommendedScenario ? `${Math.round(recommendedScenario.exportReductionKwhAnnualized).toLocaleString('nl-NL')} kWh/jaar` : '-'],
     ['Kwartiermetingen', payload.quality.rows.toLocaleString('nl-NL')],
     ['Cycli per jaar', recommendedScenario ? recommendedScenario.cyclesPerYear.toFixed(1) : '-'],
-    ['Simulatieperiode', `${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}`]
+    ['Simulatieperiode', formatReportDateRange(payload.quality.startDate, payload.quality.endDate)]
   ];
   const scenarioCards = [
     { label: 'Conservatief', scenario: hybridAdvice?.simulationAdvice.conservative, tone: 'muted' },
@@ -1010,10 +1026,10 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         <div class="callout">De jaarlijkse waarde is de netto economische bijdrage van de aanbevolen batterij in de gekozen prijsmodus. Positieve componenten verhogen de waarde; negatieve componenten verlagen die.</div>
       </div>
       <div class="card">
-        <h2 class="section-title">Waardecomponenten aanbevolen batterij</h2>
-        <div id="pv-value-breakdown-chart" class="plot"></div>
-        <div class="muted">Y-as: euro. De laatste balk is de netto jaarlijkse waarde die in het advies wordt gebruikt.</div>
-        <div class="callout">Deze grafiek maakt zichtbaar of de waarde vooral uit vermeden importkosten, lagere energiekosten per interval of kostenposten komt.</div>
+        <h2 class="section-title">Meeropbrengst per extra kWh batterijcapaciteit</h2>
+        <div id="pv-marginal-gain-chart" class="plot"></div>
+        <div class="muted">X-as: batterijcapaciteit in kWh. Linker Y-as: gedekte opslag per jaar. Rechter Y-as: meeropbrengst per extra kWh batterijcapaciteit.</div>
+        <div class="callout">Deze grafiek laat zien waar extra batterijcapaciteit nog veel effect heeft en waar de meeropbrengst begint af te vlakken.</div>
       </div>
     </section>`
         : ''
@@ -1032,7 +1048,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         <p class="section-intro">De kwaliteit van de kwartierdata bepaalt hoe robuust het advies kan worden geinterpreteerd.</p>
         <table><tbody>
           <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
-          <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
+          <tr><th>Datumbereik</th><td>${formatReportDateRange(payload.quality.startDate, payload.quality.endDate)}</td></tr>
           <tr><th>Ontbrekende intervallen</th><td>${payload.quality.missingIntervalsCount}</td></tr>
           <tr><th>Duplicaten</th><td>${payload.quality.duplicateCount}</td></tr>
           <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
@@ -1054,7 +1070,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         <p class="section-intro">Deze uitgangspunten helpen om het advies goed te plaatsen bij offerte, techniek en implementatie.</p>
         <table><tbody>
           <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
-          <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
+          <tr><th>Datumbereik</th><td>${formatReportDateRange(payload.quality.startDate, payload.quality.endDate)}</td></tr>
           <tr><th>Ontbrekende intervallen</th><td>${payload.quality.missingIntervalsCount}</td></tr>
           <tr><th>Duplicaten</th><td>${payload.quality.duplicateCount}</td></tr>
           <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
@@ -1236,34 +1252,11 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
       { responsive: true, displaylogo: false }
     );
 
-    if (document.getElementById('pv-value-breakdown-chart') && annualValueBreakdownRows.length) {
-      Plotly.newPlot('pv-value-breakdown-chart', [{
-        type: 'bar',
-        x: annualValueBreakdownRows.map(d => d.label),
-        y: annualValueBreakdownRows.map(d => d.value),
-        marker: {
-          color: annualValueBreakdownRows.map((d, index) =>
-            index === annualValueBreakdownRows.length - 1 ? '#2F5F33' : d.value >= 0 ? '#4E8D3E' : '#F5B83D'
-          )
-        },
-        text: annualValueBreakdownRows.map(d => (d.value < 0 ? '-' : '') + 'EUR ' + Math.abs(d.value).toFixed(0)),
-        textposition: 'outside',
-        cliponaxis: false,
-        customdata: annualValueBreakdownRows.map(d => d.explanation),
-        hovertemplate: '<b>%{x}</b><br>%{text}<br>%{customdata}<extra></extra>'
-      }], {
-        ...wattsTheme,
-        xaxis: { tickangle: -25, automargin: true },
-        yaxis: { title: 'EUR', zeroline: true, zerolinecolor: '#64748b' },
-        margin: { t: 30, r: 18, b: 105, l: 58 }
-      }, { responsive: true, displaylogo: false });
-    }
-
     if (document.getElementById('pv-marginal-gain-chart') && pvCharts?.marginalGainChart?.length) {
       Plotly.newPlot('pv-marginal-gain-chart', [
-        { type: 'bar', name: 'Gedekte opslag / extra effect', x: pvCharts.marginalGainChart.map(d => d.capacityKwh), y: pvCharts.marginalGainChart.map(d => d.coveredStorageKwhPerYear), marker: { color: '#0ea5e9' } },
-        { type: 'scatter', mode: 'lines+markers', name: 'Marginal gain per extra kWh', x: pvCharts.marginalGainChart.map(d => d.capacityKwh), y: pvCharts.marginalGainChart.map(d => d.marginalGainPerAddedKwh), yaxis: 'y2', line: { color: '#f97316' } }
-      ], { ...wattsTheme, xaxis: { title: 'Batterijcapaciteit (kWh)' }, yaxis: { title: 'kWh per jaar' }, yaxis2: { title: 'Marginale gain', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 70, l: 55 } }, { responsive: true, displaylogo: false });
+        { type: 'bar', name: 'Gedekte opslag per jaar', x: pvCharts.marginalGainChart.map(d => d.capacityKwh), y: pvCharts.marginalGainChart.map(d => d.coveredStorageKwhPerYear), marker: { color: '#0ea5e9' } },
+        { type: 'scatter', mode: 'lines+markers', name: 'Meeropbrengst per extra kWh', x: pvCharts.marginalGainChart.map(d => d.capacityKwh), y: pvCharts.marginalGainChart.map(d => d.marginalGainPerAddedKwh), yaxis: 'y2', line: { color: '#f97316' } }
+      ], { ...wattsTheme, xaxis: { title: 'Batterijcapaciteit (kWh)' }, yaxis: { title: 'Gedekte opslag (kWh/jaar)' }, yaxis2: { title: 'Meeropbrengst per extra kWh', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 62, b: 70, l: 58 } }, { responsive: true, displaylogo: false });
     }
 
     if (document.getElementById('pv-coverage-chart') && pvCharts?.coverageByCapacityChart?.length) {
@@ -1891,7 +1884,7 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
         <table>
           <tbody>
             <tr><th>Rijen</th><td>${payload.quality.rows}</td></tr>
-            <tr><th>Datumbereik</th><td>${payload.quality.startDate ?? '-'} t/m ${payload.quality.endDate ?? '-'}</td></tr>
+            <tr><th>Datumbereik</th><td>${formatReportDateRange(payload.quality.startDate, payload.quality.endDate)}</td></tr>
             <tr><th>Ontbrekende intervallen</th><td>${payload.quality.missingIntervalsCount}</td></tr>
             <tr><th>Duplicaten</th><td>${payload.quality.duplicateCount}</td></tr>
             <tr><th>Niet-15-min overgangen</th><td>${payload.quality.non15MinIntervals}</td></tr>
