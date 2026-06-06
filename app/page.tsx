@@ -11,7 +11,14 @@ import { DataQualityPanel } from '@/components/DataQualityPanel';
 import { KpiCards } from '@/components/KpiCards';
 import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
-import type { PeakMoment, ProcessedInterval, PvAdviceChartsData, PvSelfConsumptionAdviceResult } from '@/lib/calculations';
+import type {
+  PeakMoment,
+  ProcessedInterval,
+  PvBatterySimulationResult,
+  PvAdviceChartsData,
+  PvSelfConsumptionAdviceResult,
+  SizingResult
+} from '@/lib/calculations';
 import { getLocalDayIso } from '@/lib/datetime';
 import type { ColumnMapping } from '@/lib/parsing';
 import type { PriceInterval } from '@/lib/pricing';
@@ -72,6 +79,36 @@ function selectReportPeakMoments(peakMoments: PeakMoment[], highestPeakDay: stri
     (moment) => getLocalDayIso(moment.timestamp, 'Europe/Amsterdam') === highestPeakDay
   );
   return selectedDayMoments.length > 0 ? selectedDayMoments : peakMoments.slice(0, 500);
+}
+
+function compactPvSimulationScenario(scenario: PvBatterySimulationResult): PvBatterySimulationResult {
+  const compactScenario = { ...scenario };
+  delete compactScenario.valueByInterval;
+  delete compactScenario.socSeries;
+  return compactScenario;
+}
+
+function compactPvSelfConsumptionAdvice(
+  advice: PvSelfConsumptionAdviceResult | null | undefined
+): PvSelfConsumptionAdviceResult | null | undefined {
+  if (!advice) return advice;
+
+  return {
+    ...advice,
+    simulationAdvice: {
+      conservative: compactPvSimulationScenario(advice.simulationAdvice.conservative),
+      recommended: compactPvSimulationScenario(advice.simulationAdvice.recommended),
+      spacious: compactPvSimulationScenario(advice.simulationAdvice.spacious),
+      allScenarios: advice.simulationAdvice.allScenarios.map(compactPvSimulationScenario)
+    }
+  };
+}
+
+function compactReportSizing(sizing: SizingResult): SizingResult {
+  return {
+    ...sizing,
+    pvSelfConsumptionAdvice: compactPvSelfConsumptionAdvice(sizing.pvSelfConsumptionAdvice)
+  };
 }
 
 function mappingEqual(a: ColumnMapping | null, b: ColumnMapping): boolean {
@@ -328,9 +365,9 @@ export default function HomePage() {
         draftSettings.pvPricingMode === 'variable'
           ? variablePricePeriods.filter((period) => period.startTs && period.endTs)
           : priceIntervals;
-      const pricedIntervals =
+      const pricingAttachment =
         draftSettings.pvPricingMode === 'average'
-          ? analysisResult.intervals
+          ? null
           : attachPricesToIntervals(analysisResult.intervals, effectivePriceIntervals, {
               pricingMode: draftSettings.pvPricingMode,
               averageImportPriceEurPerKwh: draftSettings.pvImportPriceEurPerKwh,
@@ -338,7 +375,8 @@ export default function HomePage() {
               averageFeedInCostEurPerKwh: draftSettings.pvFeedInCostEurPerKwh,
               priceIntervals: effectivePriceIntervals,
               fallbackToAveragePrices: draftSettings.pvFallbackToAveragePrices
-            }).intervalsWithPrices;
+            });
+      const pricedIntervals = pricingAttachment?.intervalsWithPrices ?? analysisResult.intervals;
 
       const financialAdvice = computePvSelfConsumptionAdvice(pricedIntervals, {
         customerType: appliedSettings?.pvCustomerType ?? draftSettings.pvCustomerType,
@@ -350,7 +388,8 @@ export default function HomePage() {
           yearlyMaintenanceEur: draftSettings.pvYearlyMaintenanceEur,
           pricingMode: draftSettings.pvPricingMode,
           fallbackToAveragePrices: draftSettings.pvFallbackToAveragePrices,
-          priceIntervals: effectivePriceIntervals
+          priceIntervals: effectivePriceIntervals,
+          pricingStats: pricingAttachment?.pricingStats
         }
       });
       setFinancialResult(financialAdvice);
@@ -481,7 +520,7 @@ export default function HomePage() {
       efficiency: appliedSettings.efficiency,
       safetyFactor: appliedSettings.safetyFactor,
       pvStrategy: appliedSettings.pvStrategy,
-      sizing: reportSizing,
+      sizing: compactReportSizing(reportSizing),
       quality: analysisResult.quality,
       topEvents: analysisResult.events,
       peakMoments: reportPeakMoments,
@@ -544,7 +583,7 @@ export default function HomePage() {
       efficiency: appliedSettings.efficiency,
       safetyFactor: appliedSettings.safetyFactor,
       pvStrategy: appliedSettings.pvStrategy,
-      sizing,
+      sizing: compactReportSizing(sizing),
       quality: analysisResult.quality,
       topEvents: analysisResult.events,
       peakMoments: [],
@@ -1152,10 +1191,13 @@ export default function HomePage() {
                     Netto jaarlijkse besparing: EUR {financialResult.simulationAdvice.recommended.netAnnualSavingsEur?.toFixed(2) ?? '0.00'} bij een investering van EUR {(draftSettings.pvInstallationCostEur ?? 0).toFixed(2)}.
                   </p>
                   <p className="mt-1">
+                    De jaarlijkse besparing is berekend uit de kwartierprijzen en het batterijgedrag in de dataset, daarna opgeschaald naar een representatief jaar.
+                  </p>
+                  <p className="mt-1">
                     Onderbouwing: zonder batterij import {financialResult.simulationAdvice.recommended.importBeforeKwh.toFixed(1)} kWh en export {financialResult.simulationAdvice.recommended.exportBeforeKwh.toFixed(1)} kWh; met batterij import {financialResult.simulationAdvice.recommended.importAfterKwh.toFixed(1)} kWh en export {financialResult.simulationAdvice.recommended.exportAfterKwh.toFixed(1)} kWh.
                   </p>
                   {financialResult.simulationAdvice.recommended.paybackIndicative && (
-                    <p className="mt-1 text-amber-700">De terugverdientijd is indicatief omdat een deel van de prijsdata met fallbacktarieven is berekend.</p>
+                    <p className="mt-1 text-amber-700">De terugverdientijd is indicatief omdat de dataset korter dan een jaar is of omdat een deel van de prijsdata met fallbacktarieven is berekend.</p>
                   )}
                 </div>
               )}

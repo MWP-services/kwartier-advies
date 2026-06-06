@@ -100,6 +100,10 @@ describe('dynamic pricing', () => {
     expect(recommended.baselineEnergyCostEur).toBeDefined();
     expect(recommended.batteryEnergyCostEur).toBeDefined();
     expect(recommended.annualValueEur).toBe(recommended.dynamicValueEur);
+    expect(recommended.dynamicValueEur).toBeCloseTo(
+      ((recommended.baselineEnergyCostEur ?? 0) - (recommended.batteryEnergyCostEur ?? 0)) * (365 / 40),
+      1
+    );
     expect((recommended.valueByInterval ?? []).length).toBe(intervals.length);
   });
 

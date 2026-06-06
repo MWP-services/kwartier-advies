@@ -1240,10 +1240,13 @@ export function simulatePvBatteryScenario(
   const lostExportRevenueEur =
     exportReductionKwh * ((economicsConfig?.exportCompensationEurPerKwh ?? 0) - (economicsConfig?.feedInCostEurPerKwh ?? 0));
   const dynamicValueEur = baselineEnergyCostEur - batteryEnergyCostEur;
+  const grossSavingsAnnualEur = normalizeAnnual(grossSavingsEur, numberOfDays);
+  const lostExportRevenueAnnualEur = normalizeAnnual(lostExportRevenueEur, numberOfDays);
+  const dynamicValueAnnualEur = normalizeAnnual(dynamicValueEur, numberOfDays);
   const grossAnnualSavingsEur =
     economicsConfig?.pricingMode === 'dynamic'
-      ? dynamicValueEur
-      : grossSavingsEur - lostExportRevenueEur;
+      ? dynamicValueAnnualEur
+      : grossSavingsAnnualEur - lostExportRevenueAnnualEur;
   const yearlyCostsEur = economicsConfig?.yearlyMaintenanceEur ?? 0;
   const annualValueEur = grossAnnualSavingsEur - yearlyCostsEur;
   const batteryCostEur =
@@ -1289,7 +1292,7 @@ export function simulatePvBatteryScenario(
     remainingExportKwhAnnualized: round2(normalizeAnnual(exportAfterKwh, numberOfDays)),
     baselineEnergyCostEur: round2(baselineEnergyCostEur),
     batteryEnergyCostEur: round2(batteryEnergyCostEur),
-    dynamicValueEur: round2(dynamicValueEur),
+    dynamicValueEur: round2(dynamicValueAnnualEur),
     yearlyCostsEur: round2(yearlyCostsEur),
     netAnnualSavingsEur: round2(annualValueEur),
     annualValueEur: round2(annualValueEur),
@@ -1297,7 +1300,8 @@ export function simulatePvBatteryScenario(
     paybackIndicative:
       intervals.some((interval) => interval.pricingIndicative) ||
       (economicsConfig?.pricingStats?.missingPrices ?? 0) > 0 ||
-      (economicsConfig?.pricingStats?.fallbackMatches ?? 0) > 0,
+      (economicsConfig?.pricingStats?.fallbackMatches ?? 0) > 0 ||
+      numberOfDays < 365,
     pricingStats: economicsConfig?.pricingStats,
     valueByInterval,
     isEligible: true,
