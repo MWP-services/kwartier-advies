@@ -437,19 +437,6 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
       </div>
     </section>
 
-    <section class="card">
-      <h2 class="section-title">Vervolgstappen</h2>
-      <p class="section-intro">Na akkoord op de richting van het advies volgen de technische en commerciele controles richting realisatie.</p>
-      <div class="steps">
-        <div class="step"><div class="step-number">1</div><div class="step-title">Controle netaansluiting</div></div>
-        <div class="step"><div class="step-number">2</div><div class="step-title">Controle omvormer en EMS-integratie</div></div>
-        <div class="step"><div class="step-number">3</div><div class="step-title">Bevestigen tariefstructuur en businesscase</div></div>
-        <div class="step"><div class="step-number">4</div><div class="step-title">Definitieve offerte</div></div>
-        <div class="step"><div class="step-number">5</div><div class="step-title">Installatieplanning</div></div>
-        <div class="step"><div class="step-number">6</div><div class="step-title">Monitoring na oplevering</div></div>
-      </div>
-    </section>
-
     <footer class="footer">
       <div>WattsNext Energieoplossingen</div>
       <div>${pvSummary.strategy === 'PV_WITH_TRADING' ? 'PV + trading rapport' : 'PV self-consumption rapport'}</div>
@@ -1113,15 +1100,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         : ''
     }
 
-    <section class="grid two">
-      <div class="card">
-        <h2 class="section-title">Voorbeelddag met batterij-SOC</h2>
-        <p class="section-intro">De voorbeelddag laat zien hoe de batterij in de simulatie laadt en ontlaadt binnen het profiel.</p>
-        <div id="pv-example-day-chart" class="plot"></div>
-        <div class="muted">X-as: kwartieren binnen een representatieve dag. Linker Y-as: import en export in kWh per kwartier. Rechter Y-as: batterijlading in kWh.</div>
-        <div class="callout">Deze grafiek laat zien hoe de aanbevolen batterij overdag laadt op zonne-overschot en later ontlaadt om eigen verbruik te ondersteunen.</div>
-      </div>
-      <div class="card">
+    <section class="card">
         <h2 class="section-title">Conclusie en advies</h2>
         <table><tbody>
           <tr><th>Aanbevolen batterij</th><td>${payload.sizing.recommendedProduct?.label ?? 'Geen haalbare configuratie'}</td></tr>
@@ -1130,20 +1109,6 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
           <tr><th>Zelfstandig te begrijpen</th><td>Dit rapport combineert de formulematige basis met kwartiersimulatie, zodat een klant zonder applicatie kan volgen waarom de aanbevolen batterij is gekozen.</td></tr>
         </tbody></table>
         ${(hybridAdvice?.warnings.length ?? 0) > 0 ? `<div class="callout">${hybridAdvice?.warnings.join('<br />')}</div>` : ''}
-      </div>
-    </section>
-
-    <section class="card">
-      <h2 class="section-title">Vervolgstappen</h2>
-      <p class="section-intro">Na akkoord op de richting van het advies volgen de technische en commerciele controles richting realisatie.</p>
-      <div class="steps">
-        <div class="step"><div class="step-number">1</div><div class="step-title">Controle netaansluiting</div></div>
-        <div class="step"><div class="step-number">2</div><div class="step-title">Controle omvormer en EMS-integratie</div></div>
-        <div class="step"><div class="step-number">3</div><div class="step-title">Bevestigen tariefstructuur en businesscase</div></div>
-        <div class="step"><div class="step-number">4</div><div class="step-title">Definitieve offerte</div></div>
-        <div class="step"><div class="step-number">5</div><div class="step-title">Installatieplanning</div></div>
-        <div class="step"><div class="step-number">6</div><div class="step-title">Monitoring na oplevering</div></div>
-      </div>
     </section>
 
     <footer class="footer">
@@ -1333,14 +1298,6 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
         { type: 'bar', name: 'Kosten met batterij', x: pvCharts.monthlyValueChart.map(d => d.month), y: pvCharts.monthlyValueChart.map(d => d.batteryCostEur), marker: { color: '#16a34a' } },
         { type: 'scatter', mode: 'lines+markers', name: 'Netto waarde', x: pvCharts.monthlyValueChart.map(d => d.month), y: pvCharts.monthlyValueChart.map(d => d.valueEur), yaxis: 'y2', line: { color: '#2563eb' } }
       ], { ...wattsTheme, barmode: 'group', xaxis: { title: 'Maand' }, yaxis: { title: 'Kosten (EUR)' }, yaxis2: { title: 'Waarde (EUR)', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 70, l: 55 } }, { responsive: true, displaylogo: false });
-    }
-
-    if (pvCharts?.exampleDayChart?.length) {
-      Plotly.newPlot('pv-example-day-chart', [
-        { type: 'bar', name: 'Export', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.exportKwh), marker: { color: '#f59e0b' } },
-        { type: 'bar', name: 'Import', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.importKwh), marker: { color: '#22c55e' } },
-        { type: 'scatter', mode: 'lines', name: 'Batterij-SOC', x: pvCharts.exampleDayChart.map(d => d.timestamp), y: pvCharts.exampleDayChart.map(d => d.batterySocKwh), yaxis: 'y2', line: { color: '#2563eb' } }
-      ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20, title: 'Kwartieren binnen de dag' }, yaxis: { title: 'Import/export (kWh per kwartier)' }, yaxis2: { title: 'Batterij-SOC (kWh)', overlaying: 'y', side: 'right' }, margin: { t: 30, r: 50, b: 90, l: 55 } }, { responsive: true, displaylogo: false });
     }
 
     if (pvCharts?.exampleDayChart?.some(d => d.importPriceEurPerKwh != null || d.exportPriceEurPerKwh != null)) {

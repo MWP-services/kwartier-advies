@@ -21,7 +21,9 @@ import type {
 } from '@/lib/calculations';
 import { getLocalDayIso } from '@/lib/datetime';
 import type { ColumnMapping } from '@/lib/parsing';
+import type { PdfPayload } from '@/lib/pdf';
 import type { PriceInterval } from '@/lib/pricing';
+import type { ScenarioResult } from '@/lib/simulation';
 
 const Charts = dynamic(() => import('@/components/Charts').then((module) => module.Charts), {
   ssr: false,
@@ -40,6 +42,30 @@ const ScenarioCharts = dynamic(() => import('@/components/ScenarioCharts').then(
 
 const OUTLIER_KW_THRESHOLD = 5000;
 const REPORT_HISTOGRAM_SAMPLE_SIZE = 1200;
+
+interface ProgressState {
+  percent: number;
+  label: string;
+}
+
+function ProgressBar({ progress }: { progress: ProgressState | null }) {
+  if (!progress) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span>{progress.label}</span>
+        <span className="font-semibold tabular-nums text-slate-900">{progress.percent}%</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className="h-full rounded-full bg-emerald-600 transition-all duration-300 ease-out"
+          style={{ width: `${progress.percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
 
 function compactReportInterval(interval: ProcessedInterval): ProcessedInterval {
   return {
@@ -111,6 +137,14 @@ function compactReportSizing(sizing: SizingResult): SizingResult {
   };
 }
 
+function compactReportScenario(scenario: ScenarioResult): ScenarioResult {
+  return {
+    ...scenario,
+    shavedSeries: [],
+    socSeries: []
+  };
+}
+
 function mappingEqual(a: ColumnMapping | null, b: ColumnMapping): boolean {
   if (!a) return false;
   return (
@@ -165,6 +199,8 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isCalculatingFinancials, setIsCalculatingFinancials] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState<ProgressState | null>(null);
+  const [financialProgress, setFinancialProgress] = useState<ProgressState | null>(null);
   const isPvMode = draftSettings.analysisType === 'PV_SELF_CONSUMPTION';
   const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
 
@@ -257,20 +293,27 @@ export default function HomePage() {
     }
 
     setIsAnalyzing(true);
+    setAnalysisProgress({ percent: 10, label: 'Analyse voorbereiden...' });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
+      setAnalysisProgress({ percent: 25, label: 'Rekenmodules laden...' });
       const [{ mapRows }, { runAnalysis }] = await Promise.all([
         import('@/lib/parsing'),
         import('@/lib/clientAnalysis')
       ]);
+      setAnalysisProgress({ percent: 45, label: 'Data opschonen en kwartieren voorbereiden...' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const mappedRows = mapRows(rawRows, draftMapping);
+      setAnalysisProgress({ percent: 70, label: 'Batterijscenario’s simuleren...' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const result = runAnalysis(mappedRows, draftSettings);
       if (!result) {
         setError('Geen bruikbare rijen na normalisatie of filtering.');
         return;
       }
 
+      setAnalysisProgress({ percent: 92, label: 'Resultaten en grafieken klaarzetten...' });
       setAppliedSettings({ ...draftSettings });
       setAppliedMapping({ ...draftMapping });
       setAnalysisResult(result);
@@ -278,8 +321,10 @@ export default function HomePage() {
       setFinancialPvAdviceCharts(null);
       setSelectedScenario(result.sizing.recommendedProduct?.capacityKwh ?? result.scenarios[0]?.capacityKwh ?? 64);
       setAnalyzedAt(new Date().toISOString());
+      setAnalysisProgress({ percent: 100, label: 'Analyse gereed.' });
     } finally {
       setIsAnalyzing(false);
+      window.setTimeout(() => setAnalysisProgress(null), 500);
     }
   };
 
@@ -353,14 +398,17 @@ export default function HomePage() {
     }
 
     setIsCalculatingFinancials(true);
+    setFinancialProgress({ percent: 10, label: 'Financiële berekening voorbereiden...' });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
+      setFinancialProgress({ percent: 25, label: 'Prijs- en rekenmodules laden...' });
       const [{ attachPricesToIntervals }, { buildPvAdviceChartsData, computePvSelfConsumptionAdvice }] =
         await Promise.all([
           import('@/lib/pricing'),
           import('@/lib/calculations')
         ]);
+      setFinancialProgress({ percent: 45, label: 'Prijzen aan kwartieren koppelen...' });
       const effectivePriceIntervals =
         draftSettings.pvPricingMode === 'variable'
           ? variablePricePeriods.filter((period) => period.startTs && period.endTs)
@@ -378,6 +426,8 @@ export default function HomePage() {
             });
       const pricedIntervals = pricingAttachment?.intervalsWithPrices ?? analysisResult.intervals;
 
+      setFinancialProgress({ percent: 70, label: 'Financiële batterijscenario’s doorrekenen...' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const financialAdvice = computePvSelfConsumptionAdvice(pricedIntervals, {
         customerType: appliedSettings?.pvCustomerType ?? draftSettings.pvCustomerType,
         economics: {
@@ -392,14 +442,17 @@ export default function HomePage() {
           pricingStats: pricingAttachment?.pricingStats
         }
       });
+      setFinancialProgress({ percent: 90, label: 'Rapportgrafieken en terugverdientijd klaarzetten...' });
       setFinancialResult(financialAdvice);
       setFinancialPvAdviceCharts(
         analysisResult.sizing.pvFormulaAdvice
           ? buildPvAdviceChartsData(analysisResult.sizing.pvFormulaAdvice, analysisResult.intervals, financialAdvice)
           : null
       );
+      setFinancialProgress({ percent: 100, label: 'Financiële berekening gereed.' });
     } finally {
       setIsCalculatingFinancials(false);
+      window.setTimeout(() => setFinancialProgress(null), 500);
     }
   };
 
@@ -566,12 +619,14 @@ export default function HomePage() {
     });
     const sizing = buildSizingResultFromPvSelfConsumptionAdvice(formulaAdvice, financialResult);
     const reportScenarios = financialResult.simulationAdvice.allScenarios.map((scenario) =>
-      toScenarioResult({
-        ...scenario,
-        optionLabel: `${scenario.capacityKwh} kWh / ${scenario.dischargePowerKw.toFixed(1)} kW`
-      })
+      compactReportScenario(
+        toScenarioResult({
+          ...scenario,
+          optionLabel: `${scenario.capacityKwh} kWh / ${scenario.dischargePowerKw.toFixed(1)} kW`
+        })
+      )
     );
-    const reportPayload = {
+    const reportPayload: PdfPayload = {
       reportVariant: 'financial',
       analysisType: appliedSettings.analysisType,
       contractedPowerKw: appliedSettings.contractedPowerKw,
@@ -595,16 +650,10 @@ export default function HomePage() {
     };
 
     try {
-      const response = await fetch('/api/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reportPayload)
-      });
-      if (!response.ok) {
-        throw new Error(`Financieel rapport download mislukt (${response.status})`);
-      }
-
-      const blob = await response.blob();
+      const { generateReportPdf } = await import('@/lib/pdf');
+      const pdf = await generateReportPdf(reportPayload);
+      const pdfBuffer = pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer;
+      const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -818,6 +867,9 @@ export default function HomePage() {
           >
             Wijzigingen resetten
           </button>
+        </div>
+        <div className="lg:col-span-3">
+          <ProgressBar progress={analysisProgress} />
         </div>
       </div>
 
@@ -1181,6 +1233,9 @@ export default function HomePage() {
                 <button className="wx-btn-secondary" onClick={downloadFinancialReport} disabled={!financialResult || hasPendingChanges}>
                   Download financieel rapport
                 </button>
+              </div>
+              <div className="mt-3">
+                <ProgressBar progress={financialProgress} />
               </div>
               {financialResult && (
                 <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
