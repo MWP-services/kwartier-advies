@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
-import type { AnalysisResult, AnalysisSettings } from '@/lib/analysis';
+import type { AnalysisResult, AnalysisSettings, AnnualBillInput, PvInputMode } from '@/lib/analysis';
 import { defaultAnalysisSettings } from '@/lib/analysis';
 import { ColumnMapper } from '@/components/ColumnMapper';
 import { ComplianceSlider } from '@/components/ComplianceSlider';
@@ -25,6 +25,9 @@ import type { ColumnMapping } from '@/lib/parsing';
 import type { PdfPayload } from '@/lib/pdf';
 import type { PriceInterval } from '@/lib/pricing';
 import type { ScenarioResult } from '@/lib/simulation';
+import type { AnnualBillAdviceResult } from '@/src/lib/annual-bill/calculateAnnualBillAdvice';
+import type { AnnualBillExtract } from '@/src/lib/annual-bill/schema';
+import { annualBillConfidenceLabel, annualBillMissingDetails, formatEuro, formatKwh, formatYears, maskEan, resolveAverageFeedInPrice, resolveAverageImportPrice, resolveAnnualFeedInKwh, resolveAnnualUsageKwh } from '@/src/lib/annual-bill/annualBillUx';
 
 const Charts = dynamic(() => import('@/components/Charts').then((module) => module.Charts), {
   ssr: false,
@@ -47,6 +50,19 @@ const REPORT_HISTOGRAM_SAMPLE_SIZE = 1200;
 interface ProgressState {
   percent: number;
   label: string;
+}
+
+async function readApiJson<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) return {} as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const cleanText = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const message = cleanText.slice(0, 180) || response.statusText || 'Onbekende serverfout';
+    return { error: `Server gaf geen geldige JSON terug (${response.status}): ${message}` } as T;
+  }
 }
 
 function ProgressBar({ progress }: { progress: ProgressState | null }) {
@@ -146,6 +162,10 @@ function compactReportScenario(scenario: ScenarioResult): ScenarioResult {
   };
 }
 
+function toOptionalNumber(value: string): number | undefined {
+  return value === '' ? undefined : Number(value);
+}
+
 function mappingEqual(a: ColumnMapping | null, b: ColumnMapping): boolean {
   if (!a) return false;
   return (
@@ -181,11 +201,19 @@ export default function HomePage() {
   const [draftMapping, setDraftMapping] = useState<ColumnMapping>({ timestamp: '', consumptionKwh: '' });
   const [appliedMapping, setAppliedMapping] = useState<ColumnMapping | null>(null);
   const [draftSettings, setDraftSettings] = useState<AnalysisSettings>(defaultAnalysisSettings);
+  const [inputMode, setInputMode] = useState<PvInputMode>(defaultAnalysisSettings.pvInputMode);
   const [appliedSettings, setAppliedSettings] = useState<AnalysisSettings | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [financialResult, setFinancialResult] = useState<PvSelfConsumptionAdviceResult | null>(null);
   const [financialPvAdviceCharts, setFinancialPvAdviceCharts] = useState<PvAdviceChartsData | null>(null);
+  const [annualBillExtract, setAnnualBillExtract] = useState<AnnualBillExtract | null>(null);
+  const [annualBillInput, setAnnualBillInput] = useState<AnnualBillInput>({ source: 'manual' });
+  const [annualBillAdvice, setAnnualBillAdvice] = useState<AnnualBillAdviceResult | null>(null);
+  const [annualBillFileName, setAnnualBillFileName] = useState<string | null>(null);
+  const [annualBillTextPreview, setAnnualBillTextPreview] = useState<string | null>(null);
+  const [annualBillDetailsOpen, setAnnualBillDetailsOpen] = useState(false);
+  const [isExtractingAnnualBill, setIsExtractingAnnualBill] = useState(false);
   const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
   const [priceIntervals, setPriceIntervals] = useState<PriceInterval[]>([]);
   const [variablePricePeriods, setVariablePricePeriods] = useState<PriceInterval[]>([
@@ -206,16 +234,22 @@ export default function HomePage() {
   const [analysisProgress, setAnalysisProgress] = useState<ProgressState | null>(null);
   const [financialProgress, setFinancialProgress] = useState<ProgressState | null>(null);
   const isPvMode = draftSettings.analysisType === 'PV_SELF_CONSUMPTION';
+  const usesIntervalData = !isPvMode || inputMode === 'intervalData';
   const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
+  const hasAnnualBillInputs =
+    resolveAnnualUsageKwh(annualBillInput) > 0 ||
+    resolveAnnualFeedInKwh(annualBillInput) > 0;
+  const annualBillConfidence = annualBillConfidenceLabel(annualBillInput);
+  const annualBillMissing = annualBillMissingDetails(annualBillInput);
+  const annualBillUsedImportPrice = resolveAverageImportPrice(annualBillInput);
+  const annualBillUsedFeedInPrice = resolveAverageFeedInPrice(annualBillInput);
 
   const canAnalyze =
-    (uploadedRowCount > 0 || rawRows.length > 0) &&
-    !!draftMapping.timestamp &&
-    !!draftMapping.consumptionKwh &&
+    (usesIntervalData ? (uploadedRowCount > 0 || rawRows.length > 0) && !!draftMapping.timestamp && !!draftMapping.consumptionKwh : hasAnnualBillInputs) &&
     draftSettings.efficiency > 0 &&
     (isPvMode || draftSettings.contractedPowerKw > 0) &&
     (isPvMode || (draftSettings.compliance >= 0.7 && draftSettings.compliance <= 1)) &&
-    (draftSettings.analysisType === 'PEAK_SHAVING' || hasPvInputs);
+    (draftSettings.analysisType === 'PEAK_SHAVING' || !usesIntervalData || hasPvInputs);
 
   const hasPendingChanges =
     !!appliedSettings &&
@@ -258,13 +292,13 @@ export default function HomePage() {
         method: 'POST',
         body: formData
       });
-      const result = (await response.json()) as {
+      const result = await readApiJson<{
         uploadId?: string;
         headers?: string[];
         rowCount?: number;
         detectedMapping?: ColumnMapping | null;
         error?: string;
-      };
+      }>(response);
       if (!response.ok || !result.uploadId || !result.headers) {
         throw new Error(result.error ?? `Bestand uploaden mislukt (${response.status})`);
       }
@@ -288,14 +322,95 @@ export default function HomePage() {
     }
   };
 
+  const updatePvInputMode = (mode: PvInputMode) => {
+    setInputMode(mode);
+    setDraftSettings((prev) => ({ ...prev, pvInputMode: mode }));
+    setAnalysisResult(null);
+    setAnalysisId(null);
+    setAnnualBillAdvice(null);
+    setFinancialResult(null);
+    setFinancialPvAdviceCharts(null);
+  };
+
+  const handleAnnualBillPdf = async (file: File) => {
+    setAnnualBillFileName(file.name);
+    setIsExtractingAnnualBill(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.set('file', file);
+      const response = await fetch('/api/annual-bill/extract', {
+        method: 'POST',
+        body: formData
+      });
+      const result = await readApiJson<{
+        input?: AnnualBillInput;
+        raw?: AnnualBillExtract['raw'];
+        issues?: AnnualBillExtract['issues'];
+        textPreview?: string;
+        error?: string;
+      }>(response);
+      if (!response.ok || !result.input) {
+        throw new Error(result.error ?? `Jaarnota uitlezen mislukt (${response.status})`);
+      }
+
+      const extract: AnnualBillExtract = {
+        input: result.input,
+        raw: result.raw ?? {},
+        issues: result.issues ?? [],
+        textPreview: result.textPreview ?? ''
+      };
+      setAnnualBillExtract(extract);
+      setAnnualBillInput((prev) => ({
+        ...prev,
+        ...result.input,
+        supplierName: result.input?.supplierName ?? prev.supplierName ?? file.name.replace(/\.pdf$/i, ''),
+        source: 'pdf'
+      }));
+      setAnnualBillTextPreview(result.textPreview ?? null);
+      setAnnualBillDetailsOpen(false);
+      setAnnualBillAdvice(null);
+      setAnalysisResult(null);
+      setAnalysisId(null);
+      setFinancialResult(null);
+      setFinancialPvAdviceCharts(null);
+    } catch {
+      setAnnualBillInput((prev) => ({
+        ...prev,
+        supplierName: prev.supplierName ?? file.name.replace(/\.pdf$/i, ''),
+        source: 'pdf',
+        extractionConfidence: 0,
+        missingFields: ['totalUsageKwh', 'totalFeedInKwh']
+      }));
+      setAnnualBillExtract(null);
+      setAnnualBillAdvice(null);
+      setError('We konden deze PDF niet automatisch uitlezen. Je kunt doorgaan met handmatige jaarnota-invoer.');
+    } finally {
+      setIsExtractingAnnualBill(false);
+    }
+  };
+
+  const updateAnnualBillInput = (patch: Partial<AnnualBillInput>) => {
+    setAnnualBillInput((prev) => ({ ...prev, ...patch }));
+    setAnnualBillAdvice(null);
+    setAnalysisResult(null);
+    setAnalysisId(null);
+    setFinancialResult(null);
+    setFinancialPvAdviceCharts(null);
+  };
+
   const handleAnalyze = async () => {
     setError(null);
-    if (!draftMapping.timestamp || !draftMapping.consumptionKwh) {
+    if (usesIntervalData && (!draftMapping.timestamp || !draftMapping.consumptionKwh)) {
       setError('Selecteer eerst timestamp- en consumption-kolommen.');
       return;
     }
-    if (draftSettings.analysisType === 'PV_SELF_CONSUMPTION' && !hasPvInputs) {
+    if (draftSettings.analysisType === 'PV_SELF_CONSUMPTION' && usesIntervalData && !hasPvInputs) {
       setError('Voor PV-analyse is een pv_kwh- of export_kwh-kolom nodig.');
+      return;
+    }
+    if (draftSettings.analysisType === 'PV_SELF_CONSUMPTION' && !usesIntervalData && !hasAnnualBillInputs) {
+      setError('We hebben geen stroomverbruik of teruglevering gevonden. Vul minimaal een van deze jaarwaarden in.');
       return;
     }
     if (!canAnalyze) {
@@ -316,10 +431,11 @@ export default function HomePage() {
           uploadId,
           rows: uploadId ? undefined : rawRows,
           mapping: draftMapping,
-          settings: draftSettings
+          settings: { ...draftSettings, pvInputMode: inputMode },
+          annualBillInput: usesIntervalData ? undefined : annualBillInput
         })
       });
-      const payload = (await response.json()) as (AnalysisResult & { analysisId?: string }) | { error?: string };
+      const payload = await readApiJson<(AnalysisResult & { analysisId?: string }) | { error?: string }>(response);
       setAnalysisProgress({ percent: 45, label: 'Data opschonen en kwartieren voorbereiden...' });
       await new Promise((resolve) => setTimeout(resolve, 0));
       setAnalysisProgress({ percent: 70, label: 'Batterijscenario’s simuleren...' });
@@ -339,11 +455,14 @@ export default function HomePage() {
       setAppliedMapping({ ...draftMapping });
       setAnalysisResult(result);
       setAnalysisId(result.analysisId ?? null);
+      setAnnualBillAdvice(result.annualBillAdvice ?? null);
       setFinancialResult(null);
       setFinancialPvAdviceCharts(null);
       setSelectedScenario(result.sizing.recommendedProduct?.capacityKwh ?? result.scenarios[0]?.capacityKwh ?? 64);
       setAnalyzedAt(new Date().toISOString());
       setAnalysisProgress({ percent: 100, label: 'Analyse gereed.' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Analyse kon niet worden uitgevoerd. Probeer opnieuw of upload het bestand opnieuw.');
     } finally {
       setIsAnalyzing(false);
       window.setTimeout(() => setAnalysisProgress(null), 500);
@@ -438,9 +557,10 @@ export default function HomePage() {
           priceIntervals: effectivePriceIntervals
         })
       });
-      const payload = (await response.json()) as
+      const payload = await readApiJson<
         | { financialAdvice: PvSelfConsumptionAdviceResult; charts: PvAdviceChartsData | null }
-        | { error?: string };
+        | { error?: string }
+      >(response);
       if (!response.ok || !('financialAdvice' in payload)) {
         setError('error' in payload && payload.error ? payload.error : `Financiele berekening mislukt (${response.status})`);
         return;
@@ -450,6 +570,8 @@ export default function HomePage() {
       setFinancialResult(financialAdvice);
       setFinancialPvAdviceCharts(payload.charts);
       setFinancialProgress({ percent: 100, label: 'Financiële berekening gereed.' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Financiele berekening kon niet worden uitgevoerd. Probeer opnieuw.');
     } finally {
       setIsCalculatingFinancials(false);
       window.setTimeout(() => setFinancialProgress(null), 500);
@@ -687,9 +809,9 @@ export default function HomePage() {
         </div>
       </section>
 
-      <Upload onFile={handleFile} />
+      {usesIntervalData && <Upload onFile={handleFile} />}
       {error && <p className="rounded border border-red-200 bg-red-50 p-3 text-red-700">{error}</p>}
-      {headers.length > 0 && (
+      {usesIntervalData && headers.length > 0 && (
         <ColumnMapper
           headers={headers}
           mapping={draftMapping}
@@ -749,6 +871,217 @@ export default function HomePage() {
 
         {isPvMode && (
           <>
+            <div className="lg:col-span-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="mb-3 text-sm font-medium text-slate-900">Invoermethode PV-opwek optimaliseren</p>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {[
+                    ['intervalData', 'Kwartierdata uploaden', 'Nauwkeurig advies'],
+                    ['annualBill', 'Jaarnota uploaden', 'Indicatief advies'],
+                    ['manualAnnualBill', 'Handmatig invullen', 'Indicatief advies']
+                  ].map(([value, title, label]) => (
+                    <label key={value} className="rounded-lg border border-slate-200 p-3 text-sm">
+                      <input
+                        className="mr-2"
+                        type="radio"
+                        checked={inputMode === value}
+                        onChange={() => updatePvInputMode(value as PvInputMode)}
+                      />
+                      <span className="font-medium text-slate-900">{title}</span>
+                      <span className="mt-1 block text-xs text-slate-500">{label}</span>
+                    </label>
+                  ))}
+                </div>
+                {inputMode !== 'intervalData' && (
+                  <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                    Indicatief advies: deze route gebruikt jaarvolumes en een vereenvoudigd profiel. Upload kwartierdata voor een nauwkeurig batterijadvies.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {inputMode === 'annualBill' && (
+              <label className="text-sm lg:col-span-3">
+                Upload PDF-jaarnota
+                <input id="annual-bill-pdf-input" className="wx-input" type="file" accept=".pdf" disabled={isExtractingAnnualBill} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleAnnualBillPdf(file); }} />
+                <span className="mt-1 block text-xs text-slate-500">
+                  {isExtractingAnnualBill
+                    ? 'Je jaarnota wordt geanalyseerd...'
+                    : annualBillFileName
+                      ? `Jaarnota: ${annualBillFileName}. Controleer en vul de jaarwaarden hieronder aan.`
+                      : 'Upload een PDF; de app probeert jaarwaarden te herkennen en zet ze hieronder klaar ter controle.'}
+                </span>
+              </label>
+            )}
+
+            {inputMode !== 'intervalData' && (
+              <div className="lg:col-span-3">
+                <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-3">
+                  <div className="md:col-span-3 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+                    Extractiezekerheid: {annualBillInput.extractionConfidence != null ? `${Math.round(annualBillInput.extractionConfidence * 100)}%` : 'n.v.t.'}
+                    {annualBillInput.missingFields?.length ? ` | Controleer/aanvullen: ${annualBillInput.missingFields.join(', ')}` : ' | Geen verplichte ontbrekende velden gemeld.'}
+                  </div>
+                  <div className="md:col-span-3 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Verbruik per jaar</p>
+                      <p className="text-lg font-semibold text-slate-900">{formatKwh(resolveAnnualUsageKwh(annualBillInput))}</p>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Teruglevering per jaar</p>
+                      <p className="text-lg font-semibold text-slate-900">{formatKwh(resolveAnnualFeedInKwh(annualBillInput))}</p>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Periode</p>
+                      <p className="text-sm font-semibold text-slate-900">{annualBillInput.periodStart || '-'} t/m {annualBillInput.periodEnd || '-'}</p>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Leverancier</p>
+                      <p className="text-sm font-semibold text-slate-900">{annualBillInput.supplierName || '-'}</p>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Gebruikte stroomprijs</p>
+                      <p className="text-sm font-semibold text-slate-900">€ {annualBillUsedImportPrice.toLocaleString('nl-NL', { maximumFractionDigits: 2 })}/kWh</p>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Gebruikte terugleververgoeding</p>
+                      <p className="text-sm font-semibold text-slate-900">€ {annualBillUsedFeedInPrice.toLocaleString('nl-NL', { maximumFractionDigits: 2 })}/kWh</p>
+                    </div>
+                  </div>
+                  <p className="md:col-span-3 rounded-md border border-lime-200 bg-lime-50 p-2 text-sm text-lime-900">
+                    {annualBillExtract
+                      ? 'We hebben de belangrijkste gegevens gevonden. Controleer kort of dit klopt.'
+                      : 'We hebben niet alles kunnen vinden, maar kunnen wel een indicatief advies maken.'}
+                    {annualBillMissing.length ? ` Ontbrekende details worden geschat: ${annualBillMissing.join(', ')}.` : ''}
+                  </p>
+                  <details className="md:col-span-3 rounded-md border border-slate-200 bg-white p-3 text-sm" open={annualBillDetailsOpen} onToggle={(event) => setAnnualBillDetailsOpen(event.currentTarget.open)}>
+                    <summary className="cursor-pointer font-medium text-slate-900">Geavanceerde gegevens bekijken</summary>
+                    <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <label className="text-sm">
+                    Leverancier
+                    <input className="wx-input" value={annualBillInput.supplierName ?? ''} onChange={(event) => updateAnnualBillInput({ supplierName: event.target.value, source: inputMode === 'annualBill' ? 'pdf' : 'manual' })} />
+                  </label>
+                  <label className="text-sm">
+                    Periode start
+                    <input className="wx-input" type="date" value={annualBillInput.periodStart ?? ''} onChange={(event) => updateAnnualBillInput({ periodStart: event.target.value })} />
+                  </label>
+                  <label className="text-sm">
+                    Periode einde
+                    <input className="wx-input" type="date" value={annualBillInput.periodEnd ?? ''} onChange={(event) => updateAnnualBillInput({ periodEnd: event.target.value })} />
+                  </label>
+                  <label className="text-sm">
+                    Totaal verbruik (kWh/jaar)
+                    <input className="wx-input" type="number" step="1" value={annualBillInput.totalUsageKwh ?? ''} onChange={(event) => updateAnnualBillInput({ totalUsageKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Totaal teruglevering (kWh/jaar)
+                    <input className="wx-input" type="number" step="1" value={annualBillInput.totalFeedInKwh ?? ''} onChange={(event) => updateAnnualBillInput({ totalFeedInKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Verbruik overdag/piek (kWh/jaar)
+                    <input className="wx-input" type="number" step="1" value={annualBillInput.usageNormalKwh ?? ''} onChange={(event) => updateAnnualBillInput({ usageNormalKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Verbruik dal/nacht (kWh/jaar)
+                    <input className="wx-input" type="number" step="1" value={annualBillInput.usageOffPeakKwh ?? ''} onChange={(event) => updateAnnualBillInput({ usageOffPeakKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Teruglevering overdag/piek (kWh/jaar)
+                    <input className="wx-input" type="number" step="1" value={annualBillInput.feedInNormalKwh ?? ''} onChange={(event) => updateAnnualBillInput({ feedInNormalKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Teruglevering dal/nacht (kWh/jaar)
+                    <input className="wx-input" type="number" step="1" value={annualBillInput.feedInOffPeakKwh ?? ''} onChange={(event) => updateAnnualBillInput({ feedInOffPeakKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Jaarlijkse PV-opwek (optioneel)
+                    <input className="wx-input" type="number" step="1" value={annualBillInput.annualPvProductionKwh ?? ''} onChange={(event) => updateAnnualBillInput({ annualPvProductionKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Aantal zonnepanelen
+                    <input className="wx-input" type="number" step="1" value={annualBillInput.solarPanelCount ?? ''} onChange={(event) => updateAnnualBillInput({ solarPanelCount: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Vermogen per paneel (Wp)
+                    <input className="wx-input" type="number" step="5" value={annualBillInput.solarPanelWp ?? ''} onChange={(event) => updateAnnualBillInput({ solarPanelWp: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Dakoriëntatie
+                    <select className="wx-input" value={annualBillInput.roofOrientation ?? 'other'} onChange={(event) => updateAnnualBillInput({ roofOrientation: event.target.value as AnnualBillInput['roofOrientation'] })}>
+                      <option value="south">Zuid</option>
+                      <option value="east_west">Oost-west</option>
+                      <option value="east">Oost</option>
+                      <option value="west">West</option>
+                      <option value="other">Anders/onbekend</option>
+                    </select>
+                  </label>
+                  <label className="text-sm">
+                    Verbruik overdag/piek tarief (EUR/kWh)
+                    <input className="wx-input" type="number" step="0.01" value={annualBillInput.normalTariffEurPerKwh ?? ''} onChange={(event) => updateAnnualBillInput({ normalTariffEurPerKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Verbruik dal/nacht tarief (EUR/kWh)
+                    <input className="wx-input" type="number" step="0.01" value={annualBillInput.offPeakTariffEurPerKwh ?? ''} onChange={(event) => updateAnnualBillInput({ offPeakTariffEurPerKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Terugleververgoeding (EUR/kWh)
+                    <input className="wx-input" type="number" step="0.01" value={annualBillInput.feedInTariffEurPerKwh ?? ''} onChange={(event) => updateAnnualBillInput({ feedInTariffEurPerKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Batterij-investering (EUR)
+                    <input className="wx-input" type="number" step="100" value={annualBillInput.batteryInvestmentEur ?? ''} onChange={(event) => updateAnnualBillInput({ batteryInvestmentEur: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <div className="md:col-span-3 text-xs text-slate-600">
+                    EAN: {maskEan(annualBillInput.eanElectricity)} | Betrouwbaarheid: {annualBillConfidence === 'medium' ? 'middel' : 'laag'}
+                  </div>
+                    </div>
+                  </details>
+                  {annualBillTextPreview && (
+                    <details className="md:col-span-3 rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-600">
+                      <summary className="cursor-pointer font-medium text-slate-800">PDF-tekstfragment tonen</summary>
+                      <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap">{annualBillTextPreview}</pre>
+                    </details>
+                  )}
+                  <div className="md:col-span-3 rounded-md border border-lime-200 bg-lime-50 p-3">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-lime-900">
+                          Controleer de gevonden waarden
+                        </p>
+                        <p className="mt-1 text-xs text-lime-800">
+                          {inputMode === 'annualBill'
+                            ? annualBillExtract
+                              ? 'De PDF is geanalyseerd. Pas alleen velden aan die niet kloppen en bereken daarna het indicatieve advies.'
+                              : 'Upload eerst een PDF-jaarnota; daarna vult de app de gevonden waarden hier automatisch in.'
+                            : 'Vul de belangrijkste jaarwaarden in en bereken daarna het indicatieve advies.'}
+                        </p>
+                        {annualBillExtract?.issues.length ? (
+                          <p className="mt-1 text-xs text-amber-800">
+                            Aandachtspunten: {annualBillExtract.issues.map((issue) => issue.message).join(' ')}
+                          </p>
+                        ) : null}
+                      </div>
+                      <button
+                        className="wx-btn-primary"
+                        type="button"
+                        onClick={handleAnalyze}
+                        disabled={!canAnalyze || isAnalyzing || isExtractingAnnualBill}
+                      >
+                        {isAnalyzing ? 'Advies berekenen...' : 'Bereken mijn batterijadvies'}
+                      </button>
+                      <button className="wx-btn-secondary" type="button" onClick={() => setAnnualBillDetailsOpen(true)}>
+                        Waarden aanpassen
+                      </button>
+                      {inputMode === 'annualBill' && (
+                        <button className="wx-btn-secondary" type="button" onClick={() => document.getElementById('annual-bill-pdf-input')?.click()}>
+                          Nieuwe jaarnota uploaden
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <label className="text-sm">
               PV batterijmodus
               <select
@@ -849,13 +1182,15 @@ export default function HomePage() {
         )}
 
         <div className="flex gap-2">
-          <button
-            className="wx-btn-primary"
-            onClick={handleAnalyze}
-            disabled={!canAnalyze || isAnalyzing}
-          >
-            {isAnalyzing ? 'Analyseren...' : 'Analyseer'}
-          </button>
+          {usesIntervalData && (
+            <button
+              className="wx-btn-primary"
+              onClick={handleAnalyze}
+              disabled={!canAnalyze || isAnalyzing}
+            >
+              {isAnalyzing ? 'Analyseren...' : 'Analyseer'}
+            </button>
+          )}
           <button
             className="wx-btn-secondary"
             onClick={resetDraft}
@@ -883,6 +1218,95 @@ export default function HomePage() {
                 {warning}
               </p>
             ))}
+          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && annualBillAdvice && (
+            <div className="wx-card">
+              <h2 className="wx-title">Indicatief batterijadvies op basis van jaarnota</h2>
+              <div className="grid gap-3 md:grid-cols-4">
+                <div>
+                  <p className="text-xs text-slate-500">Aanbevolen batterij</p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    {annualBillAdvice.recommendedBatteryKwh != null
+                      ? `${annualBillAdvice.recommendedBatteryKwh} kWh`
+                      : 'Onvoldoende data'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Jaarlijkse besparing</p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    {formatEuro(annualBillAdvice.annualSavingsRangeEur.expected)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    range {formatEuro(annualBillAdvice.annualSavingsRangeEur.min)} - {formatEuro(annualBillAdvice.annualSavingsRangeEur.max)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Terugverdientijd</p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    {formatYears(annualBillAdvice.paybackRangeYears.expected)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Betrouwbaarheid</p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    {annualBillAdvice.confidence === 'medium' ? 'Middel' : 'Laag'}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 rounded-md border border-lime-200 bg-lime-50 p-3 text-sm text-lime-900">
+                <p className="font-semibold">Waarom dit advies?</p>
+                <p className="mt-1">{annualBillAdvice.explanation}</p>
+              </div>
+              <p className="mt-3 text-sm text-slate-600">
+                Betrouwbaarheid: {annualBillAdvice.confidence === 'medium' ? 'middel' : 'laag'}. Dit blijft indicatief omdat er geen kwartierprofiel is gebruikt.
+              </p>
+              {annualBillAdvice.warnings.length > 0 && (
+                <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
+                  {annualBillAdvice.warnings.join(' ')}
+                </p>
+              )}
+              {annualBillAdvice.options.length > 0 && (
+                <div className="mt-4 hidden overflow-x-auto md:block">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b text-xs text-slate-500">
+                        <th className="py-2">Batterij</th>
+                        <th className="py-2">Opgeslagen zon/jaar</th>
+                        <th className="py-2">Besparing/jaar</th>
+                        <th className="py-2">TVT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {annualBillAdvice.options.map((option) => (
+                        <tr key={option.batteryKwh} className="border-b border-slate-100">
+                          <td className="py-2">{option.batteryKwh} kWh</td>
+                          <td className="py-2">{formatKwh(option.estimatedAnnualStoredSolarKwh)}</td>
+                          <td className="py-2">{formatEuro(option.estimatedAnnualSavingsEur)}</td>
+                          <td className="py-2">{formatYears(option.estimatedPaybackYears)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {annualBillAdvice.options.length > 0 && (
+                <div className="mt-4 grid gap-3 md:hidden">
+                  {annualBillAdvice.options.map((option) => (
+                    <div key={option.batteryKwh} className="rounded-md border border-slate-200 bg-white p-3 text-sm">
+                      <div className="flex items-center justify-between">
+                        <strong>{option.batteryKwh} kWh</strong>
+                        <span>{formatYears(option.estimatedPaybackYears)}</span>
+                      </div>
+                      <p className="mt-2 text-slate-600">Opgeslagen zon: {formatKwh(option.estimatedAnnualStoredSolarKwh)}</p>
+                      <p className="text-slate-600">Besparing: {formatEuro(option.estimatedAnnualSavingsEur)} per jaar</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button className="wx-btn-secondary mt-4" type="button" onClick={() => updatePvInputMode('intervalData')}>
+                Nauwkeuriger advies maken met kwartierdata
+              </button>
+            </div>
+          )}
           {analysisResult.analysisType === 'PEAK_SHAVING' && analysisResult.maxObservedKw > OUTLIER_KW_THRESHOLD * 2 && (
             <p className="rounded border border-amber-300 bg-amber-50 p-3 text-amber-800">
               Onrealistisch vermogen gedetecteerd - controleer kolomkeuze

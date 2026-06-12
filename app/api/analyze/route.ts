@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { AnalysisSettings } from '@/lib/analysis';
+import type { AnnualBillInput } from '@/lib/analysis';
 import type { ColumnMapping } from '@/lib/parsing';
+import { buildAnnualBillIndicativeAnalysis } from '@/lib/annualBillAdvice';
 import { runAnalysis } from '@/lib/clientAnalysis';
 import { mapRows } from '@/lib/parsing';
 import { getUploadedDataset, storeAnalysisResult } from '@/lib/serverDataStore';
@@ -12,13 +14,35 @@ interface AnalyzeRequestBody {
   rows?: Record<string, unknown>[];
   mapping?: ColumnMapping;
   settings?: AnalysisSettings;
+  annualBillInput?: AnnualBillInput;
 }
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as AnalyzeRequestBody;
 
-    if ((!Array.isArray(body.rows) && !body.uploadId) || !body.mapping || !body.settings) {
+    if (!body.settings) {
+      return NextResponse.json({ error: 'Ongeldige analyse-aanvraag.' }, { status: 400 });
+    }
+
+    if (body.settings.analysisType === 'PV_SELF_CONSUMPTION' && body.settings.pvInputMode !== 'intervalData') {
+      if (!body.annualBillInput) {
+        return NextResponse.json({ error: 'Vul eerst de jaarnota-gegevens in.' }, { status: 400 });
+      }
+
+      const result = buildAnnualBillIndicativeAnalysis(body.annualBillInput, body.settings);
+      if (!result) {
+        return NextResponse.json(
+          { error: 'Voor indicatief jaarnota-advies zijn minimaal totaal verbruik en totale teruglevering nodig.' },
+          { status: 422 }
+        );
+      }
+
+      const analysisId = storeAnalysisResult(result);
+      return NextResponse.json({ ...result, analysisId });
+    }
+
+    if ((!Array.isArray(body.rows) && !body.uploadId) || !body.mapping) {
       return NextResponse.json({ error: 'Ongeldige analyse-aanvraag.' }, { status: 400 });
     }
 

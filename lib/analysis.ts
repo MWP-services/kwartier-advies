@@ -11,9 +11,39 @@ import type { NormalizationDiagnostics, InterpretationMode } from './normalizati
 import type { PvSummary, ScenarioResult } from './simulation';
 import type { PvAnalysisMode, PvStrategy } from './pvSimulation';
 import type { PricingMode } from './pricing';
+import type { AnnualBillAdviceResult } from '@/src/lib/annual-bill/calculateAnnualBillAdvice';
 
 export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
+export type PvInputMode = 'intervalData' | 'annualBill' | 'manualAnnualBill';
+
+export type AnnualBillInput = {
+  supplierName?: string;
+  invoiceDate?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  eanElectricity?: string;
+  usageNormalKwh?: number;
+  usageOffPeakKwh?: number;
+  feedInNormalKwh?: number;
+  feedInOffPeakKwh?: number;
+  totalUsageKwh?: number;
+  totalFeedInKwh?: number;
+  annualPvProductionKwh?: number;
+  normalTariffEurPerKwh?: number;
+  offPeakTariffEurPerKwh?: number;
+  feedInTariffEurPerKwh?: number;
+  totalElectricityCostEur?: number;
+  energyTaxElectricityEur?: number;
+  gridCostElectricityEur?: number;
+  batteryInvestmentEur?: number;
+  solarPanelCount?: number;
+  solarPanelWp?: number;
+  roofOrientation?: 'south' | 'east_west' | 'east' | 'west' | 'other';
+  extractionConfidence?: number;
+  missingFields?: string[];
+  source?: 'pdf' | 'manual';
+};
 
 export interface AnalysisSettings {
   analysisType: AnalysisType;
@@ -23,6 +53,7 @@ export interface AnalysisSettings {
   safetyFactor: number;
   efficiency: number;
   interpretationMode: InterpretationMode;
+  pvInputMode: PvInputMode;
   pvStrategy: PvStrategy;
   pvCustomerType: 'auto' | 'home' | 'business';
   pvPricingMode: PricingMode;
@@ -55,6 +86,7 @@ export interface AnalysisResult {
   pvAdviceCharts?: PvAdviceChartsData | null;
   pvAnalysisMode?: PvAnalysisMode | null;
   pvWarnings?: string[];
+  annualBillAdvice?: AnnualBillAdviceResult | null;
 }
 
 export const defaultAnalysisSettings: AnalysisSettings = {
@@ -65,6 +97,7 @@ export const defaultAnalysisSettings: AnalysisSettings = {
   safetyFactor: 1.2,
   efficiency: 0.9,
   interpretationMode: 'AUTO',
+  pvInputMode: 'intervalData',
   pvStrategy: 'SELF_CONSUMPTION_ONLY',
   pvCustomerType: 'auto',
   pvPricingMode: 'dynamic',
@@ -88,6 +121,7 @@ export function analysisSettingsEqual(a: AnalysisSettings, b: AnalysisSettings):
     a.safetyFactor === b.safetyFactor &&
     a.efficiency === b.efficiency &&
     a.interpretationMode === b.interpretationMode &&
+    a.pvInputMode === b.pvInputMode &&
     a.pvStrategy === b.pvStrategy &&
     a.pvCustomerType === b.pvCustomerType &&
     a.pvPricingMode === b.pvPricingMode &&
