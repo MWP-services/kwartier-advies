@@ -175,12 +175,15 @@ function technicalSettingsEqual(a: AnalysisSettings, b: AnalysisSettings): boole
 
 export default function HomePage() {
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
+  const [uploadId, setUploadId] = useState<string | null>(null);
+  const [uploadedRowCount, setUploadedRowCount] = useState(0);
   const [headers, setHeaders] = useState<string[]>([]);
   const [draftMapping, setDraftMapping] = useState<ColumnMapping>({ timestamp: '', consumptionKwh: '' });
   const [appliedMapping, setAppliedMapping] = useState<ColumnMapping | null>(null);
   const [draftSettings, setDraftSettings] = useState<AnalysisSettings>(defaultAnalysisSettings);
   const [appliedSettings, setAppliedSettings] = useState<AnalysisSettings | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [financialResult, setFinancialResult] = useState<PvSelfConsumptionAdviceResult | null>(null);
   const [financialPvAdviceCharts, setFinancialPvAdviceCharts] = useState<PvAdviceChartsData | null>(null);
   const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
@@ -206,7 +209,7 @@ export default function HomePage() {
   const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
 
   const canAnalyze =
-    rawRows.length > 0 &&
+    (uploadedRowCount > 0 || rawRows.length > 0) &&
     !!draftMapping.timestamp &&
     !!draftMapping.consumptionKwh &&
     draftSettings.efficiency > 0 &&
@@ -249,27 +252,34 @@ export default function HomePage() {
   const handleFile = async (file: File) => {
     setError(null);
     try {
-      const { autoDetectColumns, parseCsv, parseXlsx } = await import('@/lib/parsing');
-      let detectedMapping: ColumnMapping | null = null;
-      if (file.name.toLowerCase().endsWith('.csv')) {
-        const content = await file.text();
-        const result = parseCsv(content);
-        setRawRows(result.rows);
-        setHeaders(result.headers);
-        detectedMapping = autoDetectColumns(result.headers);
-      } else {
-        const buffer = await file.arrayBuffer();
-        const result = parseXlsx(buffer);
-        setRawRows(result.rows);
-        setHeaders(result.headers);
-        detectedMapping = autoDetectColumns(result.headers);
+      const formData = new FormData();
+      formData.set('file', file);
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const result = (await response.json()) as {
+        uploadId?: string;
+        headers?: string[];
+        rowCount?: number;
+        detectedMapping?: ColumnMapping | null;
+        error?: string;
+      };
+      if (!response.ok || !result.uploadId || !result.headers) {
+        throw new Error(result.error ?? `Bestand uploaden mislukt (${response.status})`);
       }
-      if (detectedMapping) {
-        setDraftMapping(detectedMapping);
+
+      setUploadId(result.uploadId);
+      setUploadedRowCount(result.rowCount ?? 0);
+      setRawRows([]);
+      setHeaders(result.headers);
+      if (result.detectedMapping) {
+        setDraftMapping(result.detectedMapping);
       }
       setAppliedSettings(null);
       setAppliedMapping(null);
       setAnalysisResult(null);
+      setAnalysisId(null);
       setFinancialResult(null);
       setFinancialPvAdviceCharts(null);
       setAnalyzedAt(null);
@@ -299,16 +309,26 @@ export default function HomePage() {
 
     try {
       setAnalysisProgress({ percent: 25, label: 'Rekenmodules laden...' });
-      const [{ mapRows }, { runAnalysis }] = await Promise.all([
-        import('@/lib/parsing'),
-        import('@/lib/clientAnalysis')
-      ]);
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadId,
+          rows: uploadId ? undefined : rawRows,
+          mapping: draftMapping,
+          settings: draftSettings
+        })
+      });
+      const payload = (await response.json()) as (AnalysisResult & { analysisId?: string }) | { error?: string };
       setAnalysisProgress({ percent: 45, label: 'Data opschonen en kwartieren voorbereiden...' });
       await new Promise((resolve) => setTimeout(resolve, 0));
-      const mappedRows = mapRows(rawRows, draftMapping);
       setAnalysisProgress({ percent: 70, label: 'Batterijscenario’s simuleren...' });
       await new Promise((resolve) => setTimeout(resolve, 0));
-      const result = runAnalysis(mappedRows, draftSettings);
+      if (!response.ok) {
+        setError('error' in payload && payload.error ? payload.error : `Analyse mislukt (${response.status})`);
+        return;
+      }
+      const result = payload as AnalysisResult & { analysisId?: string };
       if (!result) {
         setError('Geen bruikbare rijen na normalisatie of filtering.');
         return;
@@ -318,6 +338,7 @@ export default function HomePage() {
       setAppliedSettings({ ...draftSettings });
       setAppliedMapping({ ...draftMapping });
       setAnalysisResult(result);
+      setAnalysisId(result.analysisId ?? null);
       setFinancialResult(null);
       setFinancialPvAdviceCharts(null);
       setSelectedScenario(result.sizing.recommendedProduct?.capacityKwh ?? result.scenarios[0]?.capacityKwh ?? 64);
@@ -383,14 +404,6 @@ export default function HomePage() {
     setError(null);
     if (!analysisResult || analysisResult.analysisType !== 'PV_SELF_CONSUMPTION') return;
     if (
-      draftSettings.pvPricingMode === 'dynamic' &&
-      priceIntervals.length === 0 &&
-      !draftSettings.pvFallbackToAveragePrices
-    ) {
-      setError('Upload een prijsbestand of zet fallback naar gemiddelde prijzen aan.');
-      return;
-    }
-    if (
       draftSettings.pvPricingMode === 'variable' &&
       !variablePricePeriods.some((period) => !!period.startTs && !!period.endTs)
     ) {
@@ -404,52 +417,38 @@ export default function HomePage() {
 
     try {
       setFinancialProgress({ percent: 25, label: 'Prijs- en rekenmodules laden...' });
-      const [{ attachPricesToIntervals }, { buildPvAdviceChartsData, computePvSelfConsumptionAdvice }] =
-        await Promise.all([
-          import('@/lib/pricing'),
-          import('@/lib/calculations')
-        ]);
       setFinancialProgress({ percent: 45, label: 'Prijzen aan kwartieren koppelen...' });
       const effectivePriceIntervals =
         draftSettings.pvPricingMode === 'variable'
           ? variablePricePeriods.filter((period) => period.startTs && period.endTs)
           : priceIntervals;
-      const pricingAttachment =
-        draftSettings.pvPricingMode === 'average'
-          ? null
-          : attachPricesToIntervals(analysisResult.intervals, effectivePriceIntervals, {
-              pricingMode: draftSettings.pvPricingMode,
-              averageImportPriceEurPerKwh: draftSettings.pvImportPriceEurPerKwh,
-              averageExportPriceEurPerKwh: draftSettings.pvExportCompensationEurPerKwh,
-              averageFeedInCostEurPerKwh: draftSettings.pvFeedInCostEurPerKwh,
-              priceIntervals: effectivePriceIntervals,
-              fallbackToAveragePrices: draftSettings.pvFallbackToAveragePrices
-            });
-      const pricedIntervals = pricingAttachment?.intervalsWithPrices ?? analysisResult.intervals;
-
       setFinancialProgress({ percent: 70, label: 'Financiële batterijscenario’s doorrekenen...' });
       await new Promise((resolve) => setTimeout(resolve, 0));
-      const financialAdvice = computePvSelfConsumptionAdvice(pricedIntervals, {
-        customerType: appliedSettings?.pvCustomerType ?? draftSettings.pvCustomerType,
-        economics: {
-          importPriceEurPerKwh: draftSettings.pvImportPriceEurPerKwh,
-          exportCompensationEurPerKwh: draftSettings.pvExportCompensationEurPerKwh,
-          feedInCostEurPerKwh: draftSettings.pvFeedInCostEurPerKwh,
-          installationCostEur: draftSettings.pvInstallationCostEur,
-          yearlyMaintenanceEur: draftSettings.pvYearlyMaintenanceEur,
-          pricingMode: draftSettings.pvPricingMode,
-          fallbackToAveragePrices: draftSettings.pvFallbackToAveragePrices,
-          priceIntervals: effectivePriceIntervals,
-          pricingStats: pricingAttachment?.pricingStats
-        }
+      const response = await fetch('/api/financial-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          analysisId,
+          intervals: analysisId ? undefined : analysisResult.intervals,
+          formulaAdvice: analysisId ? undefined : analysisResult.sizing.pvFormulaAdvice ?? null,
+          settings: {
+            ...draftSettings,
+            pvCustomerType: appliedSettings?.pvCustomerType ?? draftSettings.pvCustomerType
+          },
+          priceIntervals: effectivePriceIntervals
+        })
       });
+      const payload = (await response.json()) as
+        | { financialAdvice: PvSelfConsumptionAdviceResult; charts: PvAdviceChartsData | null }
+        | { error?: string };
+      if (!response.ok || !('financialAdvice' in payload)) {
+        setError('error' in payload && payload.error ? payload.error : `Financiele berekening mislukt (${response.status})`);
+        return;
+      }
+      const financialAdvice = payload.financialAdvice;
       setFinancialProgress({ percent: 90, label: 'Rapportgrafieken en terugverdientijd klaarzetten...' });
       setFinancialResult(financialAdvice);
-      setFinancialPvAdviceCharts(
-        analysisResult.sizing.pvFormulaAdvice
-          ? buildPvAdviceChartsData(analysisResult.sizing.pvFormulaAdvice, analysisResult.intervals, financialAdvice)
-          : null
-      );
+      setFinancialPvAdviceCharts(payload.charts);
       setFinancialProgress({ percent: 100, label: 'Financiële berekening gereed.' });
     } finally {
       setIsCalculatingFinancials(false);
@@ -1076,18 +1075,22 @@ export default function HomePage() {
                     <option value="variable">Variabel contract</option>
                   </select>
                 </label>
-                <label className="text-sm">
-                  Importprijs / fallback (EUR/kWh)
-                  <input className="wx-input" type="number" step="0.01" value={draftSettings.pvImportPriceEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvImportPriceEurPerKwh: Number(event.target.value) }))} />
-                </label>
-                <label className="text-sm">
-                  Terugleververgoeding / fallback (EUR/kWh)
-                  <input className="wx-input" type="number" step="0.01" value={draftSettings.pvExportCompensationEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvExportCompensationEurPerKwh: Number(event.target.value) }))} />
-                </label>
-                <label className="text-sm">
-                  Terugleverkosten / fallback (EUR/kWh)
-                  <input className="wx-input" type="number" step="0.01" value={draftSettings.pvFeedInCostEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvFeedInCostEurPerKwh: Number(event.target.value) }))} />
-                </label>
+                {draftSettings.pvPricingMode !== 'dynamic' && (
+                  <>
+                    <label className="text-sm">
+                      Importprijs / fallback (EUR/kWh)
+                      <input className="wx-input" type="number" step="0.01" value={draftSettings.pvImportPriceEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvImportPriceEurPerKwh: Number(event.target.value) }))} />
+                    </label>
+                    <label className="text-sm">
+                      Terugleververgoeding / fallback (EUR/kWh)
+                      <input className="wx-input" type="number" step="0.01" value={draftSettings.pvExportCompensationEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvExportCompensationEurPerKwh: Number(event.target.value) }))} />
+                    </label>
+                    <label className="text-sm">
+                      Terugleverkosten / fallback (EUR/kWh)
+                      <input className="wx-input" type="number" step="0.01" value={draftSettings.pvFeedInCostEurPerKwh} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvFeedInCostEurPerKwh: Number(event.target.value) }))} />
+                    </label>
+                  </>
+                )}
                 <label className="text-sm">
                   Investering (EUR)
                   <input className="wx-input" type="number" step="100" value={draftSettings.pvInstallationCostEur ?? ''} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvInstallationCostEur: event.target.value === '' ? undefined : Number(event.target.value) }))} />
@@ -1096,10 +1099,12 @@ export default function HomePage() {
                   Jaarlijks onderhoud / kosten (EUR)
                   <input className="wx-input" type="number" step="10" value={draftSettings.pvYearlyMaintenanceEur ?? 0} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvYearlyMaintenanceEur: Number(event.target.value) }))} />
                 </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={draftSettings.pvFallbackToAveragePrices} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvFallbackToAveragePrices: event.target.checked }))} />
-                  Fallback naar gemiddelde prijzen toestaan
-                </label>
+                {draftSettings.pvPricingMode !== 'dynamic' && (
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={draftSettings.pvFallbackToAveragePrices} onChange={(event) => setDraftSettings((prev) => ({ ...prev, pvFallbackToAveragePrices: event.target.checked }))} />
+                    Fallback naar gemiddelde prijzen toestaan
+                  </label>
+                )}
                 {draftSettings.pvPricingMode === 'variable' && (
                   <div className="lg:col-span-3">
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
