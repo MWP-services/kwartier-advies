@@ -11,6 +11,7 @@ import { DataQualityPanel } from '@/components/DataQualityPanel';
 import { KpiCards } from '@/components/KpiCards';
 import { ScenarioTable } from '@/components/ScenarioTable';
 import { Upload } from '@/components/Upload';
+import { PageTitle, PremiumBadge, Screen } from '@/components/ui';
 import type {
   PeakMoment,
   ProcessedInterval,
@@ -666,7 +667,7 @@ export default function HomePage() {
   };
 
   return (
-    <main className="wx-shell">
+    <Screen>
       <section className="wx-hero">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-4">
@@ -678,16 +679,12 @@ export default function HomePage() {
               className="h-auto w-[140px] md:w-[170px]"
               priority
             />
-            <div>
-              <h1 className="text-2xl font-bold md:text-3xl">
-                {draftSettings.analysisType === 'PV_SELF_CONSUMPTION' ? 'PV Self Consumption Adviseur' : 'Peak Shaving Adviseur'}
-              </h1>
-              <p className="text-sm text-slate-600">Snelle batterij-analyse in WattsNext-stijl</p>
-            </div>
+            <PageTitle
+              title={draftSettings.analysisType === 'PV_SELF_CONSUMPTION' ? 'PV Self Consumption Adviseur' : 'Peak Shaving Adviseur'}
+              description="batterij-analyse met scenariovergelijking, rapportage en financiële onderbouwing."
+            />
           </div>
-          <div className="rounded-lg border border-lime-200 bg-lime-50 px-3 py-2 text-xs font-medium text-lime-800">
-            ENERGIEOPLOSSINGEN
-          </div>
+          <PremiumBadge tone="success">ENERGIEOPLOSSINGEN</PremiumBadge>
         </div>
       </section>
 
@@ -1370,6 +1367,6 @@ export default function HomePage() {
           Upload data en klik op Analyseer om resultaten te genereren.
         </div>
       )}
-    </main>
+    </Screen>
   );
 }

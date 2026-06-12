@@ -64,19 +64,20 @@
 
 @layer base {
   :root {
-    --wx-bg: #ffffff;
-    --wx-text: #000000;
-    --wx-text-secondary: #333333;
-    --wx-muted: #666666;
-    --wx-green: #A2C037;
-    --wx-green-dark: #4D8C3F;
-    --wx-green-light: #E8F0D1;
+    --wx-bg: #f6f7f3;
+    --wx-text: #182018;
+    --wx-text-secondary: #344033;
+    --wx-muted: #66715f;
+    --wx-green: #4f7f38;
+    --wx-green-dark: #315f2d;
+    --wx-green-light: #edf4e6;
     --wx-lime: #A2C037;
-    --wx-warm: #DC911B;
-    --wx-yellow: #F3D03A;
-    --wx-border: #e0e0e0;
-    --wx-border-light: #f0f0f0;
-    --wx-panel: #fafafa;
+    --wx-warm: #c98a24;
+    --wx-yellow: #e2bd32;
+    --wx-border: #dfe6d8;
+    --wx-border-light: #edf1e9;
+    --wx-panel: #ffffff;
+    --wx-panel-muted: #f1f4ec;
   }
 
   html,
@@ -87,9 +88,7 @@
   body {
     color: var(--wx-text);
     background:
-      radial-gradient(circle at 10% 0%, rgba(162, 192, 55, 0.08), transparent 28%),
-      radial-gradient(circle at 100% 0%, rgba(243, 208, 58, 0.06), transparent 24%),
-      radial-gradient(circle at 80% 38%, rgba(220, 145, 27, 0.04), transparent 30%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(246, 247, 243, 0.96) 360px),
       var(--wx-bg);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -104,21 +103,21 @@
 
   input:focus,
   select:focus {
-    box-shadow: 0 0 0 3px rgba(162, 192, 55, 0.25);
+    box-shadow: 0 0 0 3px rgba(79, 127, 56, 0.16);
     border-color: var(--wx-green);
   }
 }
 
 @layer components {
   .wx-shell {
-    @apply mx-auto max-w-7xl space-y-5 px-4 py-6 md:px-6;
+    @apply mx-auto max-w-7xl space-y-5 px-4 py-6 md:px-6 lg:py-8;
   }
 
   .wx-hero {
     @apply relative overflow-hidden rounded-2xl border p-5 md:p-8;
     border-color: var(--wx-border);
-    background: linear-gradient(135deg, #ffffff 0%, #f8faf5 100%);
-    box-shadow: 0 8px 24px rgba(162, 192, 55, 0.12);
+    background: linear-gradient(135deg, #ffffff 0%, #f3f6ef 100%);
+    box-shadow: 0 18px 48px rgba(24, 32, 24, 0.07);
   }
 
   .wx-hero::after {
@@ -129,27 +128,31 @@
     width: 200px;
     height: 200px;
     border-radius: 999px;
-    background: radial-gradient(circle, rgba(162, 192, 55, 0.12), transparent 66%);
+    background: radial-gradient(circle, rgba(79, 127, 56, 0.1), transparent 66%);
     pointer-events: none;
   }
 
   .wx-card {
-    @apply rounded-xl border p-6 transition-shadow duration-200;
+    @apply rounded-xl border p-5 transition duration-200 md:p-6;
     border-color: var(--wx-border);
     background: var(--wx-panel);
-    box-shadow: 0 8px 24px rgba(162, 192, 55, 0.08);
+    box-shadow: 0 1px 2px rgba(24, 32, 24, 0.04);
   }
 
   .wx-card:hover {
-    box-shadow: 0 12px 32px rgba(162, 192, 55, 0.12);
-    border-color: var(--wx-green);
+    box-shadow: 0 14px 34px rgba(24, 32, 24, 0.07);
+    border-color: #cfdcc6;
+  }
+
+  .wx-card-interactive:hover {
+    transform: translateY(-1px);
   }
 
   .wx-title {
-    @apply mb-3 text-lg font-bold tracking-tight;
+    @apply mb-3 text-base font-semibold tracking-tight md:text-lg;
     color: var(--wx-text);
     position: relative;
-    padding-left: 14px;
+    padding-left: 12px;
   }
 
   .wx-title::before {
@@ -157,21 +160,22 @@
     position: absolute;
     left: 0;
     top: 3px;
-    width: 5px;
-    height: 22px;
+    width: 4px;
+    height: 20px;
     border-radius: 999px;
-    background: linear-gradient(180deg, var(--wx-green) 0%, var(--wx-warm) 100%);
+    background: var(--wx-green);
   }
 
   .wx-btn-primary {
-    @apply rounded-lg px-5 py-2.5 font-semibold text-white transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
-    background: linear-gradient(135deg, var(--wx-green) 0%, var(--wx-green-dark) 100%);
-    box-shadow: 0 4px 12px rgba(162, 192, 55, 0.3);
+    @apply rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition duration-200 disabled:cursor-not-allowed disabled:opacity-50;
+    background: var(--wx-green-dark);
+    box-shadow: 0 1px 2px rgba(24, 32, 24, 0.12);
   }
 
   .wx-btn-primary:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(162, 192, 55, 0.4);
+    transform: translateY(-1px);
+    background: #274f25;
+    box-shadow: 0 10px 22px rgba(49, 95, 45, 0.18);
   }
 
   .wx-btn-primary:active:not(:disabled) {
@@ -179,21 +183,40 @@
   }
 
   .wx-btn-secondary {
-    @apply rounded-lg border px-5 py-2.5 font-semibold transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
-    border-color: var(--wx-green);
+    @apply rounded-lg border px-5 py-2.5 text-sm font-semibold transition duration-200 disabled:cursor-not-allowed disabled:opacity-50;
+    border-color: #c8d7c1;
     color: var(--wx-green);
-    background: rgba(162, 192, 55, 0.1);
+    background: #ffffff;
   }
 
   .wx-btn-secondary:hover:not(:disabled) {
-    background: rgba(162, 192, 55, 0.15);
-    transform: translateY(-2px);
+    background: var(--wx-green-light);
+    transform: translateY(-1px);
+  }
+
+  .wx-btn-ghost {
+    @apply rounded-lg px-5 py-2.5 text-sm font-semibold text-slate-700 transition duration-200 disabled:cursor-not-allowed disabled:opacity-50;
+    background: transparent;
+  }
+
+  .wx-btn-ghost:hover:not(:disabled) {
+    background: rgba(49, 95, 45, 0.07);
+  }
+
+  .wx-btn-danger {
+    @apply rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition duration-200 disabled:cursor-not-allowed disabled:opacity-50;
+    background: #b42318;
+  }
+
+  .wx-btn-danger:hover:not(:disabled) {
+    background: #981b12;
   }
 
   .wx-input {
-    @apply mt-1 w-full rounded-lg border px-3 py-2;
-    border-color: #cbd9c8;
+    @apply mt-1 w-full rounded-lg border px-3 py-2 text-sm transition duration-200;
+    border-color: #ccd8c5;
     background: #ffffff;
+    color: var(--wx-text);
   }
 
   .wx-table th {
