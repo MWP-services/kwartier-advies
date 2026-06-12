@@ -67,16 +67,39 @@ function getEmbeddedLogoSrc(): string | null {
   return asset?.dataUri ?? null;
 }
 
-function getRecommendedBrochureInfo(payload: PdfPayload): { key: string; dataUri: string } | null {
-  const product = payload.sizing.recommendedProduct;
+function getProductBrochureKey(product: PdfPayload['sizing']['recommendedProduct']): string | null {
   if (!product) return null;
 
-  const baseKey =
-    product.unitCapacityKwh && [64, 96, 232, 261].includes(Math.round(product.unitCapacityKwh))
-      ? String(Math.round(product.unitCapacityKwh))
-      : [232, 2090, 5015].includes(Math.round(product.capacityKwh))
-        ? String(Math.round(product.capacityKwh))
-        : null;
+  const brochureKeys = [64, 96, 232, 261, 2090, 5015];
+  const modularKeys = [64, 96, 232, 261];
+
+  const unitCapacity = product.unitCapacityKwh == null ? null : Math.round(product.unitCapacityKwh);
+  if (unitCapacity != null && modularKeys.includes(unitCapacity)) {
+    return String(unitCapacity);
+  }
+
+  const firstBreakdownCapacity = product.breakdown?.[0]?.unitCapacityKwh;
+  const breakdownCapacity = firstBreakdownCapacity == null ? null : Math.round(firstBreakdownCapacity);
+  if (breakdownCapacity != null && modularKeys.includes(breakdownCapacity)) {
+    return String(breakdownCapacity);
+  }
+
+  const labelMatch = product.label.match(/(?:^|\D)(64|96|232|261|2090|5015)\s*kWh/i);
+  if (labelMatch) {
+    return labelMatch[1];
+  }
+
+  const capacity = Math.round(product.capacityKwh);
+  if (brochureKeys.includes(capacity)) {
+    return String(capacity);
+  }
+
+  return null;
+}
+
+function getRecommendedBrochureInfo(payload: PdfPayload): { key: string; dataUri: string } | null {
+  const product = payload.sizing.recommendedProduct;
+  const baseKey = getProductBrochureKey(product);
 
   if (!baseKey) return null;
   const asset = getEmbeddedAsset([
@@ -1136,10 +1159,10 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
 
     if (pvCharts?.exportVsNightImportChart?.length) {
       Plotly.newPlot('pv-export-night-chart', [
-        { type: 'bar', name: 'Teruglevering', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyExportKwh), marker: { color: '#F5B83D' } },
-        { type: 'bar', name: 'Avond/nachtverbruik', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.eveningNightImportKwh), marker: { color: '#4E8D3E' } },
-        { type: 'scatter', mode: 'lines', name: 'Praktische opslagbehoefte', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyStorageNeedKwh), line: { color: '#2F5F33', width: 2 } }
-      ], { ...wattsTheme, barmode: 'group', xaxis: { tickangle: -20, automargin: true }, yaxis: { title: 'kWh per dag', rangemode: 'tozero' }, legend: { orientation: 'h', x: 0, y: 1.16, xanchor: 'left', yanchor: 'bottom' }, margin: { t: 70, r: 18, b: 82, l: 58 } }, { responsive: true, displaylogo: false });
+        { type: 'bar', name: 'Teruglevering', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyExportKwh), marker: { color: '#F5B83D' }, hovertemplate: 'Teruglevering: %{y:.1f} kWh<extra></extra>' },
+        { type: 'bar', name: 'Avond/nachtverbruik', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.eveningNightImportKwh), marker: { color: '#4E8D3E' }, hovertemplate: 'Avond/nachtverbruik: %{y:.1f} kWh<extra></extra>' },
+        { type: 'scatter', mode: 'lines', name: 'Praktische opslagbehoefte', x: pvCharts.exportVsNightImportChart.map(d => d.date), y: pvCharts.exportVsNightImportChart.map(d => d.dailyStorageNeedKwh), line: { color: '#2F5F33', width: 2 }, hovertemplate: 'Praktische opslagbehoefte: %{y:.1f} kWh<extra></extra>' }
+      ], { ...wattsTheme, barmode: 'group', hovermode: 'x unified', xaxis: { tickangle: -20, automargin: true }, yaxis: { title: 'kWh per dag', rangemode: 'tozero' }, legend: { orientation: 'h', x: 0, y: 1.16, xanchor: 'left', yanchor: 'bottom' }, margin: { t: 70, r: 18, b: 82, l: 58 }, hoverlabel: { align: 'left' } }, { responsive: true, displaylogo: false });
     }
 
     const formatKwhYear = value => Math.round(value).toLocaleString('nl-NL') + ' kWh/jaar';
