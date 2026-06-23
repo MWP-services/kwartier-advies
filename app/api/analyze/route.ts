@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
+import type { AnalysisResult } from '@/lib/analysis';
 import type { AnalysisSettings } from '@/lib/analysis';
 import type { AnnualBillInput } from '@/lib/analysis';
 import type { ColumnMapping } from '@/lib/parsing';
+import type { PvBatterySimulationResult, PvSelfConsumptionAdviceResult, SizingResult } from '@/lib/calculations';
+import type { ScenarioResult } from '@/lib/simulation';
 import { buildAnnualBillIndicativeAnalysis } from '@/lib/annualBillAdvice';
 import { runAnalysis } from '@/lib/clientAnalysis';
 import { mapRows } from '@/lib/parsing';
@@ -15,6 +18,53 @@ interface AnalyzeRequestBody {
   mapping?: ColumnMapping;
   settings?: AnalysisSettings;
   annualBillInput?: AnnualBillInput;
+}
+
+function compactScenarioResult(scenario: ScenarioResult): ScenarioResult {
+  return {
+    ...scenario,
+    shavedSeries: [],
+    socSeries: []
+  };
+}
+
+function compactPvBatterySimulationResult(scenario: PvBatterySimulationResult): PvBatterySimulationResult {
+  const compactScenario = { ...scenario };
+  delete compactScenario.valueByInterval;
+  delete compactScenario.socSeries;
+  return compactScenario;
+}
+
+function compactPvSelfConsumptionAdvice(
+  advice: PvSelfConsumptionAdviceResult | null | undefined
+): PvSelfConsumptionAdviceResult | null | undefined {
+  if (!advice) return advice;
+
+  return {
+    ...advice,
+    simulationAdvice: {
+      conservative: compactPvBatterySimulationResult(advice.simulationAdvice.conservative),
+      recommended: compactPvBatterySimulationResult(advice.simulationAdvice.recommended),
+      spacious: compactPvBatterySimulationResult(advice.simulationAdvice.spacious),
+      allScenarios: advice.simulationAdvice.allScenarios.map(compactPvBatterySimulationResult)
+    }
+  };
+}
+
+function compactSizingResult(sizing: SizingResult): SizingResult {
+  return {
+    ...sizing,
+    pvSelfConsumptionAdvice: compactPvSelfConsumptionAdvice(sizing.pvSelfConsumptionAdvice)
+  };
+}
+
+function compactAnalysisResult(result: AnalysisResult, analysisId: string): AnalysisResult & { analysisId: string } {
+  return {
+    ...result,
+    analysisId,
+    sizing: compactSizingResult(result.sizing),
+    scenarios: result.scenarios.map(compactScenarioResult)
+  };
 }
 
 export async function POST(request: Request) {
@@ -39,7 +89,7 @@ export async function POST(request: Request) {
       }
 
       const analysisId = storeAnalysisResult(result);
-      return NextResponse.json({ ...result, analysisId });
+      return NextResponse.json(compactAnalysisResult(result, analysisId));
     }
 
     if ((!Array.isArray(body.rows) && !body.uploadId) || !body.mapping) {
@@ -59,7 +109,7 @@ export async function POST(request: Request) {
     }
 
     const analysisId = storeAnalysisResult(result);
-    return NextResponse.json({ ...result, analysisId });
+    return NextResponse.json(compactAnalysisResult(result, analysisId));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Analyse op de server is mislukt.' },

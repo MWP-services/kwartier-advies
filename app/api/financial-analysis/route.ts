@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { AnalysisSettings } from '@/lib/analysis';
-import type { ProcessedInterval, PvStorageFormulaAdviceResult } from '@/lib/calculations';
+import type {
+  ProcessedInterval,
+  PvBatterySimulationResult,
+  PvSelfConsumptionAdviceResult,
+  PvStorageFormulaAdviceResult
+} from '@/lib/calculations';
 import { buildPvAdviceChartsData, computePvSelfConsumptionAdvice } from '@/lib/calculations';
 import { attachPricesToIntervals, type PriceInterval } from '@/lib/pricing';
 import { fetchHistoricalDynamicPricesForRange } from '@/src/lib/dynamicPrices';
@@ -14,6 +19,25 @@ interface FinancialAnalysisRequestBody {
   formulaAdvice?: PvStorageFormulaAdviceResult | null;
   settings?: AnalysisSettings;
   priceIntervals?: PriceInterval[];
+}
+
+function compactPvBatterySimulationResult(scenario: PvBatterySimulationResult): PvBatterySimulationResult {
+  const compactScenario = { ...scenario };
+  delete compactScenario.valueByInterval;
+  delete compactScenario.socSeries;
+  return compactScenario;
+}
+
+function compactPvSelfConsumptionAdvice(advice: PvSelfConsumptionAdviceResult): PvSelfConsumptionAdviceResult {
+  return {
+    ...advice,
+    simulationAdvice: {
+      conservative: compactPvBatterySimulationResult(advice.simulationAdvice.conservative),
+      recommended: compactPvBatterySimulationResult(advice.simulationAdvice.recommended),
+      spacious: compactPvBatterySimulationResult(advice.simulationAdvice.spacious),
+      allScenarios: advice.simulationAdvice.allScenarios.map(compactPvBatterySimulationResult)
+    }
+  };
 }
 
 function getIntervalRange(intervals: ProcessedInterval[]): { start: string; end: string } | null {
@@ -116,7 +140,7 @@ export async function POST(request: Request) {
       ? buildPvAdviceChartsData(formulaAdvice, intervals, financialAdvice)
       : null;
 
-    return NextResponse.json({ financialAdvice, charts });
+    return NextResponse.json({ financialAdvice: compactPvSelfConsumptionAdvice(financialAdvice), charts });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Financiele analyse op de server is mislukt.' },
