@@ -498,76 +498,111 @@ function buildModularCombinationCandidates(
     .sort((a, b) => a.capacityKwh - b.capacityKwh);
   if (pricedOptions.length === 0) return [];
 
-  const maxCapacityKwh = requiredKwh + Math.max(...pricedOptions.map((option) => option.capacityKwh));
-  const maxCountBasis = Math.max(
-    ...pricedOptions.map((option) =>
-      Math.max(
-        Math.ceil(requiredKwh / option.capacityKwh),
-        Math.ceil(requiredKw / option.powerKw)
-      )
-    )
-  );
-  const counts = Array.from({ length: pricedOptions.length }, () => 0);
-  const candidates: BatteryConfigurationCandidate[] = [];
+  const baseOption = [...pricedOptions].sort(
+    (a, b) =>
+      (a.unitPriceEur ?? 0) / a.capacityKwh - (b.unitPriceEur ?? 0) / b.capacityKwh ||
+      (a.unitPriceEur ?? 0) / a.powerKw - (b.unitPriceEur ?? 0) / b.powerKw
+  )[0];
+  const baseIndex = pricedOptions.indexOf(baseOption);
+  const augmentOptions = pricedOptions.filter((_, index) => index !== baseIndex);
+  const maxOtherCapacityKwh = Math.max(0, ...augmentOptions.map((option) => option.capacityKwh));
+  const maxOtherPowerKw = Math.max(0, ...augmentOptions.map((option) => option.powerKw));
+  const augmentCounts = Array.from({ length: augmentOptions.length }, () => 0);
+  const candidatesByKey = new Map<string, BatteryConfigurationCandidate>();
 
-  function visit(index: number, capacityKwh: number, powerKw: number, priceEur: number): void {
-    if (capacityKwh > maxCapacityKwh) return;
+  function pushCandidate(countsByPricedOption: number[]): void {
+    const totals = pricedOptions.reduce(
+      (acc, option, index) => {
+        const count = countsByPricedOption[index] ?? 0;
+        acc.capacityKwh += count * option.capacityKwh;
+        acc.powerKw += count * option.powerKw;
+        acc.priceEur += count * (option.unitPriceEur ?? 0);
+        return acc;
+      },
+      { capacityKwh: 0, powerKw: 0, priceEur: 0 }
+    );
 
-    if (index === pricedOptions.length) {
-      if (capacityKwh < requiredKwh || powerKw < requiredKw) return;
+    if (totals.capacityKwh < requiredKwh || totals.powerKw < requiredKw) return;
 
-      const breakdown = pricedOptions
-        .map((option, optionIndex) => ({
-          option,
-          count: counts[optionIndex]
-        }))
-        .filter((entry) => entry.count > 0)
-        .map(({ option, count }) => ({
-          type: `${option.capacityKwh} kWh`,
-          count,
-          unitCapacityKwh: option.capacityKwh,
-          unitPriceEur: roundCurrency(option.unitPriceEur ?? 0),
-          totalPriceEur: roundCurrency(count * (option.unitPriceEur ?? 0))
-        }));
-      const label = breakdown.map((entry) => `${entry.count}x ${entry.unitCapacityKwh} kWh`).join(' + ');
-      const primary = breakdown[0];
+    const key = countsByPricedOption.join(':');
+    if (candidatesByKey.has(key)) return;
 
-      candidates.push({
-        label: `${label} (modulair)`,
-        totalCapacityKwh: capacityKwh,
-        totalPowerKw: powerKw,
-        totalPriceEur: priceEur,
-        overCapacityKwh: capacityKwh - requiredKwh,
-        overPowerKw: powerKw - requiredKw,
-        count: breakdown.reduce((sum, entry) => sum + entry.count, 0),
-        unitCapacityKwh: primary?.unitCapacityKwh ?? 0,
-        unitPowerKw: 0,
-        unitPriceEur: primary?.unitPriceEur,
-        breakdown
+    const breakdown = pricedOptions
+      .map((option, optionIndex) => ({
+        option,
+        count: countsByPricedOption[optionIndex] ?? 0
+      }))
+      .filter((entry) => entry.count > 0)
+      .map(({ option, count }) => ({
+        type: `${option.capacityKwh} kWh`,
+        count,
+        unitCapacityKwh: option.capacityKwh,
+        unitPriceEur: roundCurrency(option.unitPriceEur ?? 0),
+        totalPriceEur: roundCurrency(count * (option.unitPriceEur ?? 0))
+      }));
+    if (breakdown.length === 0) return;
+
+    const label = breakdown.map((entry) => `${entry.count}x ${entry.unitCapacityKwh} kWh`).join(' + ');
+    const primary = breakdown[0];
+
+    candidatesByKey.set(key, {
+      label: `${label} (modulair)`,
+      totalCapacityKwh: totals.capacityKwh,
+      totalPowerKw: totals.powerKw,
+      totalPriceEur: totals.priceEur,
+      overCapacityKwh: totals.capacityKwh - requiredKwh,
+      overPowerKw: totals.powerKw - requiredKw,
+      count: breakdown.reduce((sum, entry) => sum + entry.count, 0),
+      unitCapacityKwh: primary?.unitCapacityKwh ?? 0,
+      unitPowerKw: 0,
+      unitPriceEur: primary?.unitPriceEur,
+      breakdown
+    });
+  }
+
+  function visitAugments(index: number): void {
+    if (index === augmentOptions.length) {
+      const countsByPricedOption = Array.from({ length: pricedOptions.length }, () => 0);
+      let augmentCapacityKwh = 0;
+      let augmentPowerKw = 0;
+
+      augmentOptions.forEach((option, augmentIndex) => {
+        const pricedIndex = pricedOptions.indexOf(option);
+        const count = augmentCounts[augmentIndex] ?? 0;
+        countsByPricedOption[pricedIndex] = count;
+        augmentCapacityKwh += count * option.capacityKwh;
+        augmentPowerKw += count * option.powerKw;
+      });
+
+      const baseCount = Math.max(
+        0,
+        Math.ceil((requiredKwh - augmentCapacityKwh) / baseOption.capacityKwh),
+        Math.ceil((requiredKw - augmentPowerKw) / baseOption.powerKw)
+      );
+
+      [baseCount, baseCount + 1].forEach((count) => {
+        countsByPricedOption[baseIndex] = count;
+        pushCandidate(countsByPricedOption);
       });
       return;
     }
 
-    const option = pricedOptions[index];
+    const option = augmentOptions[index];
     const maxCount = Math.max(
       1,
-      Math.ceil(maxCapacityKwh / option.capacityKwh),
-      maxCountBasis + 1
+      Math.ceil((baseOption.capacityKwh + maxOtherCapacityKwh) / option.capacityKwh),
+      Math.ceil((baseOption.powerKw + maxOtherPowerKw) / option.powerKw)
     );
+
     for (let count = 0; count <= maxCount; count += 1) {
-      counts[index] = count;
-      visit(
-        index + 1,
-        capacityKwh + count * option.capacityKwh,
-        powerKw + count * option.powerKw,
-        priceEur + count * (option.unitPriceEur ?? 0)
-      );
+      augmentCounts[index] = count;
+      visitAugments(index + 1);
     }
-    counts[index] = 0;
+    augmentCounts[index] = 0;
   }
 
-  visit(0, 0, 0, 0);
-  return candidates;
+  visitAugments(0);
+  return Array.from(candidatesByKey.values());
 }
 
 export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw = 0): {
@@ -577,6 +612,14 @@ export function selectMinimumCostBatteryOptions(requiredKwh: number, requiredKw 
 } {
   const normalizedRequiredKwh = Math.max(0, requiredKwh);
   const normalizedRequiredKw = Math.max(0, requiredKw);
+  if (normalizedRequiredKwh === 0 && normalizedRequiredKw === 0) {
+    return {
+      recommendedProduct: null,
+      alternativeProduct: null,
+      noFeasibleBatteryByPower: false
+    };
+  }
+
   const candidates: BatteryConfigurationCandidate[] = [];
   const modularOptions = BATTERY_OPTIONS.filter((option) => option.modular);
   candidates.push(

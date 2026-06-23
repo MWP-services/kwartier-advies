@@ -559,6 +559,23 @@ describe('calculations', () => {
     expect(result.recommendedProduct?.totalPriceEur).toBeCloseTo(439959.6, 2);
   });
 
+  it('handles very large modular sizing needs without exhaustive combination search', () => {
+    const result = selectMinimumCostBatteryOptions(10000, 5000);
+
+    expect(result.noFeasibleBatteryByPower).toBe(false);
+    expect(result.recommendedProduct?.capacityKwh).toBeGreaterThanOrEqual(10000);
+    expect(result.recommendedProduct?.powerKw).toBeGreaterThanOrEqual(5000);
+    expect(result.recommendedProduct?.label).toBe('40x 261 kWh (modulair)');
+  });
+
+  it('does not return an empty modular label when no battery capacity is required', () => {
+    const result = selectMinimumCostBatteryOptions(0, 0);
+
+    expect(result.recommendedProduct).toBeNull();
+    expect(result.alternativeProduct).toBeNull();
+    expect(result.noFeasibleBatteryByPower).toBe(false);
+  });
+
   it('chooses 1x96 over 2x64 for R=70 by total price', () => {
     const result = selectMinimumCostBatteryOptions(70);
     expect(result.recommendedProduct?.label).toBe('1x 96 kWh (modulair)');
