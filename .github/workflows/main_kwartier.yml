@@ -16,16 +16,24 @@ jobs:
       - name: Set up Node.js version
         uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
+          node-version: '20.x'
+          cache: 'npm'
 
       - name: Install and build
         run: |
-          npm install
+          npm ci
           npm run build
 
-      - name: Zip Next.js app
+      - name: Prepare standalone deployment package
         run: |
-          zip next.zip ./* .next -qr
+          mkdir -p deploy/.next
+          cp -R .next/standalone/. deploy/
+          mkdir -p deploy/.next/static deploy/public
+          cp -R .next/static/. deploy/.next/static/
+          cp -R public/. deploy/public/
+          node -e "const fs=require('fs'); const pkg=require('./deploy/package.json'); pkg.scripts={start:'node server.js'}; delete pkg.devDependencies; fs.writeFileSync('./deploy/package.json', JSON.stringify(pkg, null, 2));"
+          cd deploy
+          zip -qr ../next.zip .
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
