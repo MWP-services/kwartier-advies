@@ -1,7 +1,7 @@
 import type { AnalysisResult, AnalysisSettings, AnnualBillInput } from './analysis';
 import type { IntervalRecord } from './calculations';
 import { runAnalysis } from './clientAnalysis';
-import { calculateAnnualBillAdvice, type AnnualBillAdviceInput } from '@/src/lib/annual-bill/calculateAnnualBillAdvice';
+import { calculateAnnualBillAdvice, type AnnualBillAdviceInput } from '../src/lib/annual-bill/calculateAnnualBillAdvice';
 
 const DAYS_PER_YEAR = 365;
 const SYNTHETIC_PROFILE_DAYS = 31;

@@ -5,6 +5,8 @@ import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import type { AnalysisResult, AnalysisSettings, AnnualBillInput, PvInputMode } from '@/lib/analysis';
 import { defaultAnalysisSettings } from '@/lib/analysis';
+import { pollAnalysisJob } from '@/lib/analysisJobClient';
+import type { StartAnalysisJobResponse } from '@/lib/analysisJobTypes';
 import { ColumnMapper } from '@/components/ColumnMapper';
 import { ComplianceSlider } from '@/components/ComplianceSlider';
 import { DataQualityPanel } from '@/components/DataQualityPanel';
@@ -233,6 +235,7 @@ export default function HomePage() {
   const [isCalculatingFinancials, setIsCalculatingFinancials] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<ProgressState | null>(null);
   const [financialProgress, setFinancialProgress] = useState<ProgressState | null>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
   const isPvMode = draftSettings.analysisType === 'PV_SELF_CONSUMPTION';
   const usesIntervalData = !isPvMode || inputMode === 'intervalData';
   const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
@@ -282,6 +285,13 @@ export default function HomePage() {
       }
     }
   }, [financialSettingsKey, financialResult]);
+
+  useEffect(() => {
+    return () => {
+      analysisAbortRef.current?.abort();
+      analysisAbortRef.current = null;
+    };
+  }, []);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -400,6 +410,8 @@ export default function HomePage() {
   };
 
   const handleAnalyze = async () => {
+    if (isAnalyzing) return;
+
     setError(null);
     if (usesIntervalData && (!draftMapping.timestamp || !draftMapping.consumptionKwh)) {
       setError('Selecteer eerst timestamp- en consumption-kolommen.');
@@ -423,10 +435,15 @@ export default function HomePage() {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
-      setAnalysisProgress({ percent: 25, label: 'Rekenmodules laden...' });
+      analysisAbortRef.current?.abort();
+      const abortController = new AbortController();
+      analysisAbortRef.current = abortController;
+
+      setAnalysisProgress({ percent: 20, label: 'Analysejob starten...' });
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           uploadId,
           rows: uploadId ? undefined : rawRows,
@@ -435,23 +452,39 @@ export default function HomePage() {
           annualBillInput: usesIntervalData ? undefined : annualBillInput
         })
       });
-      const payload = await readApiJson<(AnalysisResult & { analysisId?: string }) | { error?: string }>(response);
-      setAnalysisProgress({ percent: 45, label: 'Data opschonen en kwartieren voorbereiden...' });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      setAnalysisProgress({ percent: 70, label: 'Batterijscenario’s simuleren...' });
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      const payload = await readApiJson<StartAnalysisJobResponse | { error?: string }>(response);
       if (!response.ok) {
-        setError('error' in payload && payload.error ? payload.error : `Analyse mislukt (${response.status})`);
+        setError('error' in payload && payload.error ? payload.error : `Analyse starten mislukt (${response.status})`);
         return;
       }
-      const result = payload as AnalysisResult & { analysisId?: string };
+      if (!('jobId' in payload)) {
+        setError('Analyse kon niet worden gestart: server gaf geen jobId terug.');
+        return;
+      }
+
+      setAnalysisProgress({ percent: payload.progress, label: payload.currentStep });
+      const finalStatus = await pollAnalysisJob({
+        jobId: payload.jobId,
+        signal: abortController.signal,
+        intervalMs: 2500,
+        onStatus: (status) => {
+          setAnalysisProgress({ percent: status.progress, label: status.currentStep });
+        }
+      });
+
+      if (finalStatus.status === 'failed') {
+        setError(finalStatus.error);
+        return;
+      }
+
+      const result: AnalysisResult & { analysisId?: string } = finalStatus.result;
       if (!result) {
         setError('Geen bruikbare rijen na normalisatie of filtering.');
         return;
       }
 
       setAnalysisProgress({ percent: 92, label: 'Resultaten en grafieken klaarzetten...' });
-      setAppliedSettings({ ...draftSettings });
+      setAppliedSettings({ ...draftSettings, pvInputMode: inputMode });
       setAppliedMapping({ ...draftMapping });
       setAnalysisResult(result);
       setAnalysisId(result.analysisId ?? null);
@@ -462,9 +495,13 @@ export default function HomePage() {
       setAnalyzedAt(new Date().toISOString());
       setAnalysisProgress({ percent: 100, label: 'Analyse gereed.' });
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Analyse kon niet worden uitgevoerd. Probeer opnieuw of upload het bestand opnieuw.');
     } finally {
       setIsAnalyzing(false);
+      analysisAbortRef.current = null;
       window.setTimeout(() => setAnalysisProgress(null), 500);
     }
   };

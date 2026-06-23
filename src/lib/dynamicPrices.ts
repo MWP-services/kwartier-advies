@@ -22,6 +22,8 @@ export type FetchDynamicPricesOptions = DynamicPriceCostConfig & {
   zone?: 'NL';
   fetchImpl?: typeof fetch;
   energyZeroBaseUrl?: string;
+  timeoutMs?: number;
+  maxRetries?: number;
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -30,6 +32,9 @@ const DEFAULT_ENERGYZERO_BASE_URL = 'https://public.api.energyzero.nl';
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const PRICE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RETRIES = 2;
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
 const globalPriceCache = globalThis as typeof globalThis & {
   __kwartierDynamicPriceCache?: Map<string, { createdAt: number; points: DynamicPricePoint[] }>;
@@ -57,6 +62,43 @@ function toIso(value: unknown): string | null {
 
 function addHoursIso(startIso: string, hours: number): string {
   return new Date(new Date(startIso).getTime() + hours * HOUR_MS).toISOString();
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchWithTimeoutAndRetry(
+  fetchImpl: typeof fetch,
+  url: URL,
+  options: Pick<FetchDynamicPricesOptions, 'timeoutMs' | 'maxRetries'>
+): Promise<Response> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetchImpl(url, { signal: controller.signal });
+      if (!RETRYABLE_STATUSES.has(response.status) || attempt === maxRetries) {
+        return response;
+      }
+      lastError = new Error(`EnergyZero tijdelijke fout (${response.status})`);
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxRetries) {
+        throw error;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    await sleep(250 * 2 ** attempt);
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('EnergyZero prijzen ophalen mislukt.');
 }
 
 function localDateKey(date: Date): string {
@@ -201,7 +243,7 @@ export async function fetchEnergyZeroPricesForDate(
   url.searchParams.set('interval', '4');
   url.searchParams.set('inclBtw', 'true');
 
-  const response = await fetchImpl(url);
+  const response = await fetchWithTimeoutAndRetry(fetchImpl, url, options);
   if (!response.ok) {
     throw new Error(`EnergyZero prijzen ophalen mislukt (${response.status})`);
   }

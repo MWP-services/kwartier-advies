@@ -1,119 +1,102 @@
 import { NextResponse } from 'next/server';
-import type { AnalysisResult } from '@/lib/analysis';
-import type { AnalysisSettings } from '@/lib/analysis';
-import type { AnnualBillInput } from '@/lib/analysis';
-import type { ColumnMapping } from '@/lib/parsing';
-import type { PvBatterySimulationResult, PvSelfConsumptionAdviceResult, SizingResult } from '@/lib/calculations';
-import type { ScenarioResult } from '@/lib/simulation';
-import { buildAnnualBillIndicativeAnalysis } from '@/lib/annualBillAdvice';
-import { runAnalysis } from '@/lib/clientAnalysis';
-import { mapRows } from '@/lib/parsing';
-import { getUploadedDataset, storeAnalysisResult } from '@/lib/serverDataStore';
+import type { AnalyzeRequestBody, PersistedAnalyzeInput } from '@/lib/analysisJobTypes';
+import { jsonError } from '@/lib/apiResponses';
+import { getAnalysisJobStore, toStartAnalysisJobResponse } from '@/lib/analysisJobStore';
+import { ensureAnalysisWorkerStarted } from '@/lib/analysisWorker';
+import { getUploadedDataset } from '@/lib/serverDataStore';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-interface AnalyzeRequestBody {
-  uploadId?: string;
-  rows?: Record<string, unknown>[];
-  mapping?: ColumnMapping;
-  settings?: AnalysisSettings;
-  annualBillInput?: AnnualBillInput;
+const MAX_DIRECT_ROWS = 200_000;
+
+function elapsedMs(start: number): number {
+  return Math.round(performance.now() - start);
 }
 
-function compactScenarioResult(scenario: ScenarioResult): ScenarioResult {
-  return {
-    ...scenario,
-    shavedSeries: [],
-    socSeries: []
-  };
+function logAnalyzeStart(message: string, extra?: Record<string, unknown>): void {
+  if (extra) {
+    console.log(`[analyze] start ${message}`, extra);
+    return;
+  }
+  console.log(`[analyze] start ${message}`);
 }
 
-function compactPvBatterySimulationResult(scenario: PvBatterySimulationResult): PvBatterySimulationResult {
-  const compactScenario = { ...scenario };
-  delete compactScenario.valueByInterval;
-  delete compactScenario.socSeries;
-  return compactScenario;
-}
+function validateAndPersistInput(body: AnalyzeRequestBody): PersistedAnalyzeInput {
+  if (!body.settings) {
+    throw new Error('Ongeldige analyse-aanvraag.');
+  }
 
-function compactPvSelfConsumptionAdvice(
-  advice: PvSelfConsumptionAdviceResult | null | undefined
-): PvSelfConsumptionAdviceResult | null | undefined {
-  if (!advice) return advice;
-
-  return {
-    ...advice,
-    simulationAdvice: {
-      conservative: compactPvBatterySimulationResult(advice.simulationAdvice.conservative),
-      recommended: compactPvBatterySimulationResult(advice.simulationAdvice.recommended),
-      spacious: compactPvBatterySimulationResult(advice.simulationAdvice.spacious),
-      allScenarios: advice.simulationAdvice.allScenarios.map(compactPvBatterySimulationResult)
+  if (body.settings.analysisType === 'PV_SELF_CONSUMPTION' && body.settings.pvInputMode !== 'intervalData') {
+    if (!body.annualBillInput) {
+      throw new Error('Vul eerst de jaarnota-gegevens in.');
     }
-  };
-}
 
-function compactSizingResult(sizing: SizingResult): SizingResult {
-  return {
-    ...sizing,
-    pvSelfConsumptionAdvice: compactPvSelfConsumptionAdvice(sizing.pvSelfConsumptionAdvice)
-  };
-}
+    return {
+      settings: body.settings,
+      annualBillInput: body.annualBillInput
+    };
+  }
 
-function compactAnalysisResult(result: AnalysisResult, analysisId: string): AnalysisResult & { analysisId: string } {
+  if (!body.mapping) {
+    throw new Error('Ongeldige analyse-aanvraag.');
+  }
+
+  const rows = body.uploadId ? getUploadedDataset(body.uploadId)?.rows : body.rows;
+  if (!rows) {
+    throw new Error(body.uploadId ? 'Upload niet gevonden. Upload het bestand opnieuw.' : 'Ongeldige analyse-aanvraag.');
+  }
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Ongeldige analyse-aanvraag.');
+  }
+
+  if (rows.length > MAX_DIRECT_ROWS) {
+    throw new Error(`Dataset is te groot voor deze analyse (${rows.length} rijen). Gebruik maximaal ${MAX_DIRECT_ROWS} rijen.`);
+  }
+
   return {
-    ...result,
-    analysisId,
-    sizing: compactSizingResult(result.sizing),
-    scenarios: result.scenarios.map(compactScenarioResult)
+    rows,
+    mapping: body.mapping,
+    settings: body.settings
   };
 }
 
 export async function POST(request: Request) {
+  const requestStart = performance.now();
+  logAnalyzeStart('request received');
+
   try {
     const body = (await request.json()) as AnalyzeRequestBody;
+    logAnalyzeStart('json parsed', { durationMs: elapsedMs(requestStart) });
 
-    if (!body.settings) {
-      return NextResponse.json({ error: 'Ongeldige analyse-aanvraag.' }, { status: 400 });
+    const validationStart = performance.now();
+    let input: PersistedAnalyzeInput;
+    try {
+      input = validateAndPersistInput(body);
+    } catch (error) {
+      logAnalyzeStart('validation failed', {
+        durationMs: elapsedMs(validationStart),
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return jsonError(error instanceof Error ? error.message : 'Ongeldige analyse-aanvraag.', 400);
     }
+    logAnalyzeStart('validation completed', {
+      durationMs: elapsedMs(validationStart),
+      rowCount: input.rows?.length ?? 0,
+      analysisType: input.settings.analysisType
+    });
 
-    if (body.settings.analysisType === 'PV_SELF_CONSUMPTION' && body.settings.pvInputMode !== 'intervalData') {
-      if (!body.annualBillInput) {
-        return NextResponse.json({ error: 'Vul eerst de jaarnota-gegevens in.' }, { status: 400 });
-      }
+    const storeStart = performance.now();
+    const job = await getAnalysisJobStore().createJob(input);
+    logAnalyzeStart('job stored', { jobId: job.jobId, durationMs: elapsedMs(storeStart) });
 
-      const result = buildAnnualBillIndicativeAnalysis(body.annualBillInput, body.settings);
-      if (!result) {
-        return NextResponse.json(
-          { error: 'Voor indicatief jaarnota-advies zijn minimaal totaal verbruik en totale teruglevering nodig.' },
-          { status: 422 }
-        );
-      }
+    ensureAnalysisWorkerStarted();
+    logAnalyzeStart('accepted', { jobId: job.jobId, totalDurationMs: elapsedMs(requestStart) });
 
-      const analysisId = storeAnalysisResult(result);
-      return NextResponse.json(compactAnalysisResult(result, analysisId));
-    }
-
-    if ((!Array.isArray(body.rows) && !body.uploadId) || !body.mapping) {
-      return NextResponse.json({ error: 'Ongeldige analyse-aanvraag.' }, { status: 400 });
-    }
-
-    const rows = body.uploadId ? getUploadedDataset(body.uploadId)?.rows : body.rows;
-    if (!rows) {
-      return NextResponse.json({ error: 'Upload niet gevonden. Upload het bestand opnieuw.' }, { status: 404 });
-    }
-
-    const mappedRows = mapRows(rows, body.mapping);
-    const result = runAnalysis(mappedRows, body.settings);
-
-    if (!result) {
-      return NextResponse.json({ error: 'Geen bruikbare rijen na normalisatie of filtering.' }, { status: 422 });
-    }
-
-    const analysisId = storeAnalysisResult(result);
-    return NextResponse.json(compactAnalysisResult(result, analysisId));
+    return NextResponse.json(toStartAnalysisJobResponse(job), { status: 202 });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Analyse op de server is mislukt.' },
-      { status: 500 }
-    );
+    console.error('[analyze] start failed', error);
+    return jsonError('Analyse kon niet worden gestart.', 500);
   }
 }

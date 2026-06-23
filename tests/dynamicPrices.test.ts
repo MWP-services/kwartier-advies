@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   calculateDynamicIntervalPrices,
+  fetchEnergyZeroPricesForDate,
   fetchHistoricalDynamicPricesForRange,
   matchDynamicPriceToTimestamp,
   normalizeEnergyZeroPrices,
@@ -76,6 +77,48 @@ describe('dynamic prices', () => {
       '2025-01-01T00:00:00.000Z',
       '2025-01-01T01:00:00.000Z'
     ]);
+  });
+
+  it('retries temporary EnergyZero failures', async () => {
+    let calls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1;
+      if (calls === 1) return new Response('', { status: 503 });
+      return new Response(
+        JSON.stringify({
+          prices: [{ readingDate: '2025-01-01T00:00:00.000Z', price: 0.1 }]
+        }),
+        { status: 200 }
+      );
+    };
+
+    const points = await fetchEnergyZeroPricesForDate('2025-02-01T12:00:00.000Z', {
+      fetchImpl,
+      energyZeroBaseUrl: 'https://retry-test.local',
+      timeoutMs: 1000,
+      maxRetries: 1
+    });
+
+    expect(calls).toBe(2);
+    expect(points).toHaveLength(1);
+  });
+
+  it('aborts EnergyZero calls after the configured timeout', async () => {
+    const fetchImpl: typeof fetch = async (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {
+          once: true
+        });
+      });
+
+    await expect(
+      fetchEnergyZeroPricesForDate('2025-03-01T12:00:00.000Z', {
+        fetchImpl,
+        energyZeroBaseUrl: 'https://timeout-test.local',
+        timeoutMs: 1,
+        maxRetries: 0
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
 

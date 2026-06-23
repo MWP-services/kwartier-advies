@@ -10,6 +10,7 @@ import { buildPvAdviceChartsData, computePvSelfConsumptionAdvice } from '@/lib/c
 import { attachPricesToIntervals, type PriceInterval } from '@/lib/pricing';
 import { fetchHistoricalDynamicPricesForRange } from '@/src/lib/dynamicPrices';
 import { getAnalysisResult } from '@/lib/serverDataStore';
+import { getAnalysisJobStore } from '@/lib/analysisJobStore';
 
 export const runtime = 'nodejs';
 
@@ -96,7 +97,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Financiele analyse is alleen beschikbaar voor PV self consumption.' }, { status: 400 });
     }
 
-    const storedAnalysis = body.analysisId ? getAnalysisResult(body.analysisId) : null;
+    const persistedJob = body.analysisId ? await getAnalysisJobStore().getJob(body.analysisId) : null;
+    const persistedAnalysis = persistedJob?.status === 'completed' ? persistedJob.result ?? null : null;
+    const storedAnalysis = body.analysisId ? getAnalysisResult(body.analysisId) ?? persistedAnalysis : null;
     const intervals = storedAnalysis?.intervals ?? body.intervals;
     const formulaAdvice = storedAnalysis?.sizing.pvFormulaAdvice ?? body.formulaAdvice ?? null;
 

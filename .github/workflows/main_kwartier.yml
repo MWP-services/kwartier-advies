@@ -23,6 +23,7 @@ jobs:
         run: |
           npm ci
           npm run build
+          npm run build:worker
 
       - name: Prepare standalone deployment package
         run: |
@@ -31,7 +32,9 @@ jobs:
           mkdir -p deploy/.next/static deploy/public
           cp -R .next/static/. deploy/.next/static/
           cp -R public/. deploy/public/
-          node -e "const fs=require('fs'); const pkg=require('./deploy/package.json'); pkg.scripts={start:'node server.js'}; delete pkg.devDependencies; fs.writeFileSync('./deploy/package.json', JSON.stringify(pkg, null, 2));"
+          cp -R .worker-build deploy/.worker-build
+          cp scripts/start-standalone.js deploy/start.js
+          node -e "const fs=require('fs'); const pkg=require('./deploy/package.json'); pkg.scripts={start:'node start.js'}; delete pkg.devDependencies; fs.writeFileSync('./deploy/package.json', JSON.stringify(pkg, null, 2));"
           cd deploy
           zip -qr ../next.zip .
 

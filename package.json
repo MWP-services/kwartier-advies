@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
+    "build:worker": "tsc -p tsconfig.worker.json",
     "start": "node node_modules/next/dist/bin/next start -H 0.0.0.0 -p ${PORT:-8080}",
     "lint": "next lint",
     "test": "vitest run",
