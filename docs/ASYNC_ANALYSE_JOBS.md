@@ -1,171 +1,159 @@
-# Asynchrone analysejobs
+# Asynchrone analysejobs op Azure Web App
 
-## Waarom dit bestaat
+## Architectuur
 
-Azure App Service breekt langlopende HTTP-requests af na ongeveer 230 tot 240 seconden. De oude `POST /api/analyze`-route voerde de volledige kwartierdata-analyse binnen hetzelfde open request uit. Bij grote datasets bleef de browser daardoor minuten wachten en eindigde Azure met `504 Gateway Timeout`.
+De analyse draait asynchroon om Azure HTTP-timeouts bij grote datasets te vermijden.
 
-De analyse is nu job-gebaseerd:
+1. `POST /api/analyze` valideert de aanvraag, schrijft een jobbestand en geeft snel `202 Accepted` terug.
+2. De browser pollt `GET /api/analyze/status?jobId=...` voor dezelfde job.
+3. Een apart langlopend Node-proces claimt jobs uit de gedeelde jobstore en voert de analyse uit.
+4. Bij `completed` bevat de statusresponse het compacte analyseresultaat.
 
-1. `POST /api/analyze` valideert de invoer, maakt een job aan en antwoordt snel met `202 Accepted`.
-2. Een worker verwerkt de analyse buiten het oorspronkelijke HTTP-request.
-3. De frontend pollt `GET /api/analyze/status?jobId=...`.
-4. Het eindresultaat wordt pas bij status `completed` teruggegeven.
-
-## Endpoints
-
-### Analyse starten
-
-```http
-POST /api/analyze
-```
-
-Succes:
-
-```json
-{
-  "jobId": "analysis_abc123...",
-  "status": "queued",
-  "progress": 0,
-  "currentStep": "Analyse staat in de wachtrij"
-}
-```
-
-Statuscode: `202`.
-
-### Status ophalen
-
-```http
-GET /api/analyze/status?jobId=analysis_abc123...
-```
-
-Mogelijke statussen:
-
-- `queued`
-- `processing`
-- `completed`
-- `failed`
-
-Bij `completed` bevat de response het bestaande compacte analyseresultaat. Bij `failed` bevat de response een veilige foutmelding voor de gebruiker. De technische stacktrace staat alleen in de serverlogs en jobstore.
-
-## Persistente opslag
-
-Jobs worden opgeslagen als JSON-bestanden via `FileAnalysisJobStore`.
-
-Padkeuze:
-
-- `ANALYSIS_JOB_STORE_DIR`, indien gezet.
-- Op Azure App Service: `$HOME/data/kwartieradvies/analysis-jobs`.
-- Lokaal: `.analysis-jobs`.
-
-Hierdoor verdwijnen jobs niet bij een normale Node-process restart. Gebruik op Azure App Service persistente `/home`-storage. Voor Linux/custom-container deployments hoort `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` aan te staan wanneer de App Service storage niet standaard gemount is.
-
-Per job wordt opgeslagen:
-
-- `jobId`
-- status, voortgang en huidige stap
-- aanmaak-, update-, start- en eindtijd
-- veilige inputkopie, inclusief upload-rijen voor intervalanalyses
-- resultaat bij succes
-- veilige foutmelding en technische foutdetails bij falen
-
-De `jobId` is een UUID-gebaseerde waarde met prefix `analysis_` en is niet eenvoudig te raden.
-
-## Worker
-
-Voor lokale development start `npm run dev` een eenvoudige in-process fallback-worker zodra een analysejob wordt aangemaakt of status wordt opgevraagd.
-
-Voor Azure standalone deployment bouwt de workflow ook een aparte worker:
+Dit is bedoeld voor een normale Azure App Service/Web App, niet voor Azure Static Web Apps. De productie-start is:
 
 ```bash
+npm start
+```
+
+`npm start` voert `scripts/start-webapp.js` uit. Die start twee child-processen met dezelfde Node-runtime:
+
+- Next.js webserver op `0.0.0.0:${PORT || 8080}`;
+- analyseworker uit `.worker-build/worker/analysis-worker.js`.
+
+De startfile stopt met exitcode 1 als de workerbuild ontbreekt. Zo draait Azure nooit stilletjes een website zonder worker.
+
+## Build en deployment
+
+Gebruik:
+
+```bash
+npm ci
+npm test -- --run tests/analysisJobClient.test.ts tests/analysisJobs.test.ts
 npm run build
-npm run build:worker
+node --check scripts/start-webapp.js
+test -f .worker-build/worker/analysis-worker.js
 ```
 
-De deploy-package start via:
+`npm run build` voert eerst `next build` uit en daarna `tsc -p tsconfig.worker.json`.
 
-```bash
-node start.js
-```
+De Azure Web App workflow `main_kwartier.yml` deployt de productieapp `kwartier` met een standalone Next.js zip. Die zip bevat minimaal:
 
-`start.js` doet twee dingen:
+- `server.js` en de standalone runtime uit `.next/standalone`;
+- `.next/static`;
+- `public`;
+- `.worker-build`;
+- `scripts/start-webapp.js`;
+- `package.json` met `start: node scripts/start-webapp.js`.
 
-- zet `ANALYSIS_WORKER_DISABLE_IN_PROCESS=true`, zodat de webserver zelf geen analyses draait;
-- start `.worker-build/worker/analysis-worker.js` als apart Node-proces naast `server.js`.
+De oude Azure Static Web Apps workflows staan alleen nog op `workflow_dispatch` en deployen niet meer automatisch op `push` of `pull_request`.
 
-Als de worker onverwacht stopt, wordt hij na enkele seconden opnieuw gestart. Bij `SIGTERM` of `SIGINT` wordt de worker netjes afgesloten.
+## Persistente jobstore
 
-## Logging
+Jobs worden als JSON-bestanden opgeslagen via `FileAnalysisJobStore`.
 
-Alle analysegerichte serverlogs gebruiken de prefix:
+Padvoorkeur:
+
+1. `ANALYSIS_JOB_STORE_DIR`;
+2. op Azure App Service: `/home/data/kwartieradvies/analysis-jobs`;
+3. lokaal: `.analysis-jobs`.
+
+Aanbevolen App Service setting:
 
 ```text
-[analyze]
-```
-
-De worker-starter gebruikt:
-
-```text
-[analyze-worker]
-```
-
-Geloggede stappen:
-
-- request ontvangen
-- JSON parsen
-- inputvalidatie
-- job opslaan
-- job claimen door worker
-- input verwerken
-- kwartierdata voorbewerken
-- berekeningen en simulaties uitvoeren
-- resultaat opslaan
-- response payload samenstellen
-- totale verwerkingstijd
-- volledige foutdetails bij falen
-
-Log geen API-sleutels of volledige datasets in Azure Log Stream.
-
-## Externe requests
-
-De EnergyZero-prijsintegratie gebruikt expliciete time-outs en beperkte retries:
-
-- standaard timeout: 30 seconden
-- standaard maximaal 2 retries
-- retries alleen bij `429`, `502`, `503` en `504`
-- exponential backoff
-- geen retries op permanente validatiefouten of gewone `4xx`-responses
-
-## Environment variables
-
-Aanbevolen Azure App Service settings:
-
-```text
-WEBSITES_ENABLE_APP_SERVICE_STORAGE=true
 ANALYSIS_JOB_STORE_DIR=/home/data/kwartieradvies/analysis-jobs
 ```
 
-`ANALYSIS_JOB_STORE_DIR` is optioneel zolang `$HOME` naar persistente App Service storage wijst. Zet hem wel expliciet als je het opslagpad voorspelbaar wilt houden.
+Schakel ook **Always On** in op de Azure Web App. Zonder Always On kan Azure de app laten slapen, waardoor de worker stopt tot de volgende koude start.
 
-De deployment-wrapper zet zelf:
+## Worker heartbeat en health
 
-```text
-ANALYSIS_WORKER_DISABLE_IN_PROCESS=true
-ANALYSIS_WORKER_ROLE=worker
+De worker schrijft iedere 15 seconden een klein heartbeatbestand in de jobstore met:
+
+- timestamp;
+- PID;
+- worker role;
+- jobstore-pad.
+
+Controle:
+
+```http
+GET /api/analyze/health
 ```
 
-Deze waarden hoef je normaal niet handmatig in Azure te zetten.
+Online voorbeeld:
 
-## Mislukte jobs onderzoeken
+```json
+{
+  "healthy": true,
+  "workerStatus": "online",
+  "lastHeartbeatAt": "2026-07-03T14:00:00.000Z",
+  "jobStoreDir": "/home/data/kwartieradvies/analysis-jobs",
+  "ageMs": 1234
+}
+```
 
-1. Zoek in App Service Log Stream op `[analyze] job=<jobId>`.
-2. Controleer de stap waarop de job faalde.
-3. Bekijk het jobbestand in `ANALYSIS_JOB_STORE_DIR` voor status, foutmelding en veilige technische details.
-4. Controleer of de worker draait door te zoeken op `[analyze-worker] started`.
+Bij ontbrekende, verlopen of corrupte heartbeat geeft het endpoint `503` met `healthy: false` en `workerStatus: "offline"`.
 
-## Schaal en beperkingen
+## Verwachte Log Stream
 
-Deze implementatie is geschikt voor Azure App Service met persistente App Service storage en een standalone Node deployment. De file-locks voorkomen dat dezelfde job tegelijk door meerdere workerprocessen wordt verwerkt.
+Bij een gezonde start:
 
-Azure Static Web Apps is hiervoor niet geschikt: de Next.js API-runtime draait daar serverless en houdt geen betrouwbaar long-running workerproces of gedeelde filesystem-queue naast de webserver actief. Gebruik daarom de App Service workflow `main_kwartier.yml`; de oudere Static Web Apps workflows staan alleen nog op handmatig starten om onbedoelde deployments van een build zonder worker te voorkomen.
+```text
+[webapp] starting analysis worker
+[webapp] starting Next.js
+[analyze-worker] starting
+[analyze-worker] ready
+```
 
-Bij agressieve scale-out, zeer hoge jobvolumes of meerdere App Service instances is Azure Storage Queue, Service Bus of Durable Functions de volgende stap. De code is daarvoor voorbereid met een `AnalysisJobStore`-abstractie, zodat de file store later vervangen kan worden zonder de frontendflow of API-contracten te wijzigen.
+Bij een analyse:
+
+```text
+[analyze] start request received
+[analyze] start job stored
+[analyze] job=<id> worker claimed job
+[analyze] job=<id> status=processing
+[analyze] job=<id> completed
+```
+
+Bij falen wordt de foutstack gelogd. Logs bevatten wel job-ID, attempts, statusovergangen, rijenaantal en stapduur, maar geen volledige dataset of klantgegevens.
+
+## Polling versus jobs aanmaken
+
+`POST /api/analyze` maakt een nieuwe job aan. `GET /api/analyze/status?jobId=...` maakt geen nieuwe job aan; dat is alleen polling op dezelfde `jobId`.
+
+De frontend pollt begrensd:
+
+- maximaal 5 minuten in `queued`;
+- maximaal 20 minuten totaal;
+- `completed` en `failed` blijven terminale statussen;
+- abort via `AbortController` blijft werken.
+
+Als een job te lang `queued` blijft, ziet de gebruiker een melding dat de analyseworker mogelijk niet draait of de jobstore niet kan bereiken.
+
+## Stale locks
+
+Bij het claimen maakt de worker atomisch een `.lock`-map naast het jobbestand. Een recente lock wordt nooit gestolen. Een lock ouder dan 30 minuten wordt als stale beschouwd en veilig verwijderd, zowel voor `queued` als voor verlopen `processing` jobs. Cleanup-acties worden gelogd:
+
+```text
+[analyze] jobstore removed stale lock
+```
+
+Veilige handmatige cleanup:
+
+1. Controleer eerst `/api/analyze/health`.
+2. Controleer in Log Stream of er geen actieve worker net dezelfde job verwerkt.
+3. Verwijder alleen `.lock`-mappen ouder dan 30 minuten.
+4. Verwijder geen `.json` jobbestanden tenzij je bewust oude jobs opruimt.
+
+## Diagnose bij `queued`
+
+Als een job op `queued` / `progress: 0` blijft:
+
+1. Controleer Log Stream op `[webapp] starting analysis worker`.
+2. Controleer Log Stream op `[analyze-worker] ready`.
+3. Open `GET /api/analyze/health`.
+4. Controleer dat `.worker-build/worker/analysis-worker.js` in de deployment zit.
+5. Controleer dat `ANALYSIS_JOB_STORE_DIR` naar `/home/data/kwartieradvies/analysis-jobs` wijst of dat de standaard `/home` jobstore gebruikt wordt.
+6. Controleer of Always On is ingeschakeld.
+7. Zoek op `[analyze] job=<jobId>` en kijk of `worker claimed job` verschijnt.
+8. Verschijnt alleen `start job stored`, dan draait de worker niet of ziet hij een andere jobstore.

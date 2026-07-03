@@ -1,11 +1,12 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { POST as startAnalyze } from '@/app/api/analyze/route';
+import { GET as getAnalyzeHealth } from '@/app/api/analyze/health/route';
 import { GET as getAnalyzeStatus } from '@/app/api/analyze/status/route';
 import { defaultAnalysisSettings } from '@/lib/analysis';
-import { FileAnalysisJobStore, setAnalysisJobStoreForTests } from '@/lib/analysisJobStore';
+import { FileAnalysisJobStore, WORKER_HEARTBEAT_FILE, setAnalysisJobStoreForTests } from '@/lib/analysisJobStore';
 import { processAnalysisQueueOnce, stopAnalysisWorkerForTests } from '@/lib/analysisWorker';
 
 const settings = {
@@ -115,5 +116,122 @@ describe('analysis jobs', () => {
     expect(firstClaim?.job.status).toBe('processing');
     expect(secondClaim).toBeNull();
     await firstClaim?.release();
+  });
+
+  it('removes stale locks before claiming queued jobs', async () => {
+    const job = await store.createJob(input);
+    const lockPath = path.join(tempDir, `${job.jobId}.lock`);
+    await mkdir(lockPath);
+    const staleTime = new Date(Date.now() - 31 * 60 * 1000);
+    await utimes(lockPath, staleTime, staleTime);
+
+    const claim = await store.claimNextJob();
+
+    expect(claim?.job.jobId).toBe(job.jobId);
+    expect(claim?.job.status).toBe('processing');
+    await claim?.release();
+  });
+
+  it('does not claim queued jobs with a recent lock', async () => {
+    const job = await store.createJob(input);
+    await mkdir(path.join(tempDir, `${job.jobId}.lock`));
+
+    const claim = await store.claimNextJob();
+
+    expect(claim).toBeNull();
+  });
+
+  it('reclaims stale processing jobs', async () => {
+    const job = await store.createJob(input);
+    const claim = await store.claimNextJob();
+    expect(claim?.job.status).toBe('processing');
+    const staleTime = new Date(Date.now() - 31 * 60 * 1000);
+    await utimes(path.join(tempDir, `${job.jobId}.lock`), staleTime, staleTime);
+    await store.updateJob(job.jobId, {
+      status: 'processing',
+      lockedUntil: new Date(Date.now() - 1000).toISOString()
+    });
+
+    const staleClaim = await store.claimNextJob();
+
+    expect(staleClaim?.job.jobId).toBe(job.jobId);
+    expect(staleClaim?.job.attempts).toBe(2);
+    await staleClaim?.release();
+  });
+
+  it('skips completed and failed jobs when claiming', async () => {
+    const completed = await store.createJob(input);
+    const failed = await store.createJob(input);
+    await store.updateJob(completed.jobId, { status: 'completed', progress: 100 });
+    await store.updateJob(failed.jobId, { status: 'failed', progress: 100, error: 'Boom' });
+
+    const claim = await store.claimNextJob();
+
+    expect(claim).toBeNull();
+  });
+
+  it('releases the lock after completing a job', async () => {
+    const job = await store.createJob(input);
+
+    await processAnalysisQueueOnce();
+    const claim = await store.claimNextJob();
+
+    expect(claim).toBeNull();
+    await mkdir(path.join(tempDir, `${job.jobId}.lock`));
+  });
+
+  it('reports a recent worker heartbeat as healthy', async () => {
+    await store.writeWorkerHeartbeat({
+      timestamp: new Date().toISOString(),
+      pid: 123,
+      workerRole: 'worker',
+      jobStoreDir: tempDir
+    });
+
+    const response = await getAnalyzeHealth();
+    const payload = await readJson<{ healthy: boolean; workerStatus: string; jobStoreDir: string; ageMs: number }>(response);
+
+    expect(response.status).toBe(200);
+    expect(payload.healthy).toBe(true);
+    expect(payload.workerStatus).toBe('online');
+    expect(payload.jobStoreDir).toBe(tempDir);
+    expect(payload.ageMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('reports a missing worker heartbeat as unhealthy', async () => {
+    const response = await getAnalyzeHealth();
+    const payload = await readJson<{ healthy: boolean; workerStatus: string }>(response);
+
+    expect(response.status).toBe(503);
+    expect(payload.healthy).toBe(false);
+    expect(payload.workerStatus).toBe('offline');
+  });
+
+  it('reports an expired worker heartbeat as unhealthy', async () => {
+    await store.writeWorkerHeartbeat({
+      timestamp: new Date(Date.now() - 60_000).toISOString(),
+      pid: 123,
+      workerRole: 'worker',
+      jobStoreDir: tempDir
+    });
+
+    const response = await getAnalyzeHealth();
+    const payload = await readJson<{ healthy: boolean; workerStatus: string; ageMs: number }>(response);
+
+    expect(response.status).toBe(503);
+    expect(payload.healthy).toBe(false);
+    expect(payload.workerStatus).toBe('offline');
+    expect(payload.ageMs).toBeGreaterThanOrEqual(45_000);
+  });
+
+  it('reports a corrupt worker heartbeat as unhealthy', async () => {
+    await writeFile(path.join(tempDir, WORKER_HEARTBEAT_FILE), '{bad json', 'utf8');
+
+    const response = await getAnalyzeHealth();
+    const payload = await readJson<{ healthy: boolean; workerStatus: string }>(response);
+
+    expect(response.status).toBe(503);
+    expect(payload.healthy).toBe(false);
+    expect(payload.workerStatus).toBe('offline');
   });
 });

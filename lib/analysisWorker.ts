@@ -7,7 +7,8 @@ import { runAnalysis } from './clientAnalysis';
 import { mapRows } from './parsing';
 import { storeAnalysisResult } from './serverDataStore';
 
-const POLL_INTERVAL_MS = 5000;
+export const ANALYSIS_WORKER_POLL_INTERVAL_MS = 5000;
+export const ANALYSIS_WORKER_HEARTBEAT_INTERVAL_MS = 15_000;
 
 type ProgressReporter = (progress: AnalysisJobProgress) => Promise<void>;
 
@@ -16,6 +17,7 @@ const globalWorkerState = globalThis as typeof globalThis & {
     started: boolean;
     running: boolean;
     timer?: NodeJS.Timeout;
+    heartbeatTimer?: NodeJS.Timeout;
   };
 };
 
@@ -163,6 +165,7 @@ async function processOneAnalysisJob(): Promise<boolean> {
   const { job, release } = claimed;
   const totalStart = performance.now();
   logAnalyze(job.jobId, 'worker claimed job', { attempts: job.attempts });
+  logAnalyze(job.jobId, 'status=processing', { attempts: job.attempts, progress: job.progress });
 
   try {
     const result = await executeAnalysisJob(job);
@@ -174,7 +177,7 @@ async function processOneAnalysisJob(): Promise<boolean> {
       completedAt: new Date().toISOString(),
       lockedUntil: undefined
     });
-    logAnalyze(job.jobId, 'job marked completed', { totalDurationMs: elapsedMs(totalStart) });
+    logAnalyze(job.jobId, 'completed', { totalDurationMs: elapsedMs(totalStart), attempts: job.attempts });
   } catch (error) {
     const serialized = serializeError(error);
     await store.updateJob(job.jobId, {
@@ -224,7 +227,7 @@ export function ensureAnalysisWorkerStarted(): void {
   state.started = true;
   state.timer = setInterval(() => {
     void processAnalysisQueueOnce();
-  }, POLL_INTERVAL_MS);
+  }, ANALYSIS_WORKER_POLL_INTERVAL_MS);
   state.timer.unref?.();
 
   setTimeout(() => {
@@ -232,10 +235,36 @@ export function ensureAnalysisWorkerStarted(): void {
   }, 0);
 }
 
+export async function writeAnalysisWorkerHeartbeat(): Promise<void> {
+  const store = getAnalysisJobStore();
+  await store.writeWorkerHeartbeat({
+    timestamp: new Date().toISOString(),
+    pid: process.pid,
+    workerRole: process.env.ANALYSIS_WORKER_ROLE ?? 'unknown',
+    jobStoreDir: store.getDirectory()
+  });
+}
+
+export function ensureAnalysisWorkerHeartbeatStarted(): void {
+  const state = getWorkerState();
+  if (state.heartbeatTimer) return;
+
+  const beat = () => {
+    void writeAnalysisWorkerHeartbeat().catch((error) => {
+      console.error('[analyze-worker] heartbeat failed', error);
+    });
+  };
+
+  state.heartbeatTimer = setInterval(beat, ANALYSIS_WORKER_HEARTBEAT_INTERVAL_MS);
+  state.heartbeatTimer.unref?.();
+}
+
 export function stopAnalysisWorkerForTests(): void {
   const state = getWorkerState();
   if (state.timer) clearInterval(state.timer);
+  if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
   state.started = false;
   state.running = false;
   state.timer = undefined;
+  state.heartbeatTimer = undefined;
 }

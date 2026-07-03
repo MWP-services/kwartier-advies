@@ -71,13 +71,15 @@ export async function pollAnalysisJob({
 
     const checkedAt = now();
     if (checkedAt - startedAt >= maxTotalMs) {
-      throw new Error('Analyse duurt te lang. Controleer of de worker draait en probeer het opnieuw.');
+      throw new Error('De analyse duurt te lang. Controleer Azure Log Stream en probeer het daarna opnieuw.');
     }
 
     if (status.status === 'queued') {
       queuedSince ??= checkedAt;
       if (checkedAt - queuedSince >= maxQueuedMs) {
-        throw new Error('Analyse blijft in de wachtrij. De worker lijkt niet te draaien of pakt geen jobs op.');
+        throw new Error(
+          'De analyse staat te lang in de wachtrij. De analyseworker draait mogelijk niet of kan de jobopslag niet bereiken. Controleer Azure Log Stream en probeer het daarna opnieuw.'
+        );
       }
     } else {
       queuedSince = null;

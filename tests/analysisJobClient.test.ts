@@ -76,6 +76,22 @@ describe('pollAnalysisJob', () => {
         },
         now: () => currentTime
       })
-    ).rejects.toThrow('worker lijkt niet te draaien');
+    ).rejects.toThrow('De analyse staat te lang in de wachtrij');
+  });
+
+  it('fails when total processing takes too long', async () => {
+    let currentTime = 0;
+
+    await expect(
+      pollAnalysisJob({
+        jobId: 'analysis_x',
+        maxTotalMs: 2500,
+        fetchStatus: async () => ({ jobId: 'analysis_x', status: 'processing', progress: 50, currentStep: 'Processing' }),
+        wait: async () => {
+          currentTime += 1000;
+        },
+        now: () => currentTime
+      })
+    ).rejects.toThrow('De analyse duurt te lang');
   });
 });

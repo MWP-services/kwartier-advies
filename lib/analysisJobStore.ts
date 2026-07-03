@@ -10,13 +10,24 @@ import type {
 const JOB_PREFIX = 'analysis_';
 const JOB_FILE_SUFFIX = '.json';
 const LOCK_SUFFIX = '.lock';
+export const WORKER_HEARTBEAT_FILE = 'analysis-worker-heartbeat.json';
 const STALE_PROCESSING_MS = 30 * 60 * 1000;
+
+export interface AnalysisWorkerHeartbeat {
+  timestamp: string;
+  pid: number;
+  workerRole: string;
+  jobStoreDir: string;
+}
 
 export interface AnalysisJobStore {
   createJob(input: PersistedAnalyzeInput): Promise<AnalysisJobRecord>;
   getJob(jobId: string): Promise<AnalysisJobRecord | null>;
   updateJob(jobId: string, patch: Partial<AnalysisJobRecord>): Promise<AnalysisJobRecord>;
   claimNextJob(): Promise<{ job: AnalysisJobRecord; release: () => Promise<void> } | null>;
+  getDirectory(): string;
+  writeWorkerHeartbeat(heartbeat: AnalysisWorkerHeartbeat): Promise<void>;
+  getWorkerHeartbeat(): Promise<AnalysisWorkerHeartbeat | null>;
 }
 
 let storeOverride: AnalysisJobStore | null = null;
@@ -47,11 +58,19 @@ export function resolveAnalysisJobStoreDir(): string {
     return path.resolve(process.env.ANALYSIS_JOB_STORE_DIR);
   }
 
-  if (process.env.HOME && process.env.WEBSITE_SITE_NAME) {
-    return path.join(process.env.HOME, 'data', 'kwartieradvies', 'analysis-jobs');
+  if (process.env.WEBSITE_SITE_NAME) {
+    return '/home/data/kwartieradvies/analysis-jobs';
   }
 
   return path.join(process.cwd(), '.analysis-jobs');
+}
+
+function logAnalyzeJobStore(message: string, extra?: Record<string, unknown>): void {
+  if (extra) {
+    console.log(`[analyze] jobstore ${message}`, extra);
+    return;
+  }
+  console.log(`[analyze] jobstore ${message}`);
 }
 
 export class FileAnalysisJobStore implements AnalysisJobStore {
@@ -67,6 +86,10 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
 
   private lockPath(jobId: string): string {
     return path.join(this.directory, `${safeJobId(jobId)}${LOCK_SUFFIX}`);
+  }
+
+  private heartbeatPath(): string {
+    return path.join(this.directory, WORKER_HEARTBEAT_FILE);
   }
 
   private async writeJob(job: AnalysisJobRecord): Promise<void> {
@@ -114,6 +137,9 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
       updatedAt: nowIso()
     };
     await this.writeJob(next);
+    if (patch.status && patch.status !== current.status) {
+      logAnalyzeJobStore('status transition', { jobId, from: current.status, to: patch.status, attempts: next.attempts });
+    }
     return next;
   }
 
@@ -143,8 +169,8 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
         await mkdir(lockPath);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-          if (isStaleProcessing) {
-            await this.removeStaleLock(jobId);
+          const removedStaleLock = await this.removeStaleLock(jobId, job.status);
+          if (isStaleProcessing || removedStaleLock) {
             try {
               await mkdir(lockPath);
             } catch {
@@ -171,6 +197,7 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
         job: claimed,
         release: async () => {
           await rm(lockPath, { recursive: true, force: true });
+          logAnalyzeJobStore('lock released', { jobId });
         }
       };
     }
@@ -178,15 +205,53 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
     return null;
   }
 
-  private async removeStaleLock(jobId: string): Promise<void> {
+  private async removeStaleLock(jobId: string, status: AnalysisJobRecord['status']): Promise<boolean> {
     const lockPath = this.lockPath(jobId);
     try {
       const lockStat = await stat(lockPath);
       if (Date.now() - lockStat.mtimeMs > STALE_PROCESSING_MS) {
         await rm(lockPath, { recursive: true, force: true });
+        logAnalyzeJobStore('removed stale lock', {
+          jobId,
+          status,
+          lockAgeMs: Math.round(Date.now() - lockStat.mtimeMs)
+        });
+        return true;
       }
+      logAnalyzeJobStore('recent lock retained', { jobId, status, lockAgeMs: Math.round(Date.now() - lockStat.mtimeMs) });
     } catch {
-      await rm(lockPath, { recursive: true, force: true });
+      try {
+        await rm(lockPath, { recursive: true, force: true });
+        logAnalyzeJobStore('removed unreadable stale lock', { jobId, status });
+        return true;
+      } catch (cleanupError) {
+        console.error(`[analyze] jobstore failed to remove lock job=${jobId}`, cleanupError);
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  getDirectory(): string {
+    return this.directory;
+  }
+
+  async writeWorkerHeartbeat(heartbeat: AnalysisWorkerHeartbeat): Promise<void> {
+    await this.ensureDirectory();
+    const filePath = this.heartbeatPath();
+    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tmpPath, atomicJson(heartbeat), 'utf8');
+    await rename(tmpPath, filePath);
+  }
+
+  async getWorkerHeartbeat(): Promise<AnalysisWorkerHeartbeat | null> {
+    try {
+      const content = await readFile(this.heartbeatPath(), 'utf8');
+      return JSON.parse(content) as AnalysisWorkerHeartbeat;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
     }
   }
 }

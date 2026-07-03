@@ -19,11 +19,14 @@ jobs:
           node-version: '20.x'
           cache: 'npm'
 
-      - name: Install and build
+      - name: Install, test, and build
         run: |
           npm ci
+          npm test -- --run tests/analysisJobClient.test.ts tests/analysisJobs.test.ts
           npm run build
-          npm run build:worker
+          node --check scripts/start-webapp.js
+          test -f .worker-build/worker/analysis-worker.js
+          test -f scripts/start-webapp.js
 
       - name: Prepare standalone deployment package
         run: |
@@ -33,8 +36,11 @@ jobs:
           cp -R .next/static/. deploy/.next/static/
           cp -R public/. deploy/public/
           cp -R .worker-build deploy/.worker-build
-          cp scripts/start-standalone.js deploy/start.js
-          node -e "const fs=require('fs'); const pkg=require('./deploy/package.json'); pkg.scripts={start:'node start.js'}; delete pkg.devDependencies; fs.writeFileSync('./deploy/package.json', JSON.stringify(pkg, null, 2));"
+          mkdir -p deploy/scripts
+          cp scripts/start-webapp.js deploy/scripts/start-webapp.js
+          node -e "const fs=require('fs'); const pkg=require('./deploy/package.json'); pkg.scripts={start:'node scripts/start-webapp.js'}; pkg.engines={node:'20.x'}; delete pkg.devDependencies; fs.writeFileSync('./deploy/package.json', JSON.stringify(pkg, null, 2));"
+          test -f deploy/.worker-build/worker/analysis-worker.js
+          test -f deploy/scripts/start-webapp.js
           cd deploy
           zip -qr ../next.zip .
 
