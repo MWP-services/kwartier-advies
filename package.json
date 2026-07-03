@@ -3,15 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": "20.x"
+    "node": ">=22 <23"
   },
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build:next": "next build",
-    "build:worker": "tsc -p tsconfig.worker.json",
+    "build:worker": "node scripts/build-worker.mjs",
     "build": "npm run build:next && npm run build:worker",
     "start": "node scripts/start-webapp.js",
     "lint": "next lint",
+    "test:worker-runtime": "node scripts/smoke-test-worker.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -36,6 +37,7 @@
     "@types/testing-library__jest-dom": "^5.14.9",
     "@vitest/coverage-v8": "^2.1.8",
     "autoprefixer": "^10.4.20",
+    "esbuild": "^0.28.1",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.33",
     "jsdom": "^25.0.1",

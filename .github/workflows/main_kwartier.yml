@@ -16,7 +16,7 @@ jobs:
       - name: Set up Node.js version
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '22.x'
           cache: 'npm'
 
       - name: Install, test, and build
@@ -25,6 +25,8 @@ jobs:
           npm test -- --run tests/analysisJobClient.test.ts tests/analysisJobs.test.ts
           npm run build
           node --check scripts/start-webapp.js
+          node --check .worker-build/worker/analysis-worker.js
+          node scripts/smoke-test-worker.mjs
           test -f .worker-build/worker/analysis-worker.js
           test -f scripts/start-webapp.js
 
@@ -38,9 +40,11 @@ jobs:
           cp -R .worker-build deploy/.worker-build
           mkdir -p deploy/scripts
           cp scripts/start-webapp.js deploy/scripts/start-webapp.js
-          node -e "const fs=require('fs'); const pkg=require('./deploy/package.json'); pkg.scripts={start:'node scripts/start-webapp.js'}; pkg.engines={node:'20.x'}; delete pkg.devDependencies; fs.writeFileSync('./deploy/package.json', JSON.stringify(pkg, null, 2));"
+          node -e "const fs=require('fs'); const pkg=require('./deploy/package.json'); pkg.scripts={start:'node scripts/start-webapp.js'}; pkg.engines={node:'>=22 <23'}; delete pkg.devDependencies; fs.writeFileSync('./deploy/package.json', JSON.stringify(pkg, null, 2));"
           test -f deploy/.worker-build/worker/analysis-worker.js
           test -f deploy/scripts/start-webapp.js
+          node --check deploy/.worker-build/worker/analysis-worker.js
+          node scripts/smoke-test-worker.mjs --bundle deploy/.worker-build/worker/analysis-worker.js
           cd deploy
           zip -qr ../next.zip .
 

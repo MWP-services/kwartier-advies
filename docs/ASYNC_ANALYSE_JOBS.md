@@ -31,10 +31,20 @@ npm ci
 npm test -- --run tests/analysisJobClient.test.ts tests/analysisJobs.test.ts
 npm run build
 node --check scripts/start-webapp.js
+node --check .worker-build/worker/analysis-worker.js
+node scripts/smoke-test-worker.mjs
 test -f .worker-build/worker/analysis-worker.js
 ```
 
-`npm run build` voert eerst `next build` uit en daarna `tsc -p tsconfig.worker.json`.
+`npm run build` voert eerst `next build` uit en daarna `node scripts/build-worker.mjs`.
+
+De worker wordt met esbuild gebundeld naar een self-contained CommonJS-bestand:
+
+```text
+.worker-build/worker/analysis-worker.js
+```
+
+Daarin worden gewone npm-runtimepackages zoals `papaparse` en `xlsx` meegebundeld. Node built-ins zoals `fs`, `path`, `crypto` en `child_process` blijven extern als Node built-ins. De smoke-test start de workerbundle vanuit een tijdelijke geisoleerde map zonder root `node_modules`, zodat ontbrekende workerdependencies al in CI zichtbaar worden.
 
 De Azure Web App workflow `main_kwartier.yml` deployt de productieapp `kwartier` met een standalone Next.js zip. Die zip bevat minimaal:
 
