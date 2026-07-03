@@ -6,9 +6,12 @@ export interface PollAnalysisJobOptions {
   jobId: string;
   signal?: AbortSignal;
   intervalMs?: number;
+  maxQueuedMs?: number;
+  maxTotalMs?: number;
   fetchStatus?: (jobId: string, signal?: AbortSignal) => Promise<AnalysisJobStatusResponse>;
   wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   onStatus?: (status: AnalysisJobStatusResponse) => void;
+  now?: () => number;
 }
 
 export async function fetchAnalysisJobStatus(
@@ -48,16 +51,36 @@ export async function pollAnalysisJob({
   jobId,
   signal,
   intervalMs = 2500,
+  maxQueuedMs = 5 * 60 * 1000,
+  maxTotalMs = 20 * 60 * 1000,
   fetchStatus = fetchAnalysisJobStatus,
   wait = waitForNextPoll,
-  onStatus
+  onStatus,
+  now = Date.now
 }: PollAnalysisJobOptions): Promise<TerminalAnalysisJobStatus> {
+  const startedAt = now();
+  let queuedSince: number | null = null;
+
   while (true) {
     const status = await fetchStatus(jobId, signal);
     onStatus?.(status);
 
     if (status.status === 'completed' || status.status === 'failed') {
       return status;
+    }
+
+    const checkedAt = now();
+    if (checkedAt - startedAt >= maxTotalMs) {
+      throw new Error('Analyse duurt te lang. Controleer of de worker draait en probeer het opnieuw.');
+    }
+
+    if (status.status === 'queued') {
+      queuedSince ??= checkedAt;
+      if (checkedAt - queuedSince >= maxQueuedMs) {
+        throw new Error('Analyse blijft in de wachtrij. De worker lijkt niet te draaien of pakt geen jobs op.');
+      }
+    } else {
+      queuedSince = null;
     }
 
     await wait(intervalMs, signal);

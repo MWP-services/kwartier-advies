@@ -166,4 +166,6 @@ Deze waarden hoef je normaal niet handmatig in Azure te zetten.
 
 Deze implementatie is geschikt voor Azure App Service met persistente App Service storage en een standalone Node deployment. De file-locks voorkomen dat dezelfde job tegelijk door meerdere workerprocessen wordt verwerkt.
 
+Azure Static Web Apps is hiervoor niet geschikt: de Next.js API-runtime draait daar serverless en houdt geen betrouwbaar long-running workerproces of gedeelde filesystem-queue naast de webserver actief. Gebruik daarom de App Service workflow `main_kwartier.yml`; de oudere Static Web Apps workflows staan alleen nog op handmatig starten om onbedoelde deployments van een build zonder worker te voorkomen.
+
 Bij agressieve scale-out, zeer hoge jobvolumes of meerdere App Service instances is Azure Storage Queue, Service Bus of Durable Functions de volgende stap. De code is daarvoor voorbereid met een `AnalysisJobStore`-abstractie, zodat de file store later vervangen kan worden zonder de frontendflow of API-contracten te wijzigen.

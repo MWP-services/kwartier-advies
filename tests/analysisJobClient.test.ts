@@ -62,4 +62,20 @@ describe('pollAnalysisJob', () => {
 
     expect(waitCalled).toBe(true);
   });
+
+  it('fails when a job stays queued too long', async () => {
+    let currentTime = 0;
+
+    await expect(
+      pollAnalysisJob({
+        jobId: 'analysis_x',
+        maxQueuedMs: 2500,
+        fetchStatus: async () => ({ jobId: 'analysis_x', status: 'queued', progress: 0, currentStep: 'Queued' }),
+        wait: async () => {
+          currentTime += 1000;
+        },
+        now: () => currentTime
+      })
+    ).rejects.toThrow('worker lijkt niet te draaien');
+  });
 });
