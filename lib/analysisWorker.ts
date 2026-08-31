@@ -216,23 +216,23 @@ export function ensureAnalysisWorkerStarted(): void {
     return;
   }
 
+  const processQueue = () => {
+    void processAnalysisQueueOnce().catch((error) => {
+      console.error('[analyze-worker] queue processing failed', error);
+    });
+  };
+
   const state = getWorkerState();
   if (state.started) {
-    setTimeout(() => {
-      void processAnalysisQueueOnce();
-    }, 0);
+    setTimeout(processQueue, 0);
     return;
   }
 
   state.started = true;
-  state.timer = setInterval(() => {
-    void processAnalysisQueueOnce();
-  }, ANALYSIS_WORKER_POLL_INTERVAL_MS);
+  state.timer = setInterval(processQueue, ANALYSIS_WORKER_POLL_INTERVAL_MS);
   state.timer.unref?.();
 
-  setTimeout(() => {
-    void processAnalysisQueueOnce();
-  }, 0);
+  setTimeout(processQueue, 0);
 }
 
 export async function writeAnalysisWorkerHeartbeat(): Promise<void> {

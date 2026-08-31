@@ -12,6 +12,7 @@ const JOB_FILE_SUFFIX = '.json';
 const LOCK_SUFFIX = '.lock';
 export const WORKER_HEARTBEAT_FILE = 'analysis-worker-heartbeat.json';
 const STALE_PROCESSING_MS = 30 * 60 * 1000;
+const FILE_WRITE_RETRY_DELAYS_MS = [25, 75, 150, 300, 600];
 
 export interface AnalysisWorkerHeartbeat {
   timestamp: string;
@@ -53,6 +54,15 @@ function atomicJson(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function isRetriableFileError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EPERM' || code === 'EBUSY' || code === 'EACCES' || code === 'ENOENT';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function resolveAnalysisJobStoreDir(): string {
   if (process.env.ANALYSIS_JOB_STORE_DIR) {
     return path.resolve(process.env.ANALYSIS_JOB_STORE_DIR);
@@ -92,12 +102,31 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
     return path.join(this.directory, WORKER_HEARTBEAT_FILE);
   }
 
-  private async writeJob(job: AnalysisJobRecord): Promise<void> {
+  private async writeAtomicJson(filePath: string, value: unknown): Promise<void> {
     await this.ensureDirectory();
-    const filePath = this.jobPath(job.jobId);
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmpPath, atomicJson(job), 'utf8');
-    await rename(tmpPath, filePath);
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt <= FILE_WRITE_RETRY_DELAYS_MS.length; attempt += 1) {
+      const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${attempt}.tmp`;
+      try {
+        await writeFile(tmpPath, atomicJson(value), 'utf8');
+        await rename(tmpPath, filePath);
+        return;
+      } catch (error) {
+        lastError = error;
+        await rm(tmpPath, { force: true }).catch(() => undefined);
+        if (!isRetriableFileError(error) || attempt >= FILE_WRITE_RETRY_DELAYS_MS.length) {
+          break;
+        }
+        await delay(FILE_WRITE_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+
+    throw lastError;
+  }
+
+  private async writeJob(job: AnalysisJobRecord): Promise<void> {
+    await this.writeAtomicJson(this.jobPath(job.jobId), job);
   }
 
   async createJob(input: PersistedAnalyzeInput): Promise<AnalysisJobRecord> {
@@ -184,14 +213,24 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
         }
       }
 
-      const claimed = await this.updateJob(jobId, {
-        status: 'processing',
-        progress: Math.max(job.progress, 5),
-        currentStep: 'Analyse wordt gestart',
-        attempts: job.attempts + 1,
-        startedAt: job.startedAt ?? nowIso(),
-        lockedUntil: new Date(Date.now() + STALE_PROCESSING_MS).toISOString()
-      });
+      let claimed: AnalysisJobRecord;
+      try {
+        claimed = await this.updateJob(jobId, {
+          status: 'processing',
+          progress: Math.max(job.progress, 5),
+          currentStep: 'Analyse wordt gestart',
+          attempts: job.attempts + 1,
+          startedAt: job.startedAt ?? nowIso(),
+          lockedUntil: new Date(Date.now() + STALE_PROCESSING_MS).toISOString()
+        });
+      } catch (error) {
+        await rm(lockPath, { recursive: true, force: true }).catch(() => undefined);
+        logAnalyzeJobStore('claim failed and lock released', {
+          jobId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        throw error;
+      }
 
       return {
         job: claimed,
@@ -238,11 +277,7 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
   }
 
   async writeWorkerHeartbeat(heartbeat: AnalysisWorkerHeartbeat): Promise<void> {
-    await this.ensureDirectory();
-    const filePath = this.heartbeatPath();
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmpPath, atomicJson(heartbeat), 'utf8');
-    await rename(tmpPath, filePath);
+    await this.writeAtomicJson(this.heartbeatPath(), heartbeat);
   }
 
   async getWorkerHeartbeat(): Promise<AnalysisWorkerHeartbeat | null> {

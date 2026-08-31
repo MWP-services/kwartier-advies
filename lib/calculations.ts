@@ -242,6 +242,7 @@ export interface PvSelfConsumptionAdviceConfig {
   minCyclesPerYearBusiness?: number;
   minMarginalGainPerAddedKwhHome?: number;
   minMarginalGainPerAddedKwhBusiness?: number;
+  minBusinessRecommendedCapacityRatio?: number;
   economics?: Partial<PvEconomicsConfig>;
 }
 
@@ -775,7 +776,8 @@ const DEFAULT_PV_SELF_CONSUMPTION_CONFIG: Required<
   minCyclesPerYearHome: 80,
   minCyclesPerYearBusiness: 20,
   minMarginalGainPerAddedKwhHome: 30,
-  minMarginalGainPerAddedKwhBusiness: 10
+  minMarginalGainPerAddedKwhBusiness: 10,
+  minBusinessRecommendedCapacityRatio: 0.8
 };
 
 const HOME_PV_POWER_MAP: Record<number, number> = {
@@ -1422,6 +1424,10 @@ export function computePvSelfConsumptionAdvice(
     usedCustomerType === 'business'
       ? resolvedHybridConfig.minMarginalGainPerAddedKwhBusiness
       : resolvedHybridConfig.minMarginalGainPerAddedKwhHome;
+  const minBusinessRecommendedCapacityKwh =
+    usedCustomerType === 'business'
+      ? formulaAdvice.rawAdvice.recommendedKwh * resolvedHybridConfig.minBusinessRecommendedCapacityRatio
+      : 0;
 
   const maxImportReduction = Math.max(0, ...allScenarios.map((scenario) => scenario.importReductionKwhAnnualized));
   const maxCycles = Math.max(0, ...allScenarios.map((scenario) => scenario.cyclesPerYear));
@@ -1455,6 +1461,9 @@ export function computePvSelfConsumptionAdvice(
     }
     if (scenario.cyclesPerYear < minCyclesPerYear) {
       excludedReasons.push('Te weinig cycli per jaar');
+    }
+    if (usedCustomerType === 'business' && scenario.capacityKwh < minBusinessRecommendedCapacityKwh) {
+      excludedReasons.push('Onder minimale capaciteit t.o.v. P75-formuleadvies');
     }
     if ((scenario.marginalGainPerAddedKwh ?? 0) < minMarginalGain && index > 0) {
       excludedReasons.push('Marginale meeropbrengst te laag');
@@ -1543,6 +1552,17 @@ export function computePvSelfConsumptionAdvice(
   }
   if (usedCustomerType === 'home' && formulaAdvice.rawAdvice.capReason) {
     warnings.push(formulaAdvice.rawAdvice.capReason);
+  }
+  if (
+    usedCustomerType === 'business' &&
+    resolvedHybridConfig.minBusinessRecommendedCapacityRatio > 0 &&
+    recommendedScenario.capacityKwh < formulaAdvice.rawAdvice.recommendedKwh
+  ) {
+    warnings.push(
+      `Zakelijk advies is minimaal ${Math.round(
+        resolvedHybridConfig.minBusinessRecommendedCapacityRatio * 100
+      )}% van het P75-formuleadvies om een te kleine, puur op cycli scorende batterij te voorkomen.`
+    );
   }
 
   const explanation = [

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -139,6 +139,23 @@ describe('analysis jobs', () => {
     const claim = await store.claimNextJob();
 
     expect(claim).toBeNull();
+  });
+
+  it('releases a newly-created lock when claiming fails before processing starts', async () => {
+    const job = await store.createJob(input);
+    const originalUpdateJob = store.updateJob.bind(store);
+    store.updateJob = async (...args) => {
+      const [, patch] = args;
+      if (patch.status === 'processing') {
+        throw new Error('simulated write failure');
+      }
+      return originalUpdateJob(...args);
+    };
+
+    await expect(store.claimNextJob()).rejects.toThrow('simulated write failure');
+    await expect(stat(path.join(tempDir, `${job.jobId}.lock`))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    store.updateJob = originalUpdateJob;
   });
 
   it('reclaims stale processing jobs', async () => {

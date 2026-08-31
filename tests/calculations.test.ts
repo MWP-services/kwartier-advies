@@ -397,6 +397,26 @@ describe('calculations', () => {
     ).toBe(false);
   });
 
+  it('anchors business PV recommendation near the P75 formula need instead of selecting the smallest high-cycle option', () => {
+    const rows = Array.from({ length: 60 }, (_, dayIndex) => {
+      const base = Date.UTC(2024, 6, 1 + dayIndex, 0, 0);
+      return [
+        { timestamp: new Date(base + 12 * 60 * 60 * 1000).toISOString(), consumptionKwh: 0, exportKwh: 1500 },
+        { timestamp: new Date(base + 19 * 60 * 60 * 1000).toISOString(), consumptionKwh: 1500, exportKwh: 0 }
+      ];
+    }).flat();
+    const intervals = processIntervals(rows, 5000);
+    const hybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'business' });
+    const minCapacityKwh = hybrid.formulaAdvice.recommendedFormulaKwh * 0.8;
+
+    expect(hybrid.formulaAdvice.p75StorageNeedKwh).toBe(1500);
+    expect(hybrid.simulationAdvice.recommended.capacityKwh).toBeGreaterThanOrEqual(minCapacityKwh);
+    expect(hybrid.simulationAdvice.recommended.capacityKwh).not.toBe(64);
+    expect(
+      hybrid.simulationAdvice.allScenarios.find((scenario) => scenario.capacityKwh === 64)?.excludedReason
+    ).toBe('Onder minimale capaciteit t.o.v. P75-formuleadvies');
+  });
+
   it('selects earliest timestamp when max observed kW ties', () => {
     const tieRows = [
       { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 200 },
