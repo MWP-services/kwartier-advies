@@ -242,7 +242,7 @@ export interface PvSelfConsumptionAdviceConfig {
   minCyclesPerYearBusiness?: number;
   minMarginalGainPerAddedKwhHome?: number;
   minMarginalGainPerAddedKwhBusiness?: number;
-  minBusinessRecommendedCapacityRatio?: number;
+  minBusinessRecommendedCapacityToP75Ratio?: number;
   economics?: Partial<PvEconomicsConfig>;
 }
 
@@ -777,7 +777,7 @@ const DEFAULT_PV_SELF_CONSUMPTION_CONFIG: Required<
   minCyclesPerYearBusiness: 20,
   minMarginalGainPerAddedKwhHome: 30,
   minMarginalGainPerAddedKwhBusiness: 10,
-  minBusinessRecommendedCapacityRatio: 0.8
+  minBusinessRecommendedCapacityToP75Ratio: 0.9
 };
 
 const HOME_PV_POWER_MAP: Record<number, number> = {
@@ -1426,7 +1426,7 @@ export function computePvSelfConsumptionAdvice(
       : resolvedHybridConfig.minMarginalGainPerAddedKwhHome;
   const minBusinessRecommendedCapacityKwh =
     usedCustomerType === 'business'
-      ? formulaAdvice.rawAdvice.recommendedKwh * resolvedHybridConfig.minBusinessRecommendedCapacityRatio
+      ? formulaAdvice.percentiles.p75StorageNeedKwh * resolvedHybridConfig.minBusinessRecommendedCapacityToP75Ratio
       : 0;
 
   const maxImportReduction = Math.max(0, ...allScenarios.map((scenario) => scenario.importReductionKwhAnnualized));
@@ -1463,7 +1463,7 @@ export function computePvSelfConsumptionAdvice(
       excludedReasons.push('Te weinig cycli per jaar');
     }
     if (usedCustomerType === 'business' && scenario.capacityKwh < minBusinessRecommendedCapacityKwh) {
-      excludedReasons.push('Onder minimale capaciteit t.o.v. P75-formuleadvies');
+      excludedReasons.push('Onder minimale capaciteit t.o.v. P75-opslagbehoefte');
     }
     if ((scenario.marginalGainPerAddedKwh ?? 0) < minMarginalGain && index > 0) {
       excludedReasons.push('Marginale meeropbrengst te laag');
@@ -1555,13 +1555,13 @@ export function computePvSelfConsumptionAdvice(
   }
   if (
     usedCustomerType === 'business' &&
-    resolvedHybridConfig.minBusinessRecommendedCapacityRatio > 0 &&
-    recommendedScenario.capacityKwh < formulaAdvice.rawAdvice.recommendedKwh
+    resolvedHybridConfig.minBusinessRecommendedCapacityToP75Ratio > 0 &&
+    recommendedScenario.capacityKwh < formulaAdvice.percentiles.p75StorageNeedKwh
   ) {
     warnings.push(
       `Zakelijk advies is minimaal ${Math.round(
-        resolvedHybridConfig.minBusinessRecommendedCapacityRatio * 100
-      )}% van het P75-formuleadvies om een te kleine, puur op cycli scorende batterij te voorkomen.`
+        resolvedHybridConfig.minBusinessRecommendedCapacityToP75Ratio * 100
+      )}% van de P75-opslagbehoefte om een te kleine, puur op cycli scorende batterij te voorkomen.`
     );
   }
 

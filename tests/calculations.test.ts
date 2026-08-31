@@ -397,7 +397,7 @@ describe('calculations', () => {
     ).toBe(false);
   });
 
-  it('anchors business PV recommendation near the P75 formula need instead of selecting the smallest high-cycle option', () => {
+  it('anchors business PV recommendation near the P75 storage need instead of selecting the smallest high-cycle option', () => {
     const rows = Array.from({ length: 60 }, (_, dayIndex) => {
       const base = Date.UTC(2024, 6, 1 + dayIndex, 0, 0);
       return [
@@ -407,14 +407,14 @@ describe('calculations', () => {
     }).flat();
     const intervals = processIntervals(rows, 5000);
     const hybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'business' });
-    const minCapacityKwh = hybrid.formulaAdvice.recommendedFormulaKwh * 0.8;
+    const minCapacityKwh = hybrid.formulaAdvice.p75StorageNeedKwh * 0.9;
 
     expect(hybrid.formulaAdvice.p75StorageNeedKwh).toBe(1500);
     expect(hybrid.simulationAdvice.recommended.capacityKwh).toBeGreaterThanOrEqual(minCapacityKwh);
     expect(hybrid.simulationAdvice.recommended.capacityKwh).not.toBe(64);
     expect(
       hybrid.simulationAdvice.allScenarios.find((scenario) => scenario.capacityKwh === 64)?.excludedReason
-    ).toBe('Onder minimale capaciteit t.o.v. P75-formuleadvies');
+    ).toBe('Onder minimale capaciteit t.o.v. P75-opslagbehoefte');
   });
 
   it('selects earliest timestamp when max observed kW ties', () => {
