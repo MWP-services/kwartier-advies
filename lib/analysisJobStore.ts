@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -12,6 +13,7 @@ const JOB_FILE_SUFFIX = '.json';
 const LOCK_SUFFIX = '.lock';
 export const WORKER_HEARTBEAT_FILE = 'analysis-worker-heartbeat.json';
 const STALE_PROCESSING_MS = 30 * 60 * 1000;
+const COMPLETED_DUPLICATE_REUSE_MS = 2 * 60 * 1000;
 const FILE_WRITE_RETRY_DELAYS_MS = [25, 75, 150, 300, 600];
 
 export interface AnalysisWorkerHeartbeat {
@@ -52,6 +54,10 @@ function safeJobId(jobId: string): string {
 
 function atomicJson(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function hashAnalyzeInput(input: PersistedAnalyzeInput): string {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }
 
 function isRetriableFileError(error: unknown): boolean {
@@ -129,7 +135,36 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
     await this.writeAtomicJson(this.jobPath(job.jobId), job);
   }
 
+  private async findReusableJobByRequestHash(requestHash: string): Promise<AnalysisJobRecord | null> {
+    await this.ensureDirectory();
+    const fileNames = await readdir(this.directory);
+    const jobFiles = fileNames
+      .filter((fileName) => fileName.startsWith(JOB_PREFIX) && fileName.endsWith(JOB_FILE_SUFFIX))
+      .sort();
+
+    for (const fileName of jobFiles) {
+      const jobId = fileName.slice(0, -JOB_FILE_SUFFIX.length);
+      const job = await this.getJob(jobId);
+      if (!job || job.requestHash !== requestHash) continue;
+      if (job.status === 'queued' || job.status === 'processing') {
+        logAnalyzeJobStore('reusing active duplicate job', { jobId, status: job.status });
+        return job;
+      }
+      const completedAtMs = job.completedAt ? new Date(job.completedAt).getTime() : 0;
+      if (job.status === 'completed' && Number.isFinite(completedAtMs) && Date.now() - completedAtMs < COMPLETED_DUPLICATE_REUSE_MS) {
+        logAnalyzeJobStore('reusing recent completed duplicate job', { jobId, status: job.status });
+        return job;
+      }
+    }
+
+    return null;
+  }
+
   async createJob(input: PersistedAnalyzeInput): Promise<AnalysisJobRecord> {
+    const requestHash = hashAnalyzeInput(input);
+    const reusableJob = await this.findReusableJobByRequestHash(requestHash);
+    if (reusableJob) return reusableJob;
+
     const timestamp = nowIso();
     const job: AnalysisJobRecord = {
       jobId: createJobId(),
@@ -139,6 +174,7 @@ export class FileAnalysisJobStore implements AnalysisJobStore {
       createdAt: timestamp,
       updatedAt: timestamp,
       attempts: 0,
+      requestHash,
       input
     };
     await this.writeJob(job);
@@ -312,7 +348,7 @@ export function setAnalysisJobStoreForTests(store: AnalysisJobStore | null): voi
 export function toStartAnalysisJobResponse(job: AnalysisJobRecord): StartAnalysisJobResponse {
   return {
     jobId: job.jobId,
-    status: 'queued',
+    status: job.status === 'completed' ? 'completed' : job.status === 'processing' ? 'processing' : 'queued',
     progress: job.progress,
     currentStep: job.currentStep
   };

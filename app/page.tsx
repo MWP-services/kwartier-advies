@@ -236,6 +236,7 @@ export default function HomePage() {
   const [analysisProgress, setAnalysisProgress] = useState<ProgressState | null>(null);
   const [financialProgress, setFinancialProgress] = useState<ProgressState | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
+  const analysisInFlightRef = useRef(false);
   const isPvMode = draftSettings.analysisType === 'PV_SELF_CONSUMPTION';
   const usesIntervalData = !isPvMode || inputMode === 'intervalData';
   const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
@@ -290,6 +291,7 @@ export default function HomePage() {
     return () => {
       analysisAbortRef.current?.abort();
       analysisAbortRef.current = null;
+      analysisInFlightRef.current = false;
     };
   }, []);
 
@@ -410,22 +412,27 @@ export default function HomePage() {
   };
 
   const handleAnalyze = async () => {
-    if (isAnalyzing) return;
+    if (analysisInFlightRef.current || isAnalyzing) return;
+    analysisInFlightRef.current = true;
 
     setError(null);
     if (usesIntervalData && (!draftMapping.timestamp || !draftMapping.consumptionKwh)) {
+      analysisInFlightRef.current = false;
       setError('Selecteer eerst timestamp- en consumption-kolommen.');
       return;
     }
     if (draftSettings.analysisType === 'PV_SELF_CONSUMPTION' && usesIntervalData && !hasPvInputs) {
+      analysisInFlightRef.current = false;
       setError('Voor PV-analyse is een pv_kwh- of export_kwh-kolom nodig.');
       return;
     }
     if (draftSettings.analysisType === 'PV_SELF_CONSUMPTION' && !usesIntervalData && !hasAnnualBillInputs) {
+      analysisInFlightRef.current = false;
       setError('We hebben geen stroomverbruik of teruglevering gevonden. Vul minimaal een van deze jaarwaarden in.');
       return;
     }
     if (!canAnalyze) {
+      analysisInFlightRef.current = false;
       setError('Controleer instellingen en data voordat je analyseert.');
       return;
     }
@@ -501,6 +508,7 @@ export default function HomePage() {
       setError(err instanceof Error ? err.message : 'Analyse kon niet worden uitgevoerd. Probeer opnieuw of upload het bestand opnieuw.');
     } finally {
       setIsAnalyzing(false);
+      analysisInFlightRef.current = false;
       analysisAbortRef.current = null;
       window.setTimeout(() => setAnalysisProgress(null), 500);
     }

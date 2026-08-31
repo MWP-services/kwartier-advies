@@ -74,6 +74,51 @@ describe('analysis jobs', () => {
     expect(statusPayload.status).toBe('queued');
   });
 
+  it('reuses an active job for duplicate analysis start requests', async () => {
+    const firstResponse = await startAnalyze(
+      new Request('http://localhost/api/analyze', {
+        method: 'POST',
+        body: JSON.stringify(input)
+      })
+    );
+    const secondResponse = await startAnalyze(
+      new Request('http://localhost/api/analyze', {
+        method: 'POST',
+        body: JSON.stringify(input)
+      })
+    );
+
+    expect(firstResponse.status).toBe(202);
+    expect(secondResponse.status).toBe(202);
+    const firstPayload = await readJson<{ jobId: string }>(firstResponse);
+    const secondPayload = await readJson<{ jobId: string }>(secondResponse);
+    expect(secondPayload.jobId).toBe(firstPayload.jobId);
+  });
+
+  it('reuses a recently completed duplicate analysis request', async () => {
+    const job = await store.createJob(input);
+    await store.updateJob(job.jobId, {
+      status: 'completed',
+      progress: 100,
+      currentStep: 'Analyse voltooid',
+      completedAt: new Date().toISOString(),
+      result: { analysisId: job.jobId } as never
+    });
+
+    const response = await startAnalyze(
+      new Request('http://localhost/api/analyze', {
+        method: 'POST',
+        body: JSON.stringify(input)
+      })
+    );
+
+    expect(response.status).toBe(202);
+    const payload = await readJson<{ jobId: string; status: string; progress: number }>(response);
+    expect(payload.jobId).toBe(job.jobId);
+    expect(payload.status).toBe('completed');
+    expect(payload.progress).toBe(100);
+  });
+
   it('returns 404 for an unknown job id', async () => {
     const response = await getAnalyzeStatus(
       new Request('http://localhost/api/analyze/status?jobId=analysis_00000000000000000000000000000000')
@@ -178,7 +223,13 @@ describe('analysis jobs', () => {
 
   it('skips completed and failed jobs when claiming', async () => {
     const completed = await store.createJob(input);
-    const failed = await store.createJob(input);
+    const failed = await store.createJob({
+      ...input,
+      rows: [
+        { timestamp: '2024-01-02T00:00:00.000Z', consumption_kwh: 120 },
+        { timestamp: '2024-01-02T00:15:00.000Z', consumption_kwh: 160 }
+      ]
+    });
     await store.updateJob(completed.jobId, { status: 'completed', progress: 100 });
     await store.updateJob(failed.jobId, { status: 'failed', progress: 100, error: 'Boom' });
 

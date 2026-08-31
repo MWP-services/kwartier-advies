@@ -30,6 +30,7 @@ export interface AnalysisJobRecord extends AnalysisJobProgress {
   updatedAt: string;
   attempts: number;
   input: PersistedAnalyzeInput;
+  requestHash?: string;
   startedAt?: string;
   completedAt?: string;
   failedAt?: string;
@@ -63,7 +64,7 @@ export type AnalysisJobStatusResponse =
 
 export interface StartAnalysisJobResponse {
   jobId: string;
-  status: 'queued';
+  status: 'queued' | 'processing' | 'completed';
   progress: number;
   currentStep: string;
 }
