@@ -360,17 +360,36 @@ export default function HomePage() {
         raw?: AnnualBillExtract['raw'];
         issues?: AnnualBillExtract['issues'];
         textPreview?: string;
+        diagnostics?: AnnualBillExtract['diagnostics'] & { stage?: string; details?: string };
         error?: string;
       }>(response);
       if (!response.ok || !result.input) {
-        throw new Error(result.error ?? `Jaarnota uitlezen mislukt (${response.status})`);
+        const diagnosticParts = [
+          result.diagnostics?.stage ? `fase: ${result.diagnostics.stage}` : null,
+          typeof result.diagnostics?.textLength === 'number' ? `tekstlengte: ${result.diagnostics.textLength}` : null,
+          result.diagnostics?.recognizedFields?.length
+            ? `herkend: ${result.diagnostics.recognizedFields.join(', ')}`
+            : null
+        ].filter(Boolean);
+        throw new Error(
+          `${result.error ?? `Jaarnota uitlezen mislukt (${response.status})`}${
+            diagnosticParts.length ? ` (${diagnosticParts.join('; ')})` : ''
+          }`
+        );
       }
 
       const extract: AnnualBillExtract = {
         input: result.input,
         raw: result.raw ?? {},
         issues: result.issues ?? [],
-        textPreview: result.textPreview ?? ''
+        textPreview: result.textPreview ?? '',
+        diagnostics: result.diagnostics ?? {
+          textLength: result.textPreview?.length ?? 0,
+          recognizedFields: Object.keys(result.raw ?? {}) as AnnualBillExtract['diagnostics']['recognizedFields'],
+          missingFields: (result.input.missingFields ?? []) as AnnualBillExtract['diagnostics']['missingFields'],
+          issueCount: result.issues?.length ?? 0,
+          parser: 'pdf-parse'
+        }
       };
       setAnnualBillExtract(extract);
       setAnnualBillInput((prev) => ({
@@ -386,7 +405,7 @@ export default function HomePage() {
       setAnalysisId(null);
       setFinancialResult(null);
       setFinancialPvAdviceCharts(null);
-    } catch {
+    } catch (err) {
       setAnnualBillInput((prev) => ({
         ...prev,
         supplierName: prev.supplierName ?? file.name.replace(/\.pdf$/i, ''),
@@ -396,7 +415,8 @@ export default function HomePage() {
       }));
       setAnnualBillExtract(null);
       setAnnualBillAdvice(null);
-      setError('We konden deze PDF niet automatisch uitlezen. Je kunt doorgaan met handmatige jaarnota-invoer.');
+      const details = err instanceof Error ? ` Reden: ${err.message}` : '';
+      setError(`We konden deze PDF niet automatisch uitlezen.${details} Je kunt doorgaan met handmatige jaarnota-invoer.`);
     } finally {
       setIsExtractingAnnualBill(false);
     }
@@ -965,6 +985,9 @@ export default function HomePage() {
                   <div className="md:col-span-3 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
                     Extractiezekerheid: {annualBillInput.extractionConfidence != null ? `${Math.round(annualBillInput.extractionConfidence * 100)}%` : 'n.v.t.'}
                     {annualBillInput.missingFields?.length ? ` | Controleer/aanvullen: ${annualBillInput.missingFields.join(', ')}` : ' | Geen verplichte ontbrekende velden gemeld.'}
+                    {annualBillExtract?.diagnostics
+                      ? ` | PDF-tekst: ${annualBillExtract.diagnostics.textLength} tekens | Herkend: ${annualBillExtract.diagnostics.recognizedFields.length || 0} velden`
+                      : ''}
                   </div>
                   <div className="md:col-span-3 grid gap-3 md:grid-cols-3">
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">

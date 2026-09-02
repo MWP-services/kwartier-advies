@@ -16,11 +16,21 @@ export type AnnualBillValidationIssue = {
   severity: 'missing' | 'warning';
 };
 
+export type AnnualBillExtractionDiagnostics = {
+  pdfBytes?: number;
+  textLength: number;
+  recognizedFields: AnnualBillField[];
+  missingFields: AnnualBillField[];
+  issueCount: number;
+  parser: 'pdf-parse';
+};
+
 export type AnnualBillExtractionResult = {
   input: AnnualBillInput;
   raw: AnnualBillRawExtract;
   textPreview: string;
   issues: AnnualBillValidationIssue[];
+  diagnostics: AnnualBillExtractionDiagnostics;
 };
 
 export type AnnualBillExtract = AnnualBillExtractionResult;

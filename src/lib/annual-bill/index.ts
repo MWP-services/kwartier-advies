@@ -9,15 +9,24 @@ export async function extractAnnualBillFromPdf(buffer: Buffer): Promise<AnnualBi
   const raw = extractAnnualBillData(text);
   const input = normalizeAnnualBillData(raw);
   const issues = validateAnnualBillExtract(input);
+  const missingFields = issues.filter((issue) => issue.severity === 'missing').map((issue) => issue.field);
 
   return {
     input: {
       ...input,
-      missingFields: issues.filter((issue) => issue.severity === 'missing').map((issue) => issue.field)
+      missingFields
     },
     raw,
     issues,
-    textPreview: text.slice(0, 1200)
+    textPreview: text.slice(0, 1200),
+    diagnostics: {
+      pdfBytes: buffer.byteLength,
+      textLength: text.length,
+      recognizedFields: Object.keys(raw) as Array<keyof typeof input>,
+      missingFields,
+      issueCount: issues.length,
+      parser: 'pdf-parse'
+    }
   };
 }
 
