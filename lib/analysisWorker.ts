@@ -3,6 +3,7 @@ import type { AnalysisJobProgress, AnalysisJobRecord, PersistedAnalyzeInput } fr
 import { buildAnnualBillIndicativeAnalysis } from './annualBillAdvice';
 import { getAnalysisJobStore } from './analysisJobStore';
 import { compactAnalysisResult } from './analysisResultSerialization';
+import { logAnnualBill, annualBillErrorDetails } from '../src/lib/annual-bill/logging';
 import { runAnalysis } from './clientAnalysis';
 import { mapRows } from './parsing';
 import { storeAnalysisResult } from './serverDataStore';
@@ -83,6 +84,7 @@ async function executeAnalysisJob(job: AnalysisJobRecord): Promise<AnalysisResul
   };
 
   const input: PersistedAnalyzeInput = job.input;
+  if (input.annualBillInput) logAnnualBill('analysis.worker.started', input.annualBillInput.traceId, { jobId: job.jobId });
   logAnalyze(job.jobId, 'processing accepted input', {
     hasRows: Array.isArray(input.rows),
     rowCount: input.rows?.length ?? 0,
@@ -104,6 +106,7 @@ async function executeAnalysisJob(job: AnalysisJobRecord): Promise<AnalysisResul
         if (!annualResult) {
           throw new Error('Voor indicatief jaarnota-advies zijn minimaal totaal verbruik en totale teruglevering nodig.');
         }
+        logAnnualBill('analysis.calculated', input.annualBillInput.traceId, { jobId: job.jobId, recommendedBatteryKwh: annualResult.annualBillAdvice?.recommendedBatteryKwh });
         return annualResult;
       }
 
@@ -154,6 +157,7 @@ async function executeAnalysisJob(job: AnalysisJobRecord): Promise<AnalysisResul
   );
 
   logAnalyze(job.jobId, 'completed', { totalDurationMs: elapsedMs(totalStart) });
+  if (input.annualBillInput) logAnnualBill('analysis.completed', input.annualBillInput.traceId, { jobId: job.jobId, durationMs: elapsedMs(totalStart) });
   return compactResult;
 }
 
@@ -180,6 +184,7 @@ async function processOneAnalysisJob(): Promise<boolean> {
     logAnalyze(job.jobId, 'completed', { totalDurationMs: elapsedMs(totalStart), attempts: job.attempts });
   } catch (error) {
     const serialized = serializeError(error);
+    if (job.input.annualBillInput) logAnnualBill('analysis.failed', job.input.annualBillInput.traceId, { jobId: job.jobId, ...annualBillErrorDetails(error) }, 'error');
     await store.updateJob(job.jobId, {
       status: 'failed',
       progress: 100,

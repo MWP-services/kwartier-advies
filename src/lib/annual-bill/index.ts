@@ -5,6 +5,7 @@ import { extractPdfText } from './extractPdfText';
 import { normalizeAnnualBillData } from './normalizeAnnualBillData';
 import { validateAnnualBillExtract } from './validateAnnualBillExtract';
 import type { AnnualBillAiReport, AnnualBillRawExtract, AnnualBillValidationIssue } from './schema';
+import { logAnnualBill, annualBillLogFields, annualBillLogValues, annualBillErrorDetails } from './logging';
 
 function valuesConflict(left: string | number | undefined, right: string | number | undefined): boolean {
   if (left == null || right == null) return false;
@@ -53,9 +54,19 @@ function mergeRawExtracts(rulesRaw: AnnualBillRawExtract, aiRaw: AnnualBillRawEx
   return { raw, issues };
 }
 
-export async function extractAnnualBillFromPdf(buffer: Buffer): Promise<AnnualBillExtractionResult> {
-  const text = await extractPdfText(buffer);
+export async function extractAnnualBillFromPdf(buffer: Buffer, traceId = crypto.randomUUID()): Promise<AnnualBillExtractionResult> {
+  const startedAt = performance.now();
+  logAnnualBill('pdf.text.started', traceId, { bytes: buffer.byteLength });
+  let text: string;
+  try {
+    text = await extractPdfText(buffer);
+  } catch (error) {
+    logAnnualBill('pdf.text.failed', traceId, annualBillErrorDetails(error), 'error');
+    throw error;
+  }
+  logAnnualBill('pdf.text.completed', traceId, { textLength: text.length, durationMs: Math.round(performance.now() - startedAt) });
   const rulesRaw = extractAnnualBillData(text);
+  logAnnualBill('rules.completed', traceId, { fields: annualBillLogFields(rulesRaw) });
   const aiWarnings: string[] = [];
   let aiReport: AnnualBillAiReport | undefined;
   let aiModel: string | undefined;
@@ -65,7 +76,7 @@ export async function extractAnnualBillFromPdf(buffer: Buffer): Promise<AnnualBi
 
   if (isAnnualBillAiConfigured()) {
     try {
-      const ai = await extractAnnualBillWithAi(text);
+      const ai = await extractAnnualBillWithAi(text, traceId);
       aiUsed = true;
       aiModel = ai.model;
       aiReport = ai.report;
@@ -73,24 +84,40 @@ export async function extractAnnualBillFromPdf(buffer: Buffer): Promise<AnnualBi
       const merged = mergeRawExtracts(rulesRaw, ai.raw);
       raw = merged.raw;
       mergeIssues = merged.issues;
+      logAnnualBill('merge.completed', traceId, {
+        addedByAi: Object.keys(ai.raw).filter((field) => !rulesRaw[field as keyof typeof rulesRaw]),
+        conflictingFields: mergeIssues.map((issue) => issue.field),
+        fields: annualBillLogFields(raw)
+      }, mergeIssues.length ? 'warn' : 'info');
     } catch (error) {
       aiWarnings.push(error instanceof Error ? error.message : String(error));
+      logAnnualBill('ai.fallback_to_rules', traceId, { ...annualBillErrorDetails(error), aiUsed: false }, 'warn');
     }
+  } else {
+    logAnnualBill('ai.skipped', traceId, { reason: 'OPENAI_API_KEY_missing', aiUsed: false }, 'warn');
   }
 
   const input = normalizeAnnualBillData(raw);
   const issues = [...validateAnnualBillExtract(input), ...mergeIssues];
   const missingFields = issues.filter((issue) => issue.severity === 'missing').map((issue) => issue.field);
+  logAnnualBill('extraction.completed', traceId, {
+    aiEnabled: isAnnualBillAiConfigured(), aiUsed, aiModel,
+    aiWarningCount: aiWarnings.length, values: annualBillLogValues(input),
+    issues: issues.map(({ field, severity }) => ({ field, severity })),
+    durationMs: Math.round(performance.now() - startedAt)
+  }, issues.length || aiWarnings.length ? 'warn' : 'info');
 
   return {
     input: {
       ...input,
+      traceId,
       missingFields
     },
     raw,
     issues,
     textPreview: text.slice(0, 1200),
     diagnostics: {
+      traceId,
       pdfBytes: buffer.byteLength,
       textLength: text.length,
       recognizedFields: Object.keys(raw) as Array<keyof typeof input>,

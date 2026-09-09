@@ -29,6 +29,7 @@ import type { PriceInterval } from '@/lib/pricing';
 import type { ScenarioResult } from '@/lib/simulation';
 import type { AnnualBillAdviceResult } from '@/src/lib/annual-bill/calculateAnnualBillAdvice';
 import type { AnnualBillExtract } from '@/src/lib/annual-bill/schema';
+import { logAnnualBill, annualBillLogValues, annualBillErrorDetails } from '@/src/lib/annual-bill/logging';
 import { annualBillConfidenceLabel, annualBillMissingDetails, formatEuro, formatKwh, formatYears, maskEan, resolveAverageFeedInPrice, resolveAverageImportPrice, resolveAnnualFeedInKwh, resolveAnnualUsageKwh } from '@/src/lib/annual-bill/annualBillUx';
 
 const Charts = dynamic(() => import('@/components/Charts').then((module) => module.Charts), {
@@ -374,6 +375,9 @@ export default function HomePage() {
   };
 
   const handleAnnualBillPdf = async (file: File) => {
+    const traceId = crypto.randomUUID();
+    const startedAt = performance.now();
+    logAnnualBill('browser.upload.started', traceId, { bytes: file.size });
     setAnnualBillFileName(file.name);
     setIsExtractingAnnualBill(true);
     setError(null);
@@ -382,8 +386,10 @@ export default function HomePage() {
       formData.set('file', file);
       const response = await fetch('/api/annual-bill/extract', {
         method: 'POST',
+        headers: { 'x-annual-bill-trace-id': traceId },
         body: formData
       });
+      logAnnualBill('browser.upload.response', traceId, { httpStatus: response.status });
       const result = await readApiJson<{
         input?: AnnualBillInput;
         raw?: AnnualBillExtract['raw'];
@@ -423,6 +429,12 @@ export default function HomePage() {
         }
       };
       setAnnualBillExtract(extract);
+      logAnnualBill('browser.extraction.ready', traceId, {
+        aiEnabled: extract.diagnostics.aiEnabled ?? false, aiUsed: extract.diagnostics.aiUsed ?? false,
+        aiModel: extract.diagnostics.aiModel, aiWarningCount: extract.diagnostics.aiWarnings?.length ?? 0,
+        issueCount: extract.issues.length, values: annualBillLogValues(result.input),
+        durationMs: Math.round(performance.now() - startedAt)
+      });
       setAnnualBillInput((prev) => ({
         ...prev,
         ...result.input,
@@ -437,8 +449,10 @@ export default function HomePage() {
       setFinancialResult(null);
       setFinancialPvAdviceCharts(null);
     } catch (err) {
+      logAnnualBill('browser.upload.failed', traceId, { ...annualBillErrorDetails(err), durationMs: Math.round(performance.now() - startedAt) }, 'error');
       setAnnualBillInput((prev) => ({
         ...prev,
+        traceId,
         supplierName: prev.supplierName ?? file.name.replace(/\.pdf$/i, ''),
         source: 'pdf',
         extractionConfidence: 0,
@@ -454,7 +468,9 @@ export default function HomePage() {
   };
 
   const updateAnnualBillInput = (patch: Partial<AnnualBillInput>) => {
-    setAnnualBillInput((prev) => ({ ...prev, ...patch }));
+    const traceId = annualBillInput.traceId ?? crypto.randomUUID();
+    logAnnualBill('browser.input.changed', traceId, { fields: Object.keys(patch), values: annualBillLogValues(patch) });
+    setAnnualBillInput((prev) => ({ ...prev, ...patch, traceId }));
     setAnnualBillAdvice(null);
     setAnalysisResult(null);
     setAnalysisId(null);
@@ -464,6 +480,8 @@ export default function HomePage() {
 
   const handleAnalyze = async () => {
     if (analysisInFlightRef.current || isAnalyzing) return;
+    const annualTraceId = usesIntervalData ? undefined : annualBillInput.traceId ?? crypto.randomUUID();
+    if (annualTraceId) logAnnualBill('browser.analysis.requested', annualTraceId, { inputMode, values: annualBillLogValues(annualBillInput) });
     analysisInFlightRef.current = true;
 
     setError(null);
@@ -478,11 +496,13 @@ export default function HomePage() {
       return;
     }
     if (draftSettings.analysisType === 'PV_SELF_CONSUMPTION' && !usesIntervalData && !hasAnnualBillInputs) {
+      logAnnualBill('browser.analysis.rejected', annualTraceId, { reason: 'usage_and_feed_in_missing' }, 'warn');
       analysisInFlightRef.current = false;
       setError('We hebben geen stroomverbruik of teruglevering gevonden. Vul minimaal een van deze jaarwaarden in.');
       return;
     }
     if (!canAnalyze) {
+      if (annualTraceId) logAnnualBill('browser.analysis.rejected', annualTraceId, { reason: 'invalid_settings_or_data' }, 'warn');
       analysisInFlightRef.current = false;
       setError('Controleer instellingen en data voordat je analyseert.');
       return;
@@ -507,36 +527,47 @@ export default function HomePage() {
           rows: uploadId ? undefined : rawRows,
           mapping: draftMapping,
           settings: { ...draftSettings, pvInputMode: inputMode },
-          annualBillInput: usesIntervalData ? undefined : annualBillInput
+          annualBillInput: usesIntervalData ? undefined : { ...annualBillInput, traceId: annualTraceId }
         })
       });
       const payload = await readApiJson<StartAnalysisJobResponse | { error?: string }>(response);
       if (!response.ok) {
+        if (annualTraceId) logAnnualBill('browser.analysis.rejected', annualTraceId, { httpStatus: response.status }, 'error');
         setError('error' in payload && payload.error ? payload.error : `Analyse starten mislukt (${response.status})`);
         return;
       }
       if (!('jobId' in payload)) {
+        if (annualTraceId) logAnnualBill('browser.analysis.rejected', annualTraceId, { reason: 'job_id_missing' }, 'error');
         setError('Analyse kon niet worden gestart: server gaf geen jobId terug.');
         return;
       }
 
       setAnalysisProgress({ percent: payload.progress, label: payload.currentStep });
+      if (annualTraceId) logAnnualBill('browser.analysis.queued', annualTraceId, { jobId: payload.jobId });
+      let lastLoggedStatus = '';
       const finalStatus = await pollAnalysisJob({
         jobId: payload.jobId,
         signal: abortController.signal,
         intervalMs: 2500,
         onStatus: (status) => {
+          const statusKey = `${status.status}:${status.progress}`;
+          if (annualTraceId && statusKey !== lastLoggedStatus) {
+            logAnnualBill('browser.analysis.progress', annualTraceId, { jobId: payload.jobId, status: status.status, progress: status.progress });
+            lastLoggedStatus = statusKey;
+          }
           setAnalysisProgress({ percent: status.progress, label: status.currentStep });
         }
       });
 
       if (finalStatus.status === 'failed') {
+        if (annualTraceId) logAnnualBill('browser.analysis.failed', annualTraceId, { jobId: payload.jobId, reason: 'worker_failed' }, 'error');
         setError(finalStatus.error);
         return;
       }
 
       const result: AnalysisResult & { analysisId?: string } = finalStatus.result;
       if (!result) {
+        if (annualTraceId) logAnnualBill('browser.analysis.failed', annualTraceId, { reason: 'result_missing' }, 'error');
         setError('Geen bruikbare rijen na normalisatie of filtering.');
         return;
       }
@@ -547,6 +578,7 @@ export default function HomePage() {
       setAnalysisResult(result);
       setAnalysisId(result.analysisId ?? null);
       setAnnualBillAdvice(result.annualBillAdvice ?? null);
+      if (annualTraceId) logAnnualBill('browser.analysis.ready', annualTraceId, { jobId: payload.jobId, recommendedBatteryKwh: result.annualBillAdvice?.recommendedBatteryKwh, confidence: result.annualBillAdvice?.confidence });
       setFinancialResult(null);
       setFinancialPvAdviceCharts(null);
       setSelectedScenario(result.sizing.recommendedProduct?.capacityKwh ?? result.scenarios[0]?.capacityKwh ?? 64);
@@ -554,8 +586,10 @@ export default function HomePage() {
       setAnalysisProgress({ percent: 100, label: 'Analyse gereed.' });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
+        if (annualTraceId) logAnnualBill('browser.analysis.aborted', annualTraceId);
         return;
       }
+      if (annualTraceId) logAnnualBill('browser.analysis.failed', annualTraceId, annualBillErrorDetails(err), 'error');
       setError(err instanceof Error ? err.message : 'Analyse kon niet worden uitgevoerd. Probeer opnieuw of upload het bestand opnieuw.');
     } finally {
       setIsAnalyzing(false);
@@ -698,6 +732,8 @@ export default function HomePage() {
 
   const downloadReport = async () => {
     if (!analysisResult || !appliedSettings) return;
+    const reportTraceId = analysisResult.annualBillInput?.traceId;
+    if (analysisResult.annualBillAdvice) logAnnualBill('browser.report.started', reportTraceId, { recommendedBatteryKwh: analysisResult.annualBillAdvice.recommendedBatteryKwh });
     let reportSizing = analysisResult.sizing;
     let sourceScenarios = analysisResult.scenarios;
     let reportPvAdviceCharts = analysisResult.pvAdviceCharts;
@@ -781,6 +817,11 @@ export default function HomePage() {
 
     const reportPayload = {
       reportVariant: 'advice',
+      annualBill: analysisResult.annualBillAdvice ? {
+        input: analysisResult.annualBillInput ?? {},
+        advice: analysisResult.annualBillAdvice,
+        warnings: analysisResult.pvWarnings
+      } : undefined,
       analysisType: appliedSettings.analysisType,
       contractedPowerKw: appliedSettings.contractedPowerKw,
       maxObservedKw: analysisResult.maxObservedKw,
@@ -819,7 +860,9 @@ export default function HomePage() {
     a.download = `${appliedSettings.analysisType === 'PV_SELF_CONSUMPTION' ? 'wattsnext-pv-report' : 'wattsnext-peak-shaving-report'}-${Date.now()}.html`;
     a.click();
     URL.revokeObjectURL(url);
+    if (analysisResult.annualBillAdvice) logAnnualBill('browser.report.downloaded', reportTraceId, { bytes: blob.size, httpStatus: response.status });
     } catch (err) {
+      if (analysisResult.annualBillAdvice) logAnnualBill('browser.report.failed', reportTraceId, annualBillErrorDetails(err), 'error');
       setError(err instanceof Error ? err.message : 'Download van rapport mislukt');
     }
   };
@@ -1386,6 +1429,9 @@ export default function HomePage() {
           {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && annualBillAdvice && (
             <div className="wx-card">
               <h2 className="wx-title">Indicatief batterijadvies op basis van jaarnota</h2>
+              <button className="wx-btn-primary mb-4" onClick={downloadReport}>
+                Download jaarnota-adviesrapport
+              </button>
               <div className="grid gap-3 md:grid-cols-4">
                 <div>
                   <p className="text-xs text-slate-500">Aanbevolen batterij</p>

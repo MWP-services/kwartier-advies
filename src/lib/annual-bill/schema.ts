@@ -21,6 +21,7 @@ export type AnnualBillValidationIssue = {
 };
 
 export type AnnualBillExtractionDiagnostics = {
+  traceId?: string;
   pdfBytes?: number;
   textLength: number;
   recognizedFields: AnnualBillField[];

@@ -1,6 +1,8 @@
 import { annualBillConfidenceLabel, resolveAverageImportPrice, resolveAnnualFeedInKwh, resolveAnnualUsageKwh, resolveEstimatedPvProduction } from './annualBillUx';
+import { logAnnualBill } from './logging';
 
 export type AnnualBillAdviceInput = {
+  traceId?: string;
   usageNormalKwh?: number;
   usageOffPeakKwh?: number;
   feedInNormalKwh?: number;
@@ -165,7 +167,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
     };
   });
 
-  const recommended =
+  const ranked =
     options
       .filter((option) => option.estimatedAnnualStoredSolarKwh > 0)
       .map((option, index) => {
@@ -177,7 +179,14 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
         const score = option.utilizationScore * 0.45 + Math.min(1, marginalSavings / 150) * 0.35 - paybackPenalty;
         return { option, score };
       })
-      .sort((a, b) => b.score - a.score || a.option.batteryKwh - b.option.batteryKwh)[0]?.option ?? null;
+      .sort((a, b) => b.score - a.score || a.option.batteryKwh - b.option.batteryKwh);
+  const recommended = ranked[0]?.option ?? null;
+  logAnnualBill('calculation.ranking', input.traceId, {
+    assumptions: { usableFraction: USABLE_FRACTION, roundTripEfficiency: ROUND_TRIP_EFFICIENCY, eveningDemandFraction: 0.45, maxCycles: 230, daysPerYear: DAYS_PER_YEAR },
+    valuePerStoredKwh,
+    ranking: ranked.map(({ option, score }) => ({ batteryKwh: option.batteryKwh, score, estimatedInvestmentEur: estimateBatteryInvestment(option.batteryKwh, input) })),
+    recommendedBatteryKwh: recommended?.batteryKwh ?? null
+  });
 
   const expectedSavings = recommended?.estimatedAnnualSavingsEur ?? 0;
   const annualSavingsRangeEur = {

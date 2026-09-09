@@ -13,6 +13,11 @@ import type { PvSummary, ScenarioResult } from './simulation';
 import type { PvStrategy } from './pvSimulation';
 
 export interface PdfPayload {
+  annualBill?: {
+    input: import('./analysis').AnnualBillInput;
+    advice: import('../src/lib/annual-bill/calculateAnnualBillAdvice').AnnualBillAdviceResult;
+    warnings?: string[];
+  };
   reportVariant?: 'advice' | 'financial';
   analysisType?: AnalysisType;
   contractedPowerKw: number;

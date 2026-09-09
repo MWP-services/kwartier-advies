@@ -1,4 +1,5 @@
 import type { AnnualBillField, AnnualBillAiReport, AnnualBillRawExtract } from './schema';
+import { logAnnualBill, annualBillLogFields, annualBillErrorDetails } from './logging';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_MODEL = 'gpt-4.1-mini';
@@ -184,12 +185,16 @@ export function isAnnualBillAiConfigured(): boolean {
   return Boolean(process.env.OPENAI_API_KEY);
 }
 
-export async function extractAnnualBillWithAi(text: string): Promise<AnnualBillAiExtraction> {
+export async function extractAnnualBillWithAi(text: string, traceId?: string): Promise<AnnualBillAiExtraction> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY ontbreekt.');
 
   const model = process.env.OPENAI_ANNUAL_BILL_MODEL ?? DEFAULT_MODEL;
   const documentText = text.slice(0, MAX_TEXT_CHARS);
+  const startedAt = performance.now();
+  let stage = 'http_request';
+  logAnnualBill('ai.request.started', traceId, { model, originalTextLength: text.length, sentTextLength: documentText.length, truncated: text.length > documentText.length });
+  try {
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: {
@@ -263,18 +268,48 @@ export async function extractAnnualBillWithAi(text: string): Promise<AnnualBillA
     })
   });
 
+  logAnnualBill('ai.response.received', traceId, {
+    model, httpStatus: response.status, ok: response.ok,
+    requestId: response.headers.get('x-request-id'), durationMs: Math.round(performance.now() - startedAt)
+  }, response.ok ? 'info' : 'error');
+
   if (!response.ok) {
     const body = await response.text();
+    let errorCode: string | undefined;
+    try {
+      const code = JSON.parse(body)?.error?.code;
+      if (typeof code === 'string' && /^[a-z_]{1,64}$/.test(code)) errorCode = code;
+    } catch { /* Non-JSON upstream error bodies are not logged. */ }
+    logAnnualBill('ai.http_error', traceId, { httpStatus: response.status, errorCode }, 'error');
     throw new Error(`OpenAI analyse mislukte (${response.status}): ${body.slice(0, 500)}`);
   }
 
+  stage = 'response_json';
   const json = await response.json();
+  stage = 'structured_output';
   const ai = parseAiJson(extractOutputText(json));
+  stage = 'evidence_validation';
   const extracted = toRawExtract(ai, documentText);
+  const report = buildReport(ai, documentText);
+  logAnnualBill('ai.extraction.completed', traceId, {
+    model, responseStatus: json.status, usage: json.usage ? {
+      inputTokens: json.usage.input_tokens, outputTokens: json.usage.output_tokens, totalTokens: json.usage.total_tokens
+    } : undefined,
+    fields: annualBillLogFields(extracted.raw),
+    recognizedFieldCount: Object.keys(extracted.raw).length,
+    evidenceWarningCount: extracted.warnings.length, modelWarningCount: ai.warnings.length,
+    assumptionCount: report.assumptions.length,
+    reviewRequiredCount: Object.values(extracted.raw).filter((entry) => entry?.requiresReview).length,
+    durationMs: Math.round(performance.now() - startedAt)
+  }, extracted.warnings.length || !Object.keys(extracted.raw).length ? 'warn' : 'info');
   return {
     raw: extracted.raw,
-    report: buildReport(ai, documentText),
+    report,
     model,
     warnings: [...ai.warnings, ...extracted.warnings]
   };
+  } catch (error) {
+    logAnnualBill('ai.request.failed', traceId, { model, stage, ...annualBillErrorDetails(error), durationMs: Math.round(performance.now() - startedAt) }, 'error');
+    throw error;
+  }
 }

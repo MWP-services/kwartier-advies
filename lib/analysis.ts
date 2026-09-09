@@ -18,6 +18,7 @@ export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
 export type PvInputMode = 'intervalData' | 'annualBill' | 'manualAnnualBill';
 
 export type AnnualBillInput = {
+  traceId?: string;
   supplierName?: string;
   invoiceDate?: string;
   periodStart?: string;
@@ -87,6 +88,7 @@ export interface AnalysisResult {
   pvAnalysisMode?: PvAnalysisMode | null;
   pvWarnings?: string[];
   annualBillAdvice?: AnnualBillAdviceResult | null;
+  annualBillInput?: AnnualBillInput;
 }
 
 export const defaultAnalysisSettings: AnalysisSettings = {

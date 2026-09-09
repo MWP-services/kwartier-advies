@@ -2,6 +2,7 @@ import type { AnalysisResult, AnalysisSettings, AnnualBillInput } from './analys
 import type { IntervalRecord } from './calculations';
 import { runAnalysis } from './clientAnalysis';
 import { calculateAnnualBillAdvice, type AnnualBillAdviceInput } from '../src/lib/annual-bill/calculateAnnualBillAdvice';
+import { logAnnualBill, annualBillLogValues } from '../src/lib/annual-bill/logging';
 
 const DAYS_PER_YEAR = 365;
 const SYNTHETIC_PROFILE_DAYS = 31;
@@ -97,6 +98,7 @@ function weightedImportPrice(input: AnnualBillInput): number | undefined {
 
 function toAnnualBillAdviceInput(input: AnnualBillInput): AnnualBillAdviceInput {
   return {
+    traceId: input.traceId,
     usageNormalKwh: input.usageNormalKwh,
     usageOffPeakKwh: input.usageOffPeakKwh,
     feedInNormalKwh: input.feedInNormalKwh,
@@ -117,25 +119,51 @@ export function buildAnnualBillIndicativeAnalysis(
   input: AnnualBillInput,
   settings: AnalysisSettings
 ): AnalysisResult | null {
+  const startedAt = performance.now();
+  logAnnualBill('calculation.started', input.traceId, { inputMode: settings.pvInputMode, values: annualBillLogValues(input) });
   const missingFields = getMissingFields(input);
   if (missingFields.includes('verbruik of teruglevering')) {
+    logAnnualBill('calculation.rejected', input.traceId, { reason: 'usage_and_feed_in_missing' }, 'warn');
     return null;
   }
 
   const completedInput = completeAnnualBillInput(input);
   const completedMissingFields = [...new Set([...(completedInput.missingFields ?? []), ...missingFields])];
+  logAnnualBill('calculation.inputs_resolved', input.traceId, {
+    original: annualBillLogValues(input), resolved: annualBillLogValues(completedInput),
+    estimatedUsage: resolveTotalUsageKwh(input) <= 0,
+    estimatedFeedIn: resolveTotalFeedInKwh(input) <= 0,
+    importPrice: weightedImportPrice(completedInput) ?? 0.3,
+    feedInPrice: completedInput.feedInTariffEurPerKwh ?? 0.06,
+    importPriceFallback: weightedImportPrice(completedInput) == null,
+    feedInPriceFallback: completedInput.feedInTariffEurPerKwh == null,
+    investmentEstimated: !completedInput.batteryInvestmentEur
+  });
   const rows = buildSyntheticPvRows(completedInput);
+  logAnnualBill('calculation.synthetic_profile', input.traceId, { rowCount: rows.length, sampleDays: SYNTHETIC_PROFILE_DAYS, measuredQuarterData: false, purpose: 'compatibility_analysis_not_annual_recommendation' });
   const result = runAnalysis(rows, {
     ...settings,
     analysisType: 'PV_SELF_CONSUMPTION',
     pvInputMode: settings.pvInputMode,
     interpretationMode: 'INTERVAL'
   });
-  if (!result) return null;
+  if (!result) {
+    logAnnualBill('calculation.failed', input.traceId, { reason: 'synthetic_analysis_empty' }, 'error');
+    return null;
+  }
 
   const warning =
     'Indicatief advies op basis van jaarnota: er is geen kwartierprofiel beschikbaar. Kwartierdata blijft leidend voor een nauwkeurig batterijadvies.';
   const annualBillAdvice = calculateAnnualBillAdvice(toAnnualBillAdviceInput(completedInput));
+  logAnnualBill('calculation.completed', input.traceId, {
+    recommendedBatteryKwh: annualBillAdvice.recommendedBatteryKwh,
+    annualSavingsRangeEur: annualBillAdvice.annualSavingsRangeEur,
+    paybackRangeYears: annualBillAdvice.paybackRangeYears,
+    confidence: annualBillAdvice.confidence,
+    options: annualBillAdvice.options.map(({ batteryKwh, estimatedAnnualStoredSolarKwh, estimatedAnnualSavingsEur, estimatedPaybackYears, utilizationScore }) => ({ batteryKwh, estimatedAnnualStoredSolarKwh, estimatedAnnualSavingsEur, estimatedPaybackYears, utilizationScore })),
+    warningCount: annualBillAdvice.warnings.length,
+    durationMs: Math.round(performance.now() - startedAt)
+  });
 
   return {
     ...result,
@@ -144,6 +172,7 @@ export function buildAnnualBillIndicativeAnalysis(
       warnings: [...result.quality.warnings, warning]
     },
     pvWarnings: [...(result.pvWarnings ?? []), warning, ...annualBillAdvice.warnings, ...completedMissingFields.map((field) => `Ontbrekend veld: ${field}.`)],
-    annualBillAdvice
+    annualBillAdvice,
+    annualBillInput: completedInput
   };
 }

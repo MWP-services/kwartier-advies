@@ -4,6 +4,7 @@ import { jsonError } from '@/lib/apiResponses';
 import { getAnalysisJobStore, toStartAnalysisJobResponse } from '@/lib/analysisJobStore';
 import { ensureAnalysisWorkerStarted } from '@/lib/analysisWorker';
 import { getUploadedDataset } from '@/lib/serverDataStore';
+import { logAnnualBill, annualBillLogValues } from '@/src/lib/annual-bill/logging';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -89,6 +90,9 @@ export async function POST(request: Request) {
 
     const storeStart = performance.now();
     const job = await getAnalysisJobStore().createJob(input);
+    if (input.annualBillInput) logAnnualBill('analysis.queued', input.annualBillInput.traceId, {
+      jobId: job.jobId, inputMode: input.settings.pvInputMode, values: annualBillLogValues(input.annualBillInput)
+    });
     logAnalyzeStart('job stored', { jobId: job.jobId, durationMs: elapsedMs(storeStart) });
 
     ensureAnalysisWorkerStarted();
