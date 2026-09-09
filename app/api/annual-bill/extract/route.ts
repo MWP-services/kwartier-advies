@@ -50,7 +50,10 @@ export async function POST(request: Request) {
       durationMs: Math.round(performance.now() - startedAt),
       textLength: result.diagnostics.textLength,
       recognizedFields: result.diagnostics.recognizedFields,
-      issueCount: result.diagnostics.issueCount
+      issueCount: result.diagnostics.issueCount,
+      aiEnabled: result.diagnostics.aiEnabled,
+      aiUsed: result.diagnostics.aiUsed,
+      aiWarnings: result.diagnostics.aiWarnings
     });
 
     return NextResponse.json(result);

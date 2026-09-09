@@ -146,7 +146,7 @@ export function extractAnnualBillData(text: string): AnnualBillRawExtract {
 
   NUMERIC_FIELDS.forEach((config) => {
     const match = findNumericValue(text, config);
-    if (match) raw[config.field] = match;
+    if (match) raw[config.field] = { ...match, source: 'rules', evidenceSnippet: match.evidence };
   });
 
   const periodStart = findDate(text, ['periode van', 'leveringsperiode van', 'van']);
@@ -155,11 +155,11 @@ export function extractAnnualBillData(text: string): AnnualBillRawExtract {
   const ean = findEan(text);
   const supplier = findSupplierName(text);
 
-  if (periodStart) raw.periodStart = periodStart;
-  if (periodEnd) raw.periodEnd = periodEnd;
-  if (invoiceDate) raw.invoiceDate = invoiceDate;
-  if (ean) raw.eanElectricity = ean;
-  if (supplier) raw.supplierName = supplier;
+  if (periodStart) raw.periodStart = { ...periodStart, source: 'rules', evidenceSnippet: periodStart.evidence };
+  if (periodEnd) raw.periodEnd = { ...periodEnd, source: 'rules', evidenceSnippet: periodEnd.evidence };
+  if (invoiceDate) raw.invoiceDate = { ...invoiceDate, source: 'rules', evidenceSnippet: invoiceDate.evidence };
+  if (ean) raw.eanElectricity = { ...ean, source: 'rules', evidenceSnippet: ean.evidence };
+  if (supplier) raw.supplierName = { ...supplier, source: 'rules', evidenceSnippet: supplier.evidence };
 
   return raw;
 }

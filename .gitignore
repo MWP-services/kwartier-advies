@@ -1,5 +1,8 @@
 node_modules
+.env.local
 .next/
+.next-dev/
+.next-build-check/
 .worker-build/
 .analysis-jobs/
 tsconfig.tsbuildinfo

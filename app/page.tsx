@@ -86,6 +86,35 @@ function ProgressBar({ progress }: { progress: ProgressState | null }) {
   );
 }
 
+const ANNUAL_BILL_FIELD_LABELS: Partial<Record<keyof AnnualBillInput, string>> = {
+  supplierName: 'Leverancier',
+  invoiceDate: 'Factuurdatum',
+  periodStart: 'Periode start',
+  periodEnd: 'Periode einde',
+  eanElectricity: 'EAN elektriciteit',
+  usageNormalKwh: 'Verbruik normaal',
+  usageOffPeakKwh: 'Verbruik dal',
+  feedInNormalKwh: 'Teruglevering normaal',
+  feedInOffPeakKwh: 'Teruglevering dal',
+  totalUsageKwh: 'Totaal verbruik',
+  totalFeedInKwh: 'Totaal teruglevering',
+  annualPvProductionKwh: 'Jaarlijkse PV-opwek',
+  normalTariffEurPerKwh: 'Normaaltarief',
+  offPeakTariffEurPerKwh: 'Daltarief',
+  feedInTariffEurPerKwh: 'Terugleververgoeding',
+  totalElectricityCostEur: 'Totale elektriciteitskosten',
+  energyTaxElectricityEur: 'Energiebelasting elektriciteit',
+  gridCostElectricityEur: 'Netbeheerkosten elektriciteit',
+  solarPanelCount: 'Aantal zonnepanelen',
+  solarPanelWp: 'Vermogen per paneel',
+  roofOrientation: 'Dakorientatie'
+};
+
+function formatAnnualBillValue(value: string | number): string {
+  if (typeof value === 'number') return value.toLocaleString('nl-NL', { maximumFractionDigits: 4 });
+  return value;
+}
+
 function compactReportInterval(interval: ProcessedInterval): ProcessedInterval {
   return {
     timestamp: interval.timestamp,
@@ -361,6 +390,7 @@ export default function HomePage() {
         issues?: AnnualBillExtract['issues'];
         textPreview?: string;
         diagnostics?: AnnualBillExtract['diagnostics'] & { stage?: string; details?: string };
+        aiReport?: AnnualBillExtract['aiReport'];
         error?: string;
       }>(response);
       if (!response.ok || !result.input) {
@@ -383,6 +413,7 @@ export default function HomePage() {
         raw: result.raw ?? {},
         issues: result.issues ?? [],
         textPreview: result.textPreview ?? '',
+        aiReport: result.aiReport,
         diagnostics: result.diagnostics ?? {
           textLength: result.textPreview?.length ?? 0,
           recognizedFields: Object.keys(result.raw ?? {}) as AnnualBillExtract['diagnostics']['recognizedFields'],
@@ -1109,6 +1140,72 @@ export default function HomePage() {
                       <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap">{annualBillTextPreview}</pre>
                     </details>
                   )}
+                  {annualBillExtract && (
+                    <details className="md:col-span-3 rounded-md border border-slate-200 bg-white p-3 text-sm">
+                      <summary className="cursor-pointer font-medium text-slate-900">AI-analyse en brononderbouwing controleren</summary>
+                      <div className="mt-3 space-y-3">
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                          <p>
+                            AI-status: {annualBillExtract.diagnostics.aiEnabled ? annualBillExtract.diagnostics.aiUsed ? 'gebruikt' : 'niet gelukt' : 'niet ingesteld'}
+                            {annualBillExtract.diagnostics.aiModel ? ` | model: ${annualBillExtract.diagnostics.aiModel}` : ''}
+                            {` | PDF-tekst: ${annualBillExtract.diagnostics.textLength.toLocaleString('nl-NL')} tekens`}
+                          </p>
+                          {annualBillExtract.diagnostics.aiWarnings?.length ? (
+                            <p className="mt-1 text-amber-800">{annualBillExtract.diagnostics.aiWarnings.join(' ')}</p>
+                          ) : null}
+                        </div>
+                        {annualBillExtract.aiReport?.summary && (
+                          <p className="text-sm text-slate-700">{annualBillExtract.aiReport.summary}</p>
+                        )}
+                        <div className="grid gap-2 md:grid-cols-2">
+                          {Object.entries(annualBillExtract.raw).map(([field, entry]) => entry ? (
+                            <div key={field} className="rounded-md border border-slate-200 p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="font-medium text-slate-900">{ANNUAL_BILL_FIELD_LABELS[field as keyof AnnualBillInput] ?? field}</p>
+                                  <p className="text-slate-700">{formatAnnualBillValue(entry.value)}</p>
+                                </div>
+                                <span className={`rounded px-2 py-1 text-xs ${entry.requiresReview ? 'bg-amber-100 text-amber-800' : 'bg-lime-100 text-lime-800'}`}>
+                                  {Math.round(entry.confidence * 100)}% {entry.source ?? 'bron'}
+                                </span>
+                              </div>
+                              {(entry.evidenceSnippet || entry.evidence) && (
+                                <blockquote className="mt-2 border-l-2 border-slate-300 pl-2 text-xs text-slate-600">
+                                  {entry.evidenceSnippet ?? entry.evidence}
+                                </blockquote>
+                              )}
+                              {entry.reasoning && <p className="mt-2 text-xs text-slate-500">{entry.reasoning}</p>}
+                            </div>
+                          ) : null)}
+                        </div>
+                        {annualBillExtract.aiReport?.assumptions.length ? (
+                          <div className="rounded-md border border-slate-200 p-3">
+                            <p className="font-medium text-slate-900">Aannames voor het adviesrapport</p>
+                            <div className="mt-2 space-y-2">
+                              {annualBillExtract.aiReport.assumptions.map((assumption, index) => (
+                                <div key={`${assumption.field}-${index}`} className="border-t border-slate-100 pt-2 first:border-t-0 first:pt-0">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <p className="font-medium text-slate-800">
+                                      {assumption.label}{assumption.value != null ? `: ${formatAnnualBillValue(assumption.value)}` : ''}
+                                    </p>
+                                    <span className={`rounded px-2 py-1 text-xs ${assumption.requiresReview ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'}`}>
+                                      {assumption.source} | {Math.round(assumption.confidence * 100)}%
+                                    </span>
+                                  </div>
+                                  {assumption.evidenceSnippet && (
+                                    <blockquote className="mt-1 border-l-2 border-slate-300 pl-2 text-xs text-slate-600">
+                                      {assumption.evidenceSnippet}
+                                    </blockquote>
+                                  )}
+                                  <p className="mt-1 text-xs text-slate-500">{assumption.reasoning}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </details>
+                  )}
                   <div className="md:col-span-3 rounded-md border border-lime-200 bg-lime-50 p-3">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div>
@@ -1324,6 +1421,28 @@ export default function HomePage() {
                 <p className="font-semibold">Waarom dit advies?</p>
                 <p className="mt-1">{annualBillAdvice.explanation}</p>
               </div>
+              {annualBillExtract?.aiReport?.assumptions.length ? (
+                <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-sm">
+                  <p className="font-semibold text-slate-900">Onderbouwing uit jaarnota</p>
+                  <div className="mt-2 grid gap-2 md:grid-cols-2">
+                    {annualBillExtract.aiReport.assumptions.slice(0, 6).map((assumption, index) => (
+                      <div key={`${assumption.field}-${index}`} className="rounded-md border border-slate-100 p-2">
+                        <p className="font-medium text-slate-800">
+                          {assumption.label}{assumption.value != null ? `: ${formatAnnualBillValue(assumption.value)}` : ''}
+                        </p>
+                        {assumption.evidenceSnippet && (
+                          <blockquote className="mt-1 border-l-2 border-slate-300 pl-2 text-xs text-slate-600">
+                            {assumption.evidenceSnippet}
+                          </blockquote>
+                        )}
+                        <p className="mt-1 text-xs text-slate-500">
+                          {assumption.reasoning} Betrouwbaarheid {Math.round(assumption.confidence * 100)}%.
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <p className="mt-3 text-sm text-slate-600">
                 Betrouwbaarheid: {annualBillAdvice.confidence === 'medium' ? 'middel' : 'laag'}. Dit blijft indicatief omdat er geen kwartierprofiel is gebruikt.
               </p>
