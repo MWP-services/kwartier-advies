@@ -37,3 +37,26 @@ Handmatige invoer begint bij stap 9/10; daarbij wordt geen AI aangeroepen.
 - `upload.rejected/failed`, `calculation.rejected/failed`, `analysis.failed`, `report.failed`: de betreffende stap is niet voltooid.
 
 De logs bevatten energievolumes en tarieven, maar geen API-sleutels, autorisatieheaders, namen, EAN, volledige PDF-tekst, AI-proza of ruwe foutresponses. Polling wordt alleen bij status-/voortgangswijzigingen gelogd.
+
+## Tarieven en kolomtabellen controleren
+
+- `rules.candidate.accepted/rejected`: veld, herkend label, tekstregelnummer, getal, eenheid, eventuele expliciete centconversie en reden. Tarieven vereisen een kWh-prijseenheid; een willekeurig eurobedrag is onvoldoende.
+- `rules.field.ambiguous`: meerdere verschillende waarden; de eenvoudige parser kiest niet willekeurig de eerste.
+- `rules.table.detected`: aantallen factuurregels en hoeveelheden, plus het aantal mogelijke kolomkoppelingen.
+- `rules.table.row_checked`: periode, kWh, tarief, regelbedrag en verschil tussen kWh × tarief en het regelbedrag. De kolomtabel wordt alleen gebruikt bij één eenhedenkoppeling en controleerbare positieve energieregels (maximaal 2 cent afrondingsverschil).
+- `rules.table.completed/rejected`: de gewogen periodetarieven of de reden waarom koppeling niet betrouwbaar genoeg is. Leveringsregels worden als `supply_only` gemarkeerd; onderbouwde energiebelasting en btw worden daarna apart samengesteld.
+- `compensatedFeedInKwh` is het volume bij terugleververgoeding, niet de fysieke teruglevering. Nul vergoeding vervangt nooit de fysieke teruglevering; apart gevonden teruglevervolumes blijven behouden. Tarieven worden gewogen met de hoeveelheden van de gecontroleerde factuurregels (`weightSource: billed_tariff_rows`).
+- `normalization.tariff.rejected`, `merge.ai_tariff.rejected`, `calculation.tariff.rejected`: een onbruikbare prijs wordt tegengehouden, ook bij oude invoer of hoge AI-zekerheid. Het controlebereik voor jaargemiddelden is -2 tot 2 EUR/kWh; dit is een technische controlegrens, geen marktgrens. Geen automatische deling door 100 zonder expliciete cent-eenheid.
+- `normalization.completed`: expliciet jaartotaal versus som van normaal/dal en expliciete nul-teruglevering.
+- `pricing.resolved`, `calculation.prices_used`: de werkelijk gebruikte prijs en de herkomst (gewogen normaal/dal, enkel tarief of expliciete fallback). Deze prijs wordt ook in scherm en rapport gebruikt.
+- `browser.input.replaced`: een nieuwe nota vervangt de oude invoer, zodat afgewezen/ontbrekende tarieven niet uit de vorige nota blijven staan.
+
+`credit_balance_exhausted` betekent in de foutresponse dat OpenAI geen beschikbaar API-tegoed meldt. De app toont nu expliciet dat AI niet is gebruikt. Extra parserlogs verhelpen dit tegoedprobleem niet.
+
+## Energiebelasting en btw
+
+`tax.table.detected`, `tax.row.checked` en `tax.table.completed/rejected` tonen de stroombelastingregels per periode/schijf en controleren hoeveelheid × tarief tegen het regelbedrag. Gasbelasting, vermindering energiebelasting en netbeheer tellen niet mee in de variabele stroombelasting per kWh. Het totale btw-bedrag voor stroom én gas wordt niet gebruikt als btw voor alleen stroom.
+
+`tax.metadata.resolved` toont het btw-percentage en of onderdelen inclusief/exclusief btw zijn. `pricing.resolved` bevat onder `components` de leveringsprijs, energiebelasting en toegevoegde btw op beide onderdelen. Een expliciet volledig inclusief tarief (`all_in`) krijgt geen extra opslag. Ontbrekende onderdelen worden gemeld onder `missingComponents`; er worden geen wettelijke tarieven geraden. De percentages en belastingbedragen komen uit de nota.
+
+De AI-extractie ondersteunt dezelfde componenten. `merge.verified_tax_component.retained` meldt wanneer AI afwijkt van de gecontroleerde factuurregels: de gecontroleerde waarde blijft dan behouden.

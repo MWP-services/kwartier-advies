@@ -235,6 +235,8 @@ export interface PvSelfConsumptionAdviceConfig {
   maxHomeBatteryKwh?: number;
   allowHome64AsSpacious?: boolean;
   usableFraction?: number;
+  emergencyPowerEnabled?: boolean;
+  emergencyPowerReservePercent?: number;
   roundTripEfficiency?: number;
   resetSocDailyForHome?: boolean;
   allowCarryOverForBusiness?: boolean;
@@ -770,7 +772,9 @@ const DEFAULT_PV_SELF_CONSUMPTION_CONFIG: Required<
   maxHomeBatteryKwh: 40,
   allowHome64AsSpacious: true,
   usableFraction: 0.9,
-  roundTripEfficiency: 0.9,
+  emergencyPowerEnabled: false,
+  emergencyPowerReservePercent: 10,
+  roundTripEfficiency: 0.95,
   resetSocDailyForHome: true,
   allowCarryOverForBusiness: true,
   minCyclesPerYearHome: 80,
@@ -1383,6 +1387,11 @@ export function computePvSelfConsumptionAdvice(
     ...DEFAULT_PV_SELF_CONSUMPTION_CONFIG,
     ...config
   };
+  const emergencyReserveFraction = resolvedHybridConfig.emergencyPowerEnabled
+    ? Math.max(0, Math.min(resolvedHybridConfig.usableFraction, resolvedHybridConfig.emergencyPowerReservePercent / 100))
+    : 0;
+  // Always retain at least 10% for battery protection, in addition to emergency power.
+  const effectiveUsableFraction = Math.max(0, Math.min(0.9, resolvedHybridConfig.usableFraction) - emergencyReserveFraction);
   const scenarioOptions = generatePvBatteryScenarioOptions(usedCustomerType, formulaAdvice, resolvedHybridConfig);
   const simulationConfig: PvSimulationConfig = {
     intervalMinutesFallback: 15,
@@ -1402,7 +1411,7 @@ export function computePvSelfConsumptionAdvice(
         intervals,
         createBatteryConfig(
           capacityKwh,
-          resolvedHybridConfig.usableFraction,
+          effectiveUsableFraction,
           resolvedHybridConfig.roundTripEfficiency
         ),
         simulationConfig,
@@ -1597,7 +1606,7 @@ export function computePvSelfConsumptionAdvice(
       maxDailyExportKwh: formulaAdvice.totals.maxDailyExportKwh
     },
     configUsed: {
-      usableFraction: resolvedHybridConfig.usableFraction,
+      usableFraction: effectiveUsableFraction,
       roundTripEfficiency: resolvedHybridConfig.roundTripEfficiency,
       resetSocDaily: simulationConfig.resetSocDaily,
       pricingMode: resolvedEconomics.pricingMode,

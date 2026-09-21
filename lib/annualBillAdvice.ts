@@ -3,6 +3,7 @@ import type { IntervalRecord } from './calculations';
 import { runAnalysis } from './clientAnalysis';
 import { calculateAnnualBillAdvice, type AnnualBillAdviceInput } from '../src/lib/annual-bill/calculateAnnualBillAdvice';
 import { logAnnualBill, annualBillLogValues } from '../src/lib/annual-bill/logging';
+import { isUsableAnnualTariff, resolveAnnualBillPrices, tariffFields, annualBillPriceWarnings } from '../src/lib/annual-bill/tariffs';
 
 const DAYS_PER_YEAR = 365;
 const SYNTHETIC_PROFILE_DAYS = 31;
@@ -13,12 +14,12 @@ function finiteOrZero(value: number | undefined): number {
 
 function resolveTotalUsageKwh(input: AnnualBillInput): number {
   const splitTotal = finiteOrZero(input.usageNormalKwh) + finiteOrZero(input.usageOffPeakKwh);
-  return finiteOrZero(input.totalUsageKwh) || splitTotal;
+  return input.totalUsageKwh != null ? finiteOrZero(input.totalUsageKwh) : splitTotal;
 }
 
 function resolveTotalFeedInKwh(input: AnnualBillInput): number {
   const splitTotal = finiteOrZero(input.feedInNormalKwh) + finiteOrZero(input.feedInOffPeakKwh);
-  return finiteOrZero(input.totalFeedInKwh) || splitTotal;
+  return input.totalFeedInKwh != null ? finiteOrZero(input.totalFeedInKwh) : splitTotal;
 }
 
 function resolveEveningNightUsageKwh(input: AnnualBillInput, totalUsageKwh: number): number {
@@ -69,14 +70,14 @@ function completeAnnualBillInput(input: AnnualBillInput): AnnualBillInput {
   const totalFeedInKwh = resolveTotalFeedInKwh(input);
 
   if (totalUsageKwh > 0 && totalFeedInKwh > 0) return input;
-  if (totalUsageKwh <= 0 && totalFeedInKwh > 0) {
+  if (input.totalUsageKwh == null && input.usageNormalKwh == null && input.usageOffPeakKwh == null && totalFeedInKwh > 0) {
     return {
       ...input,
       totalUsageKwh: totalFeedInKwh * 2.5,
       missingFields: [...(input.missingFields ?? []), 'totaal verbruik geschat']
     };
   }
-  if (totalFeedInKwh <= 0 && totalUsageKwh > 0) {
+  if (input.totalFeedInKwh == null && input.feedInNormalKwh == null && input.feedInOffPeakKwh == null && totalUsageKwh > 0) {
     return {
       ...input,
       totalFeedInKwh: totalUsageKwh * 0.25,
@@ -87,16 +88,11 @@ function completeAnnualBillInput(input: AnnualBillInput): AnnualBillInput {
 }
 
 function weightedImportPrice(input: AnnualBillInput): number | undefined {
-  const normalUsage = finiteOrZero(input.usageNormalKwh);
-  const offPeakUsage = finiteOrZero(input.usageOffPeakKwh);
-  const total = normalUsage + offPeakUsage;
-  if (total > 0 && Number.isFinite(input.normalTariffEurPerKwh) && Number.isFinite(input.offPeakTariffEurPerKwh)) {
-    return ((normalUsage * (input.normalTariffEurPerKwh as number)) + (offPeakUsage * (input.offPeakTariffEurPerKwh as number))) / total;
-  }
-  return input.normalTariffEurPerKwh ?? input.offPeakTariffEurPerKwh;
+  const prices = resolveAnnualBillPrices(input);
+  return prices.importSource === 'fallback' ? undefined : prices.importPrice;
 }
 
-function toAnnualBillAdviceInput(input: AnnualBillInput): AnnualBillAdviceInput {
+function toAnnualBillAdviceInput(input: AnnualBillInput, settings: AnalysisSettings): AnnualBillAdviceInput {
   return {
     traceId: input.traceId,
     usageNormalKwh: input.usageNormalKwh,
@@ -109,6 +105,8 @@ function toAnnualBillAdviceInput(input: AnnualBillInput): AnnualBillAdviceInput 
     averageImportPriceEurPerKwh: weightedImportPrice(input),
     averageFeedInPriceEurPerKwh: input.feedInTariffEurPerKwh,
     batteryInvestmentEur: input.batteryInvestmentEur,
+    emergencyPowerEnabled: settings.emergencyPowerEnabled,
+    emergencyPowerReservePercent: settings.emergencyPowerReservePercent,
     solarPanelCount: input.solarPanelCount,
     solarPanelWp: input.solarPanelWp,
     roofOrientation: input.roofOrientation
@@ -127,12 +125,23 @@ export function buildAnnualBillIndicativeAnalysis(
     return null;
   }
 
-  const completedInput = completeAnnualBillInput(input);
+  const completedInput = { ...completeAnnualBillInput(input) };
+  const tariffWarnings: string[] = [];
+  for (const field of tariffFields) {
+    if (completedInput[field] != null && !isUsableAnnualTariff(completedInput[field])) {
+      logAnnualBill('calculation.tariff.rejected', input.traceId, { field, value: completedInput[field], reason: 'outside_annual_average_review_range' }, 'warn');
+      tariffWarnings.push(`Tarief ${field} (${completedInput[field]} EUR/kWh) afgewezen; controleer de oorspronkelijke nota.`);
+      completedInput[field] = undefined;
+    }
+  }
+  tariffWarnings.push(...annualBillPriceWarnings(completedInput));
   const completedMissingFields = [...new Set([...(completedInput.missingFields ?? []), ...missingFields])];
   logAnnualBill('calculation.inputs_resolved', input.traceId, {
     original: annualBillLogValues(input), resolved: annualBillLogValues(completedInput),
-    estimatedUsage: resolveTotalUsageKwh(input) <= 0,
-    estimatedFeedIn: resolveTotalFeedInKwh(input) <= 0,
+    estimatedUsage: resolveTotalUsageKwh(input) !== resolveTotalUsageKwh(completedInput),
+    estimatedFeedIn: resolveTotalFeedInKwh(input) !== resolveTotalFeedInKwh(completedInput),
+    explicitZeroFeedIn: input.totalFeedInKwh === 0,
+    priceResolution: resolveAnnualBillPrices(completedInput),
     importPrice: weightedImportPrice(completedInput) ?? 0.3,
     feedInPrice: completedInput.feedInTariffEurPerKwh ?? 0.06,
     importPriceFallback: weightedImportPrice(completedInput) == null,
@@ -152,9 +161,12 @@ export function buildAnnualBillIndicativeAnalysis(
     return null;
   }
 
-  const warning =
-    'Indicatief advies op basis van jaarnota: er is geen kwartierprofiel beschikbaar. Kwartierdata blijft leidend voor een nauwkeurig batterijadvies.';
-  const annualBillAdvice = calculateAnnualBillAdvice(toAnnualBillAdviceInput(completedInput));
+  const annualBillAdvice = calculateAnnualBillAdvice(toAnnualBillAdviceInput(completedInput, settings));
+  annualBillAdvice.warnings.push(...tariffWarnings);
+  const annualWarnings = [...new Set([
+    ...annualBillAdvice.warnings,
+    ...completedMissingFields.map((field) => `Ontbrekend veld: ${field}.`)
+  ])];
   logAnnualBill('calculation.completed', input.traceId, {
     recommendedBatteryKwh: annualBillAdvice.recommendedBatteryKwh,
     annualSavingsRangeEur: annualBillAdvice.annualSavingsRangeEur,
@@ -169,9 +181,10 @@ export function buildAnnualBillIndicativeAnalysis(
     ...result,
     quality: {
       ...result.quality,
-      warnings: [...result.quality.warnings, warning]
+      warnings: []
     },
-    pvWarnings: [...(result.pvWarnings ?? []), warning, ...annualBillAdvice.warnings, ...completedMissingFields.map((field) => `Ontbrekend veld: ${field}.`)],
+    // The synthetic compatibility profile has no measured-data warnings to show.
+    pvWarnings: annualWarnings,
     annualBillAdvice,
     annualBillInput: completedInput
   };

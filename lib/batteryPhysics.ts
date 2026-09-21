@@ -26,7 +26,7 @@ export function resolveBatteryPhysics(
   const chargeEfficiency = hasDischargeEfficiencyOverride ? 1 : Math.sqrt(spec.roundTripEfficiency);
   const reserveEnergy = Math.max(0, config?.reserveEnergyForTradingKwh ?? 0);
   const reserveEmpty = Math.max(0, config?.reserveEmptyCapacityForTradingKwh ?? 0);
-  const minSocKwh = Math.min(spec.capacityKwh, reserveEnergy);
+  const minSocKwh = Math.min(spec.capacityKwh, spec.capacityKwh * 0.1 + reserveEnergy);
   const maxSocKwh = Math.max(minSocKwh, spec.capacityKwh - reserveEmpty);
 
   return {

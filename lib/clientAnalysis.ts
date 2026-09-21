@@ -47,7 +47,9 @@ export function runAnalysis(
       customerType: settings.pvCustomerType
     });
     const hybridAdvice = computePvSelfConsumptionAdvice(intervals, {
-      customerType: settings.pvCustomerType
+      customerType: settings.pvCustomerType,
+      emergencyPowerEnabled: settings.emergencyPowerEnabled,
+      emergencyPowerReservePercent: settings.emergencyPowerReservePercent
     });
     const sizing = buildSizingResultFromPvSelfConsumptionAdvice(formulaAdvice, hybridAdvice);
     const scenarios = hybridAdvice.simulationAdvice.allScenarios.map((scenario) =>

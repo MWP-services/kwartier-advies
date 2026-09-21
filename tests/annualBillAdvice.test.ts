@@ -19,8 +19,11 @@ describe('annual bill PV advice', () => {
 
     expect(result).not.toBeNull();
     expect(result?.analysisType).toBe('PV_SELF_CONSUMPTION');
+    expect(result?.annualBillAdvice?.recommendedBatteryKwh).toBe(64);
     expect(result?.sizing.recommendedProduct).not.toBeNull();
-    expect(result?.pvWarnings?.some((warning) => warning.includes('Indicatief advies'))).toBe(true);
+    expect(result?.annualBillAdvice?.explanation).toContain('indicatief batterijadvies');
+    expect(result?.pvWarnings?.join(' ')).not.toMatch(/kwartier|formulebasis|opgeschaald|Batterij-investering|Indicatief advies/);
+    expect(result?.quality.warnings).toEqual([]);
   });
 
   it('continues with an estimated feed-in value when only usage is available', () => {

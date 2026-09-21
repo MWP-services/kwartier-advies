@@ -1,0 +1,103 @@
+2 Energiebelasting op levering
+Verbruik
+Tarief
+8.931,03
+Bedrag
+Belasting op stroom  0 t/m 2.900 kWh
+(01-10-2024/01-01-2025)
+Belasting op stroom  0 t/m 2.900 kWh
+(01-01-2025/29-09-2025)
+1366 kWh
+1516 kWh
+0,10880
+0,10154
+¤ 148,62 21% btw
+¤ 153,94 21% btw
+Belasting op stroom  2.901 t/m 10.000 kWh
+(01-10-2024/01-01-2025)
+Belasting op stroom  2.901 t/m 10.000 kWh
+(01-01-2025/29-09-2025)
+Belasting op stroom 10.001 t/m 50.000 kWh
+(01-10-2024/01-01-2025)
+Belasting op stroom 10.001 t/m 50.000 kWh
+(01-01-2025/29-09-2025)
+Vermindering energiebelasting
+(01-10-2024/01-01-2025)
+Vermindering energiebelasting
+(01-01-2025/29-09-2025)
+Belasting op gas 0 t/m 1.000 m3
+(01-10-2024/01-01-2025)
+Belasting op gas 0 t/m 1.000 m3
+(01-01-2025/29-09-2025)
+Belasting op gas 1.001 t/m 170.000 m3
+(01-10-2024/01-01-2025)
+Belasting op gas 1.001 t/m 170.000 m3
+(01-01-2025/29-09-2025)
+21% btw over ¤ 5.479,70
+Overheidsheffingen op stroom en gas
+3343 kWh
+3713 kWh
+4297 kWh
+4770 kWh
+0,251 jaar
+0,742 jaar
+281 m3
+713 m3
+1786 m3
+4533 m3
+0,10880
+0,10154
+0,09037
+0,06937
+521,81000
+524,95000
+0,58301
+0,57816
+0,58301
+0,57816
+¤ 363,72 21% btw
+¤ 377,02 21% btw
+¤ 388,32 21% btw
+¤ 330,89 21% btw
+¤-131,17 21% btw
+¤-389,75 21% btw
+¤ 163,83 21% btw
+¤ 412,22 21% btw
+Totaal excl. btw ¤
+Totaal energiebelasting incl. btw
+¤
+3 Netbeheer
+Verbruik
+Tarief
+Netbeheerkosten voor stroom
+door Stedin Netbeheer B.V.
+Stedin tarief t/m 3x50 amp
+(04-10-2024/01-01-2025)
+Stedin tarief t/m 3x50 amp
+(01-01-2025/04-10-2025)
+Subtotaal
+Netbeheerkosten voor gas
+door Stedin Netbeheer B.V.
+Stedin tarief G10 (04-10-2024/01-01-2025)
+Stedin tarief G10 (01-01-2025/04-10-2025)
+Subtotaal
+89 dgn
+276 dgn
+89 dgn
+276 dgn
+5,75780
+6,35470
+1,40210
+1,63010
+¤
+¤ 1.041,26 21% btw
+¤ 2.620,80 21% btw
+5.479,70
+1.150,74
+6.630,44
+Bedrag
+¤ 512,44 21% btw
+¤ 1.753,90 21% btw
+2.266,34
+¤ 124,79 21% btw
+¤ 449,90 21% btw

@@ -6,6 +6,7 @@ import { normalizeAnnualBillData } from './normalizeAnnualBillData';
 import { validateAnnualBillExtract } from './validateAnnualBillExtract';
 import type { AnnualBillAiReport, AnnualBillRawExtract, AnnualBillValidationIssue } from './schema';
 import { logAnnualBill, annualBillLogFields, annualBillLogValues, annualBillErrorDetails } from './logging';
+import { isUsableAnnualTariff, tariffFields, resolveAnnualBillPrices } from './tariffs';
 
 function valuesConflict(left: string | number | undefined, right: string | number | undefined): boolean {
   if (left == null || right == null) return false;
@@ -16,7 +17,7 @@ function valuesConflict(left: string | number | undefined, right: string | numbe
   return String(left).trim().toLowerCase() !== String(right).trim().toLowerCase();
 }
 
-function mergeRawExtracts(rulesRaw: AnnualBillRawExtract, aiRaw: AnnualBillRawExtract): { raw: AnnualBillRawExtract; issues: AnnualBillValidationIssue[] } {
+function mergeRawExtracts(rulesRaw: AnnualBillRawExtract, aiRaw: AnnualBillRawExtract, traceId?: string): { raw: AnnualBillRawExtract; issues: AnnualBillValidationIssue[] } {
   const raw: AnnualBillRawExtract = { ...rulesRaw };
   const issues: AnnualBillValidationIssue[] = [];
 
@@ -24,6 +25,19 @@ function mergeRawExtracts(rulesRaw: AnnualBillRawExtract, aiRaw: AnnualBillRawEx
     if (!aiValue) return;
     const typedField = field as keyof AnnualBillRawExtract;
     const rulesValue = raw[typedField];
+    const verifiedComponent = ['normalTariffEurPerKwh', 'offPeakTariffEurPerKwh', 'supplyTariffVat', 'tariffBasis', 'energyTaxElectricityEur', 'energyTaxEurPerKwh', 'energyTaxWeightKwh', 'energyTaxVat', 'electricityVatPercent'].includes(field);
+    if (verifiedComponent && rulesValue && (rulesRaw.tariffWeightNormalKwh || rulesRaw.energyTaxWeightKwh)) {
+      if (valuesConflict(rulesValue.value, aiValue.value)) {
+        logAnnualBill('merge.verified_tax_component.retained', traceId, { field, rulesValue: rulesValue.value, aiValue: typeof aiValue.value === 'number' ? aiValue.value : undefined }, 'warn');
+        issues.push({ field: typedField, severity: 'warning', message: 'AI wijkt af van de gecontroleerde factuurberekening; de gecontroleerde waarde is behouden.' });
+      }
+      return;
+    }
+    if (tariffFields.includes(typedField as typeof tariffFields[number]) && !isUsableAnnualTariff(aiValue.value)) {
+      logAnnualBill('merge.ai_tariff.rejected', traceId, { field, value: typeof aiValue.value === 'number' ? aiValue.value : undefined, retainedRulesValue: rulesValue?.value, reason: 'outside_annual_average_review_range' }, 'warn');
+      issues.push({ field: typedField, severity: 'warning', message: 'AI-tarief buiten het controlebereik; dit tarief is niet overgenomen.' });
+      return;
+    }
     if (!rulesValue) {
       raw[typedField] = aiValue;
       return;
@@ -65,12 +79,13 @@ export async function extractAnnualBillFromPdf(buffer: Buffer, traceId = crypto.
     throw error;
   }
   logAnnualBill('pdf.text.completed', traceId, { textLength: text.length, durationMs: Math.round(performance.now() - startedAt) });
-  const rulesRaw = extractAnnualBillData(text);
+  const rulesRaw = extractAnnualBillData(text, traceId);
   logAnnualBill('rules.completed', traceId, { fields: annualBillLogFields(rulesRaw) });
   const aiWarnings: string[] = [];
   let aiReport: AnnualBillAiReport | undefined;
   let aiModel: string | undefined;
   let aiUsed = false;
+  let aiFailureCode: string | undefined;
   let raw = rulesRaw;
   let mergeIssues: AnnualBillValidationIssue[] = [];
 
@@ -81,7 +96,7 @@ export async function extractAnnualBillFromPdf(buffer: Buffer, traceId = crypto.
       aiModel = ai.model;
       aiReport = ai.report;
       aiWarnings.push(...ai.warnings);
-      const merged = mergeRawExtracts(rulesRaw, ai.raw);
+      const merged = mergeRawExtracts(rulesRaw, ai.raw, traceId);
       raw = merged.raw;
       mergeIssues = merged.issues;
       logAnnualBill('merge.completed', traceId, {
@@ -90,18 +105,28 @@ export async function extractAnnualBillFromPdf(buffer: Buffer, traceId = crypto.
         fields: annualBillLogFields(raw)
       }, mergeIssues.length ? 'warn' : 'info');
     } catch (error) {
+      const code = error instanceof Error && 'code' in error ? error.code : undefined;
+      aiFailureCode = typeof code === 'string' && /^[a-z_]{1,64}$/.test(code) ? code : undefined;
       aiWarnings.push(error instanceof Error ? error.message : String(error));
-      logAnnualBill('ai.fallback_to_rules', traceId, { ...annualBillErrorDetails(error), aiUsed: false }, 'warn');
+      logAnnualBill('ai.fallback_to_rules', traceId, { ...annualBillErrorDetails(error), aiUsed: false, aiFailureCode }, 'warn');
     }
   } else {
     logAnnualBill('ai.skipped', traceId, { reason: 'OPENAI_API_KEY_missing', aiUsed: false }, 'warn');
   }
 
-  const input = normalizeAnnualBillData(raw);
+  const input = normalizeAnnualBillData(raw, traceId);
   const issues = [...validateAnnualBillExtract(input), ...mergeIssues];
+  for (const field of tariffFields) {
+    const entry = raw[field];
+    if (entry && !isUsableAnnualTariff(entry.value)) {
+      entry.requiresReview = true;
+      issues.push({ field, severity: 'warning', message: `Uitgelezen tarief ${entry.value} is afgewezen; controleer het bedrag en de eenheid in de nota.` });
+    }
+  }
+  logAnnualBill('pricing.resolved', traceId, { ...resolveAnnualBillPrices(input), tariffBasis: input.tariffBasis ?? 'unspecified' });
   const missingFields = issues.filter((issue) => issue.severity === 'missing').map((issue) => issue.field);
   logAnnualBill('extraction.completed', traceId, {
-    aiEnabled: isAnnualBillAiConfigured(), aiUsed, aiModel,
+    aiEnabled: isAnnualBillAiConfigured(), aiUsed, aiModel, aiFailureCode,
     aiWarningCount: aiWarnings.length, values: annualBillLogValues(input),
     issues: issues.map(({ field, severity }) => ({ field, severity })),
     durationMs: Math.round(performance.now() - startedAt)
@@ -127,7 +152,8 @@ export async function extractAnnualBillFromPdf(buffer: Buffer, traceId = crypto.
       aiEnabled: isAnnualBillAiConfigured(),
       aiUsed,
       aiModel,
-      aiWarnings
+      aiWarnings,
+      aiFailureCode
     },
     aiReport
   };

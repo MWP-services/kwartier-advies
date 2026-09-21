@@ -67,6 +67,16 @@ describe('annual bill workflow logging', () => {
     expect(events()).toContainEqual(expect.objectContaining({ event: 'ai.request.failed', stage: 'structured_output' }));
   });
 
+  it('rejects an implausible AI tariff even with high reported confidence', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({ summary: '', warnings: [], assumptions: [], fields: [
+      { field: 'normalTariffEurPerKwh', value: 162, confidence: 1, evidenceSnippet: 'Totaal verbruik 4200 kWh', requiresReview: false }
+    ] }) }] }] }), { status: 200 }));
+    const result = await extractAnnualBillFromPdf(Buffer.from('fake pdf'), 'trace-bad-tariff');
+    expect(result.input.normalTariffEurPerKwh).toBeUndefined();
+    expect(events()).toContainEqual(expect.objectContaining({ event: 'merge.ai_tariff.rejected', value: 162 }));
+    expect(result.issues.some((issue) => issue.field === 'normalTariffEurPerKwh')).toBe(true);
+  });
+
   it('only logs allowed numeric input values and safe field metadata', () => {
     expect(annualBillLogValues({ supplierName: 'private', eanElectricity: '123', totalUsageKwh: 4200, totalFeedInKwh: NaN })).toEqual({ totalUsageKwh: 4200 });
     const fields = annualBillLogFields({ supplierName: { value: 'private', confidence: 0.8, evidenceSnippet: 'private text' } });

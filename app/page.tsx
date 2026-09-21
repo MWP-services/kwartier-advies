@@ -30,7 +30,8 @@ import type { ScenarioResult } from '@/lib/simulation';
 import type { AnnualBillAdviceResult } from '@/src/lib/annual-bill/calculateAnnualBillAdvice';
 import type { AnnualBillExtract } from '@/src/lib/annual-bill/schema';
 import { logAnnualBill, annualBillLogValues, annualBillErrorDetails } from '@/src/lib/annual-bill/logging';
-import { annualBillConfidenceLabel, annualBillMissingDetails, formatEuro, formatKwh, formatYears, maskEan, resolveAverageFeedInPrice, resolveAverageImportPrice, resolveAnnualFeedInKwh, resolveAnnualUsageKwh } from '@/src/lib/annual-bill/annualBillUx';
+import { resolveAnnualBillPrices, annualBillPriceWarnings } from '@/src/lib/annual-bill/tariffs';
+import { annualBillMissingDetails, formatEuro, formatKwh, maskEan, resolveAverageFeedInPrice, resolveAverageImportPrice, resolveAnnualFeedInKwh, resolveAnnualUsageKwh } from '@/src/lib/annual-bill/annualBillUx';
 
 const Charts = dynamic(() => import('@/components/Charts').then((module) => module.Charts), {
   ssr: false,
@@ -105,6 +106,13 @@ const ANNUAL_BILL_FIELD_LABELS: Partial<Record<keyof AnnualBillInput, string>> =
   feedInTariffEurPerKwh: 'Terugleververgoeding',
   totalElectricityCostEur: 'Totale elektriciteitskosten',
   energyTaxElectricityEur: 'Energiebelasting elektriciteit',
+  energyTaxEurPerKwh: 'Energiebelasting per kWh',
+  energyTaxWeightKwh: 'Belaste hoeveelheid stroom',
+  electricityVatPercent: 'Btw-percentage stroom',
+  electricityVatEur: 'Btw-bedrag stroom',
+  supplyTariffVat: 'Btw in leveringstarief',
+  energyTaxVat: 'Btw in energiebelasting',
+  tariffBasis: 'Opbouw stroomtarief',
   gridCostElectricityEur: 'Netbeheerkosten elektriciteit',
   solarPanelCount: 'Aantal zonnepanelen',
   solarPanelWp: 'Vermogen per paneel',
@@ -273,9 +281,9 @@ export default function HomePage() {
   const hasAnnualBillInputs =
     resolveAnnualUsageKwh(annualBillInput) > 0 ||
     resolveAnnualFeedInKwh(annualBillInput) > 0;
-  const annualBillConfidence = annualBillConfidenceLabel(annualBillInput);
   const annualBillMissing = annualBillMissingDetails(annualBillInput);
   const annualBillUsedImportPrice = resolveAverageImportPrice(annualBillInput);
+  const annualBillPriceDetails = resolveAnnualBillPrices(annualBillInput);
   const annualBillUsedFeedInPrice = resolveAverageFeedInPrice(annualBillInput);
 
   const canAnalyze =
@@ -435,12 +443,12 @@ export default function HomePage() {
         issueCount: extract.issues.length, values: annualBillLogValues(result.input),
         durationMs: Math.round(performance.now() - startedAt)
       });
-      setAnnualBillInput((prev) => ({
-        ...prev,
+      setAnnualBillInput({
         ...result.input,
-        supplierName: result.input?.supplierName ?? prev.supplierName ?? file.name.replace(/\.pdf$/i, ''),
+        supplierName: result.input?.supplierName ?? file.name.replace(/\.pdf$/i, ''),
         source: 'pdf'
-      }));
+      });
+      logAnnualBill('browser.input.replaced', traceId, { previousInvoiceValuesCleared: true, values: annualBillLogValues(result.input) });
       setAnnualBillTextPreview(result.textPreview ?? null);
       setAnnualBillDetailsOpen(false);
       setAnnualBillAdvice(null);
@@ -450,14 +458,13 @@ export default function HomePage() {
       setFinancialPvAdviceCharts(null);
     } catch (err) {
       logAnnualBill('browser.upload.failed', traceId, { ...annualBillErrorDetails(err), durationMs: Math.round(performance.now() - startedAt) }, 'error');
-      setAnnualBillInput((prev) => ({
-        ...prev,
+      setAnnualBillInput({
         traceId,
-        supplierName: prev.supplierName ?? file.name.replace(/\.pdf$/i, ''),
+        supplierName: file.name.replace(/\.pdf$/i, ''),
         source: 'pdf',
         extractionConfidence: 0,
         missingFields: ['totalUsageKwh', 'totalFeedInKwh']
-      }));
+      });
       setAnnualBillExtract(null);
       setAnnualBillAdvice(null);
       const details = err instanceof Error ? ` Reden: ${err.message}` : '';
@@ -1012,16 +1019,17 @@ export default function HomePage() {
           <>
             <div className="lg:col-span-3">
               <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="mb-3 text-sm font-medium text-slate-900">Invoermethode PV-opwek optimaliseren</p>
+                <p className="mb-3 text-sm font-medium text-slate-900">Hoe wil je je gegevens aanleveren?</p>
                 <div className="grid gap-3 md:grid-cols-3">
                   {[
                     ['intervalData', 'Kwartierdata uploaden', 'Nauwkeurig advies'],
-                    ['annualBill', 'Jaarnota uploaden', 'Indicatief advies'],
-                    ['manualAnnualBill', 'Handmatig invullen', 'Indicatief advies']
+                    ['annualBill', 'Jaarnota uploaden', 'Gebruik de PDF van je jaarlijkse stroomafrekening'],
+                    ['manualAnnualBill', 'Handmatig invullen', 'Neem de jaarwaarden over van je stroomafrekening']
                   ].map(([value, title, label]) => (
-                    <label key={value} className="rounded-lg border border-slate-200 p-3 text-sm">
+                    <label key={value} className={`cursor-pointer rounded-lg border p-3 text-sm ${inputMode === value ? 'border-lime-600 bg-lime-50 ring-1 ring-lime-600' : 'border-slate-200 hover:bg-slate-50'}`}>
                       <input
                         className="mr-2"
+                        name="pv-input-mode"
                         type="radio"
                         checked={inputMode === value}
                         onChange={() => updatePvInputMode(value as PvInputMode)}
@@ -1033,7 +1041,7 @@ export default function HomePage() {
                 </div>
                 {inputMode !== 'intervalData' && (
                   <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                    Indicatief advies: deze route gebruikt jaarvolumes en een vereenvoudigd profiel. Upload kwartierdata voor een nauwkeurig batterijadvies.
+                    Met je jaarnota krijg je een eerste schatting van een passende batterij en de besparing. Houd je jaarlijkse stroomafrekening bij de hand; je kunt gevonden gegevens altijd aanpassen.
                   </p>
                 )}
               </div>
@@ -1041,9 +1049,9 @@ export default function HomePage() {
 
             {inputMode === 'annualBill' && (
               <label className="text-sm lg:col-span-3">
-                Upload PDF-jaarnota
+                1. Upload je jaarnota (PDF)
                 <input id="annual-bill-pdf-input" className="wx-input" type="file" accept=".pdf" disabled={isExtractingAnnualBill} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleAnnualBillPdf(file); }} />
-                <span className="mt-1 block text-xs text-slate-500">
+                <span className="mt-1 block text-xs text-slate-500" role="status">
                   {isExtractingAnnualBill
                     ? 'Je jaarnota wordt geanalyseerd...'
                     : annualBillFileName
@@ -1055,14 +1063,31 @@ export default function HomePage() {
 
             {inputMode !== 'intervalData' && (
               <div className="lg:col-span-3">
-                <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-3">
-                  <div className="md:col-span-3 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
-                    Extractiezekerheid: {annualBillInput.extractionConfidence != null ? `${Math.round(annualBillInput.extractionConfidence * 100)}%` : 'n.v.t.'}
-                    {annualBillInput.missingFields?.length ? ` | Controleer/aanvullen: ${annualBillInput.missingFields.join(', ')}` : ' | Geen verplichte ontbrekende velden gemeld.'}
-                    {annualBillExtract?.diagnostics
-                      ? ` | PDF-tekst: ${annualBillExtract.diagnostics.textLength} tekens | Herkend: ${annualBillExtract.diagnostics.recognizedFields.length || 0} velden`
-                      : ''}
+                {annualBillExtract?.diagnostics.aiEnabled && !annualBillExtract.diagnostics.aiUsed && (
+                  <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    Automatisch uitlezen is gedeeltelijk gelukt. {annualBillExtract.diagnostics.aiFailureCode === 'credit_balance_exhausted'
+                      ? 'Controleer de gevonden jaarwaarden met je nota en vul ontbrekende gegevens aan.'
+                      : 'Controleer de gevonden jaarwaarden met je nota en vul ontbrekende gegevens aan.'}
+                  </p>
+                )}
+                {hasAnnualBillInputs && annualBillPriceWarnings(annualBillInput).length > 0 && (
+                  <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    {annualBillPriceWarnings(annualBillInput).join(' ')}
+                  </p>
+                )}
+                {annualBillInput.tariffBasis === 'supply_only' && (
+                  <div className="mb-3 rounded-md border border-lime-200 bg-lime-50 p-3 text-sm text-lime-900">
+                    <p className="font-semibold">Opbouw gebruikte stroomprijs</p>
+                    <p>Levering: € {annualBillPriceDetails.components.supplyPrice.toFixed(5).replace('.', ',')}/kWh · Energiebelasting: € {annualBillPriceDetails.components.energyTaxPrice.toFixed(5).replace('.', ',')}/kWh · Toegevoegde btw: € {(annualBillPriceDetails.components.vatOnSupply + annualBillPriceDetails.components.vatOnEnergyTax).toFixed(5).replace('.', ',')}/kWh.</p>
+                    <p>Totaal: € {annualBillUsedImportPrice.toFixed(5).replace('.', ',')}/kWh. Btw die al in een tarief zit, wordt niet opnieuw opgeteld.</p>
                   </div>
+                )}
+                <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-3">
+                  <div className="md:col-span-3">
+                    <h2 className="text-lg font-semibold text-slate-900">{inputMode === 'annualBill' ? '2. Controleer je jaargegevens' : '1. Vul je jaargegevens in'}</h2>
+                    <p className="mt-1 text-sm text-slate-600">Neem de elektriciteitswaarden over, niet het gasverbruik of het maandbedrag. Gebruik de totalen over een heel jaar.</p>
+                  </div>
+                  {hasAnnualBillInputs && (
                   <div className="md:col-span-3 grid gap-3 md:grid-cols-3">
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                       <p className="text-xs text-slate-500">Verbruik per jaar</p>
@@ -1082,21 +1107,32 @@ export default function HomePage() {
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                       <p className="text-xs text-slate-500">Gebruikte stroomprijs</p>
-                      <p className="text-sm font-semibold text-slate-900">€ {annualBillUsedImportPrice.toLocaleString('nl-NL', { maximumFractionDigits: 2 })}/kWh</p>
+                      <p className="text-sm font-semibold text-slate-900">€ {annualBillUsedImportPrice.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}/kWh</p>
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                       <p className="text-xs text-slate-500">Gebruikte terugleververgoeding</p>
-                      <p className="text-sm font-semibold text-slate-900">€ {annualBillUsedFeedInPrice.toLocaleString('nl-NL', { maximumFractionDigits: 2 })}/kWh</p>
+                      <p className="text-sm font-semibold text-slate-900">€ {annualBillUsedFeedInPrice.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}/kWh</p>
                     </div>
                   </div>
+                  )}
                   <p className="md:col-span-3 rounded-md border border-lime-200 bg-lime-50 p-2 text-sm text-lime-900">
-                    {annualBillExtract
-                      ? 'We hebben de belangrijkste gegevens gevonden. Controleer kort of dit klopt.'
-                      : 'We hebben niet alles kunnen vinden, maar kunnen wel een indicatief advies maken.'}
+                    {hasAnnualBillInputs
+                      ? 'Controleer de waarden met je nota. Je kunt hieronder correcties maken.'
+                      : 'Vul hieronder je stroomafname en teruglevering in. Daarna kun je het advies berekenen.'}
                     {annualBillMissing.length ? ` Ontbrekende details worden geschat: ${annualBillMissing.join(', ')}.` : ''}
                   </p>
+                  <label className="text-sm font-medium">
+                    Stroom afgenomen van het net (kWh per jaar)
+                    <input className="wx-input" type="number" min="0" inputMode="decimal" step="1" value={annualBillInput.totalUsageKwh ?? (resolveAnnualUsageKwh(annualBillInput) || '')} onChange={(event) => updateAnnualBillInput({ totalUsageKwh: toOptionalNumber(event.target.value), ...(event.target.value === '' ? { usageNormalKwh: undefined, usageOffPeakKwh: undefined } : {}) })} />
+                    <span className="mt-1 block text-xs font-normal text-slate-500">Dit heet op je nota ook verbruik of levering. Tel normaal- en dalverbruik bij elkaar op.</span>
+                  </label>
+                  <label className="text-sm font-medium">
+                    Stroom teruggeleverd aan het net (kWh per jaar)
+                    <input className="wx-input" type="number" min="0" inputMode="decimal" step="1" value={annualBillInput.totalFeedInKwh ?? (resolveAnnualFeedInKwh(annualBillInput) || '')} onChange={(event) => updateAnnualBillInput({ totalFeedInKwh: toOptionalNumber(event.target.value), ...(event.target.value === '' ? { feedInNormalKwh: undefined, feedInOffPeakKwh: undefined } : {}) })} />
+                    <span className="mt-1 block text-xs font-normal text-slate-500">Dit is de zonnestroom die je teruglevert, niet de totale opwek van je zonnepanelen. Geen teruglevering? Vul 0 in.</span>
+                  </label>
                   <details className="md:col-span-3 rounded-md border border-slate-200 bg-white p-3 text-sm" open={annualBillDetailsOpen} onToggle={(event) => setAnnualBillDetailsOpen(event.currentTarget.open)}>
-                    <summary className="cursor-pointer font-medium text-slate-900">Geavanceerde gegevens bekijken</summary>
+                    <summary className="cursor-pointer font-medium text-slate-900">Aanvullende gegevens en tarieven aanpassen (optioneel)</summary>
                     <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <label className="text-sm">
                     Leverancier
@@ -1110,14 +1146,8 @@ export default function HomePage() {
                     Periode einde
                     <input className="wx-input" type="date" value={annualBillInput.periodEnd ?? ''} onChange={(event) => updateAnnualBillInput({ periodEnd: event.target.value })} />
                   </label>
-                  <label className="text-sm">
-                    Totaal verbruik (kWh/jaar)
-                    <input className="wx-input" type="number" step="1" value={annualBillInput.totalUsageKwh ?? ''} onChange={(event) => updateAnnualBillInput({ totalUsageKwh: toOptionalNumber(event.target.value) })} />
-                  </label>
-                  <label className="text-sm">
-                    Totaal teruglevering (kWh/jaar)
-                    <input className="wx-input" type="number" step="1" value={annualBillInput.totalFeedInKwh ?? ''} onChange={(event) => updateAnnualBillInput({ totalFeedInKwh: toOptionalNumber(event.target.value) })} />
-                  </label>
+
+
                   <label className="text-sm">
                     Verbruik overdag/piek (kWh/jaar)
                     <input className="wx-input" type="number" step="1" value={annualBillInput.usageNormalKwh ?? ''} onChange={(event) => updateAnnualBillInput({ usageNormalKwh: toOptionalNumber(event.target.value) })} />
@@ -1172,8 +1202,34 @@ export default function HomePage() {
                     Batterij-investering (EUR)
                     <input className="wx-input" type="number" step="100" value={annualBillInput.batteryInvestmentEur ?? ''} onChange={(event) => updateAnnualBillInput({ batteryInvestmentEur: toOptionalNumber(event.target.value) })} />
                   </label>
+                  <label className="text-sm">
+                    Energiebelasting stroom (EUR/kWh)
+                    <input className="wx-input" type="number" step="0.00001" value={annualBillInput.energyTaxEurPerKwh ?? ''} onChange={(event) => updateAnnualBillInput({ energyTaxEurPerKwh: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Btw stroom (%)
+                    <input className="wx-input" type="number" step="0.1" value={annualBillInput.electricityVatPercent ?? ''} onChange={(event) => updateAnnualBillInput({ electricityVatPercent: toOptionalNumber(event.target.value) })} />
+                  </label>
+                  <label className="text-sm">
+                    Opgegeven tarief
+                    <select className="wx-input" value={annualBillInput.tariffBasis ?? ''} onChange={(event) => updateAnnualBillInput({ tariffBasis: (event.target.value || undefined) as AnnualBillInput['tariffBasis'] })}>
+                      <option value="">Niet vastgesteld</option><option value="supply_only">Leveringscomponent, belasting apart</option><option value="all_in">Inclusief btw en energiebelasting</option>
+                    </select>
+                  </label>
+                  <label className="text-sm">
+                    Btw in leveringstarief
+                    <select className="wx-input" value={annualBillInput.supplyTariffVat ?? ''} onChange={(event) => updateAnnualBillInput({ supplyTariffVat: (event.target.value || undefined) as AnnualBillInput['supplyTariffVat'] })}>
+                      <option value="">Niet vastgesteld</option><option value="excluded">Exclusief btw</option><option value="included">Inclusief btw</option>
+                    </select>
+                  </label>
+                  <label className="text-sm">
+                    Btw in energiebelasting
+                    <select className="wx-input" value={annualBillInput.energyTaxVat ?? ''} onChange={(event) => updateAnnualBillInput({ energyTaxVat: (event.target.value || undefined) as AnnualBillInput['energyTaxVat'] })}>
+                      <option value="">Niet vastgesteld</option><option value="excluded">Exclusief btw</option><option value="included">Inclusief btw</option>
+                    </select>
+                  </label>
                   <div className="md:col-span-3 text-xs text-slate-600">
-                    EAN: {maskEan(annualBillInput.eanElectricity)} | Betrouwbaarheid: {annualBillConfidence === 'medium' ? 'middel' : 'laag'}
+                    EAN: {maskEan(annualBillInput.eanElectricity)}
                   </div>
                     </div>
                   </details>
@@ -1209,7 +1265,7 @@ export default function HomePage() {
                                   <p className="text-slate-700">{formatAnnualBillValue(entry.value)}</p>
                                 </div>
                                 <span className={`rounded px-2 py-1 text-xs ${entry.requiresReview ? 'bg-amber-100 text-amber-800' : 'bg-lime-100 text-lime-800'}`}>
-                                  {Math.round(entry.confidence * 100)}% {entry.source ?? 'bron'}
+                                  {entry.source ?? 'bron'}
                                 </span>
                               </div>
                               {(entry.evidenceSnippet || entry.evidence) && (
@@ -1232,7 +1288,7 @@ export default function HomePage() {
                                       {assumption.label}{assumption.value != null ? `: ${formatAnnualBillValue(assumption.value)}` : ''}
                                     </p>
                                     <span className={`rounded px-2 py-1 text-xs ${assumption.requiresReview ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'}`}>
-                                      {assumption.source} | {Math.round(assumption.confidence * 100)}%
+                                      {assumption.source}
                                     </span>
                                   </div>
                                   {assumption.evidenceSnippet && (
@@ -1249,47 +1305,12 @@ export default function HomePage() {
                       </div>
                     </details>
                   )}
-                  <div className="md:col-span-3 rounded-md border border-lime-200 bg-lime-50 p-3">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-lime-900">
-                          Controleer de gevonden waarden
-                        </p>
-                        <p className="mt-1 text-xs text-lime-800">
-                          {inputMode === 'annualBill'
-                            ? annualBillExtract
-                              ? 'De PDF is geanalyseerd. Pas alleen velden aan die niet kloppen en bereken daarna het indicatieve advies.'
-                              : 'Upload eerst een PDF-jaarnota; daarna vult de app de gevonden waarden hier automatisch in.'
-                            : 'Vul de belangrijkste jaarwaarden in en bereken daarna het indicatieve advies.'}
-                        </p>
-                        {annualBillExtract?.issues.length ? (
-                          <p className="mt-1 text-xs text-amber-800">
-                            Aandachtspunten: {annualBillExtract.issues.map((issue) => issue.message).join(' ')}
-                          </p>
-                        ) : null}
-                      </div>
-                      <button
-                        className="wx-btn-primary"
-                        type="button"
-                        onClick={handleAnalyze}
-                        disabled={!canAnalyze || isAnalyzing || isExtractingAnnualBill}
-                      >
-                        {isAnalyzing ? 'Advies berekenen...' : 'Bereken mijn batterijadvies'}
-                      </button>
-                      <button className="wx-btn-secondary" type="button" onClick={() => setAnnualBillDetailsOpen(true)}>
-                        Waarden aanpassen
-                      </button>
-                      {inputMode === 'annualBill' && (
-                        <button className="wx-btn-secondary" type="button" onClick={() => document.getElementById('annual-bill-pdf-input')?.click()}>
-                          Nieuwe jaarnota uploaden
-                        </button>
-                      )}
-                    </div>
-                  </div>
+
                 </div>
               </div>
             )}
 
+            {usesIntervalData && (<>
             <label className="text-sm">
               PV batterijmodus
               <select
@@ -1323,10 +1344,71 @@ export default function HomePage() {
                 <option value="business">Business</option>
               </select>
             </label>
+            </>)}
+            <label className="flex items-center gap-2 text-sm lg:col-span-2">
+              <input
+                type="checkbox"
+                checked={draftSettings.emergencyPowerEnabled}
+                onChange={(event) => setDraftSettings((prev) => ({ ...prev, emergencyPowerEnabled: event.target.checked }))}
+              />
+              Batterijcapaciteit reserveren voor stroomuitval
+            </label>
+            {draftSettings.emergencyPowerEnabled && (
+              <label className="text-sm">
+                Noodstroomreserve (% van totale batterijcapaciteit)
+                <input
+                  className="wx-input"
+                  type="number"
+                  min="0"
+                  max="80"
+                  step="1"
+                  value={draftSettings.emergencyPowerReservePercent}
+                  onChange={(event) => setDraftSettings((prev) => ({ ...prev, emergencyPowerReservePercent: Math.max(0, Math.min(80, Number(event.target.value))) }))}
+                  aria-describedby="emergency-reserve-help"
+                />
+                <span id="emergency-reserve-help" className="mt-1 block text-xs text-slate-500">
+                  Dit deel van de batterij blijft beschikbaar voor stroomuitval en wordt niet gebruikt voor dagelijks verbruik. De reserve komt boven op de automatische batterijbescherming.
+                </span>
+              </label>
+            )}
+
+            {inputMode !== 'intervalData' && (
+                  <div className="lg:col-span-3 rounded-md border border-lime-200 bg-lime-50 p-3">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-lime-900">
+                          {inputMode === 'annualBill' ? '3. Bereken je batterijadvies' : '2. Bereken je batterijadvies'}
+                        </p>
+                        <p className="mt-1 text-sm text-lime-800" aria-live="polite">
+                          {hasAnnualBillInputs ? 'Klaar met controleren? Bereken welke batterij past bij je jaarverbruik en wat deze kan besparen.' : 'Vul eerst hierboven minimaal je jaarlijkse stroomafname of teruglevering in om verder te gaan.'}
+                        </p>
+                        {annualBillExtract?.issues.length ? (
+                          <p className="mt-1 text-xs text-amber-800">
+                            Aandachtspunten: {annualBillExtract.issues.map((issue) => issue.message).join(' ')}
+                          </p>
+                        ) : null}
+                      </div>
+                      <button
+                        className="wx-btn-primary"
+                        type="button"
+                        onClick={handleAnalyze}
+                        disabled={!canAnalyze || isAnalyzing || isExtractingAnnualBill}
+                      >
+                        {isAnalyzing ? 'Advies berekenen...' : 'Bereken mijn batterijadvies'}
+                      </button>
+                      {inputMode === 'annualBill' && (
+                        <button className="wx-btn-secondary" type="button" onClick={() => document.getElementById('annual-bill-pdf-input')?.click()}>
+                          Nieuwe jaarnota uploaden
+                        </button>
+                      )}
+                    </div>
+                  </div>
+            )}
 
           </>
         )}
 
+        {usesIntervalData && (<>
         <label className="text-sm">
           Interpretatie
           <select
@@ -1373,8 +1455,9 @@ export default function HomePage() {
             />
           </label>
         </div>
+        </>)}
 
-        {isPvMode && (
+        {isPvMode && usesIntervalData && (
           <div className="rounded-lg border border-lime-200 bg-lime-50 px-3 py-3 text-sm text-lime-900 lg:col-span-3">
             In PV-modus wordt eerst een formulebasis berekend en daarna een kwartiersimulatie uitgevoerd. Het eindadvies kiest dus niet simpelweg de grootste batterij, maar de beste balans tussen importreductie, benutting, cycli en economische waarde.
           </div>
@@ -1414,13 +1497,13 @@ export default function HomePage() {
 
       {hasPendingChanges && (
         <p className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          Wijzigingen zijn nog niet toegepast. Klik op Analyseer om resultaten te verversen.
+          Wijzigingen zijn nog niet toegepast. Klik op {usesIntervalData ? 'Analyseer' : 'Bereken mijn batterijadvies'} om het advies te vernieuwen.
         </p>
       )}
 
       {analysisResult ? (
         <>
-          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' &&
+          {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && !annualBillAdvice &&
             (analysisResult.pvWarnings ?? []).map((warning) => (
               <p key={warning} className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
                 {warning}
@@ -1428,11 +1511,12 @@ export default function HomePage() {
             ))}
           {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && annualBillAdvice && (
             <div className="wx-card">
-              <h2 className="wx-title">Indicatief batterijadvies op basis van jaarnota</h2>
+              <h2 className="wx-title">Jouw batterijadvies</h2>
+              <p className="mb-4 text-sm text-slate-600">Dit is een eerste schatting op basis van je jaargegevens. Laat de batterijcapaciteit en het benodigde vermogen controleren met kwartierdata voordat je een batterij kiest.</p>
               <button className="wx-btn-primary mb-4" onClick={downloadReport}>
-                Download jaarnota-adviesrapport
+                Download je adviesrapport
               </button>
-              <div className="grid gap-3 md:grid-cols-4">
+              <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <p className="text-xs text-slate-500">Aanbevolen batterij</p>
                   <p className="text-lg font-semibold text-slate-900">
@@ -1447,19 +1531,7 @@ export default function HomePage() {
                     {formatEuro(annualBillAdvice.annualSavingsRangeEur.expected)}
                   </p>
                   <p className="text-xs text-slate-500">
-                    range {formatEuro(annualBillAdvice.annualSavingsRangeEur.min)} - {formatEuro(annualBillAdvice.annualSavingsRangeEur.max)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Terugverdientijd</p>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {formatYears(annualBillAdvice.paybackRangeYears.expected)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Betrouwbaarheid</p>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {annualBillAdvice.confidence === 'medium' ? 'Middel' : 'Laag'}
+                    Verwachte bandbreedte: {formatEuro(annualBillAdvice.annualSavingsRangeEur.min)} - {formatEuro(annualBillAdvice.annualSavingsRangeEur.max)}
                   </p>
                 </div>
               </div>
@@ -1482,19 +1554,16 @@ export default function HomePage() {
                           </blockquote>
                         )}
                         <p className="mt-1 text-xs text-slate-500">
-                          {assumption.reasoning} Betrouwbaarheid {Math.round(assumption.confidence * 100)}%.
+                          {assumption.reasoning}
                         </p>
                       </div>
                     ))}
                   </div>
                 </div>
               ) : null}
-              <p className="mt-3 text-sm text-slate-600">
-                Betrouwbaarheid: {annualBillAdvice.confidence === 'medium' ? 'middel' : 'laag'}. Dit blijft indicatief omdat er geen kwartierprofiel is gebruikt.
-              </p>
-              {annualBillAdvice.warnings.length > 0 && (
+              {(analysisResult.pvWarnings ?? annualBillAdvice.warnings).length > 0 && (
                 <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
-                  {annualBillAdvice.warnings.join(' ')}
+                  {(analysisResult.pvWarnings ?? annualBillAdvice.warnings).join(' ')}
                 </p>
               )}
               {annualBillAdvice.options.length > 0 && (
@@ -1503,18 +1572,16 @@ export default function HomePage() {
                     <thead>
                       <tr className="border-b text-xs text-slate-500">
                         <th className="py-2">Batterij</th>
-                        <th className="py-2">Opgeslagen zon/jaar</th>
+                        <th className="py-2">Opgeslagen zonnestroom/jaar</th>
                         <th className="py-2">Besparing/jaar</th>
-                        <th className="py-2">TVT</th>
                       </tr>
                     </thead>
                     <tbody>
                       {annualBillAdvice.options.map((option) => (
                         <tr key={option.batteryKwh} className="border-b border-slate-100">
-                          <td className="py-2">{option.batteryKwh} kWh</td>
+                          <td className="py-2">{option.batteryKwh} kWh{option.batteryKwh === annualBillAdvice.recommendedBatteryKwh && <span className="ml-2 rounded bg-lime-100 px-2 py-1 text-xs font-semibold text-lime-900">Aanbevolen</span>}</td>
                           <td className="py-2">{formatKwh(option.estimatedAnnualStoredSolarKwh)}</td>
                           <td className="py-2">{formatEuro(option.estimatedAnnualSavingsEur)}</td>
-                          <td className="py-2">{formatYears(option.estimatedPaybackYears)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1526,8 +1593,7 @@ export default function HomePage() {
                   {annualBillAdvice.options.map((option) => (
                     <div key={option.batteryKwh} className="rounded-md border border-slate-200 bg-white p-3 text-sm">
                       <div className="flex items-center justify-between">
-                        <strong>{option.batteryKwh} kWh</strong>
-                        <span>{formatYears(option.estimatedPaybackYears)}</span>
+                        <strong>{option.batteryKwh} kWh{option.batteryKwh === annualBillAdvice.recommendedBatteryKwh ? ' ? Aanbevolen' : ''}</strong>
                       </div>
                       <p className="mt-2 text-slate-600">Opgeslagen zon: {formatKwh(option.estimatedAnnualStoredSolarKwh)}</p>
                       <p className="text-slate-600">Besparing: {formatEuro(option.estimatedAnnualSavingsEur)} per jaar</p>
@@ -1540,6 +1606,8 @@ export default function HomePage() {
               </button>
             </div>
           )}
+          {!analysisResult.annualBillAdvice && (
+            <>
           {analysisResult.analysisType === 'PEAK_SHAVING' && analysisResult.maxObservedKw > OUTLIER_KW_THRESHOLD * 2 && (
             <p className="rounded border border-amber-300 bg-amber-50 p-3 text-amber-800">
               Onrealistisch vermogen gedetecteerd - controleer kolomkeuze
@@ -2023,6 +2091,8 @@ export default function HomePage() {
               Download adviesrapport
             </button>
           </div>
+            </>
+          )}
         </>
       ) : (
         <div className="wx-card text-sm text-slate-600">

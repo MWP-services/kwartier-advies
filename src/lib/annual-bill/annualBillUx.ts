@@ -1,5 +1,6 @@
 import type { AnnualBillInput } from '@/lib/analysis';
 import type { AnnualBillAdviceInput } from './calculateAnnualBillAdvice';
+import { isUsableAnnualTariff, resolveAnnualBillPrices } from './tariffs';
 
 export type AnnualBillConfidenceLabel = 'low' | 'medium';
 
@@ -34,18 +35,12 @@ export function resolveAnnualFeedInKwh(input: Pick<AnnualBillInput, 'totalFeedIn
   return input.totalFeedInKwh ?? (split > 0 ? split : 0);
 }
 
-export function resolveAverageImportPrice(input: Pick<AnnualBillInput, 'usageNormalKwh' | 'usageOffPeakKwh' | 'normalTariffEurPerKwh' | 'offPeakTariffEurPerKwh'>): number {
-  const normalUsage = input.usageNormalKwh ?? 0;
-  const offPeakUsage = input.usageOffPeakKwh ?? 0;
-  const total = normalUsage + offPeakUsage;
-  if (total > 0 && input.normalTariffEurPerKwh != null && input.offPeakTariffEurPerKwh != null) {
-    return (normalUsage * input.normalTariffEurPerKwh + offPeakUsage * input.offPeakTariffEurPerKwh) / total;
-  }
-  return input.normalTariffEurPerKwh ?? input.offPeakTariffEurPerKwh ?? 0.3;
+export function resolveAverageImportPrice(input: AnnualBillInput): number {
+  return resolveAnnualBillPrices(input).importPrice;
 }
 
 export function resolveAverageFeedInPrice(input: Pick<AnnualBillInput, 'feedInTariffEurPerKwh'>): number {
-  return input.feedInTariffEurPerKwh ?? 0.06;
+  return resolveAnnualBillPrices(input).feedInPrice;
 }
 
 export function resolveEstimatedPvProduction(input: Pick<AnnualBillInput, 'annualPvProductionKwh' | 'solarPanelCount' | 'solarPanelWp' | 'roofOrientation'>): number | undefined {
@@ -93,7 +88,7 @@ export function annualBillConfidenceLabel(input: AnnualBillInput): AnnualBillCon
   const usage = resolveAnnualUsageKwh(input);
   const feedIn = resolveAnnualFeedInKwh(input);
   const hasLogicalPeriod = Boolean(input.periodStart && input.periodEnd && input.periodStart <= input.periodEnd);
-  const hasPrices = input.normalTariffEurPerKwh != null || input.offPeakTariffEurPerKwh != null || input.feedInTariffEurPerKwh != null;
+  const hasPrices = isUsableAnnualTariff(input.normalTariffEurPerKwh) || isUsableAnnualTariff(input.offPeakTariffEurPerKwh) || isUsableAnnualTariff(input.feedInTariffEurPerKwh);
   const hasPv = (input.annualPvProductionKwh ?? 0) > 0 || ((input.solarPanelCount ?? 0) > 0 && (input.solarPanelWp ?? 0) > 0);
 
   if (usage > 0 && feedIn > 0 && hasLogicalPeriod && (hasPrices || hasPv)) return 'medium';
@@ -103,8 +98,8 @@ export function annualBillConfidenceLabel(input: AnnualBillInput): AnnualBillCon
 export function annualBillMissingDetails(input: AnnualBillInput): string[] {
   const missing: string[] = [];
   if (!input.periodStart || !input.periodEnd) missing.push('periode');
-  if (input.normalTariffEurPerKwh == null && input.offPeakTariffEurPerKwh == null) missing.push('stroomprijs');
-  if (input.feedInTariffEurPerKwh == null) missing.push('terugleververgoeding');
+  if (!isUsableAnnualTariff(input.normalTariffEurPerKwh) && !isUsableAnnualTariff(input.offPeakTariffEurPerKwh)) missing.push('stroomprijs');
+  if (!isUsableAnnualTariff(input.feedInTariffEurPerKwh)) missing.push('terugleververgoeding');
   if (!resolveEstimatedPvProduction(input)) missing.push('PV-opwek');
   if (input.batteryInvestmentEur == null) missing.push('batterij-investering');
   return missing;

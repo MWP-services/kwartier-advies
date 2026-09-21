@@ -1,5 +1,6 @@
 import type { AnnualBillField, AnnualBillAiReport, AnnualBillRawExtract } from './schema';
 import { logAnnualBill, annualBillLogFields, annualBillErrorDetails } from './logging';
+import { parseBillNumber } from './numbers';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_MODEL = 'gpt-4.1-mini';
@@ -23,6 +24,13 @@ const AI_FIELDS = [
   'feedInTariffEurPerKwh',
   'totalElectricityCostEur',
   'energyTaxElectricityEur',
+  'energyTaxEurPerKwh',
+  'energyTaxWeightKwh',
+  'electricityVatPercent',
+  'electricityVatEur',
+  'supplyTariffVat',
+  'energyTaxVat',
+  'tariffBasis',
   'gridCostElectricityEur',
   'solarPanelCount',
   'solarPanelWp',
@@ -42,6 +50,10 @@ const NUMERIC_AI_FIELDS = new Set<AnnualBillField>([
   'feedInTariffEurPerKwh',
   'totalElectricityCostEur',
   'energyTaxElectricityEur',
+  'energyTaxEurPerKwh',
+  'energyTaxWeightKwh',
+  'electricityVatPercent',
+  'electricityVatEur',
   'gridCostElectricityEur',
   'solarPanelCount',
   'solarPanelWp'
@@ -99,15 +111,16 @@ function coerceField(field: string): AnnualBillField | null {
   return (AI_FIELDS as readonly string[]).includes(field) ? field as AnnualBillField : null;
 }
 
-function parseNumber(value: string | number): number | null {
+function parseNumber(value: string | number, decimalDot: boolean): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  const parsed = Number(value.replace(/\s/g, '').replace(/[€]/g, '').replace(/\.(?=\d{3}(?:\D|$))/g, '').replace(',', '.'));
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseBillNumber(value.replace(/[€]/g, ''), decimalDot);
 }
 
 function coerceValue(field: AnnualBillField, value: string | number): string | number | null {
+  if (field === 'supplyTariffVat' || field === 'energyTaxVat') return value === 'included' || value === 'excluded' ? value : null;
+  if (field === 'tariffBasis') return value === 'supply_only' || value === 'all_in' ? value : null;
   if (!NUMERIC_AI_FIELDS.has(field)) return typeof value === 'string' ? value.trim() : value;
-  return parseNumber(value);
+  return parseNumber(value, field.endsWith('EurPerKwh'));
 }
 
 function extractOutputText(response: unknown): string {
@@ -207,7 +220,7 @@ export async function extractAnnualBillWithAi(text: string, traceId?: string): P
         {
           role: 'system',
           content:
-            'Je analyseert Nederlandse energie-jaarnotas. Extraheer alleen waarden die in de tekst staan of duidelijk berekend kunnen worden. Geef per bewering een kort letterlijk bronfragment. Verzin geen ontbrekende waarden.'
+            'Je analyseert Nederlandse energie-jaarnotas. Extraheer alleen waarden die in de tekst staan of duidelijk berekend kunnen worden. Geef per bewering een kort letterlijk bronfragment. Verzin geen ontbrekende waarden. Lees energiebelasting op STROOM per periode en schijf: energyTaxElectricityEur is de som van positieve stroombelastingregels, zonder gasbelasting, vermindering energiebelasting of netbeheer. energyTaxWeightKwh is de bijbehorende belaste kWh; energyTaxEurPerKwh is de som gedeeld door die kWh. Bewaar leveringstarieven zoals gedrukt: tel btw of energiebelasting niet zelf bij normalTariffEurPerKwh/offPeakTariffEurPerKwh op. Geef electricityVatPercent alleen als vermeld. Geef supplyTariffVat en energyTaxVat als included of excluded wanneer onderbouwd. Geef tariffBasis=supply_only bij losse leveringscomponenten, all_in uitsluitend als het tarief expliciet inclusief btw EN energiebelasting is. Een gecombineerd btw-totaal van stroom en gas is geen electricityVatEur. Onbekende belastingstatus of ontbrekende bedragen weglaten, nooit het huidige wettelijke tarief invullen.'
         },
         {
           role: 'user',
@@ -281,7 +294,7 @@ export async function extractAnnualBillWithAi(text: string, traceId?: string): P
       if (typeof code === 'string' && /^[a-z_]{1,64}$/.test(code)) errorCode = code;
     } catch { /* Non-JSON upstream error bodies are not logged. */ }
     logAnnualBill('ai.http_error', traceId, { httpStatus: response.status, errorCode }, 'error');
-    throw new Error(`OpenAI analyse mislukte (${response.status}): ${body.slice(0, 500)}`);
+    throw Object.assign(new Error(`OpenAI analyse mislukte (${response.status}): ${body.slice(0, 500)}`), { code: errorCode, status: response.status });
   }
 
   stage = 'response_json';

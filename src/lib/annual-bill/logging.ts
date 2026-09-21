@@ -14,7 +14,9 @@ const numericFields = [
   'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh',
   'totalUsageKwh', 'totalFeedInKwh', 'annualPvProductionKwh',
   'normalTariffEurPerKwh', 'offPeakTariffEurPerKwh', 'feedInTariffEurPerKwh',
-  'batteryInvestmentEur', 'solarPanelCount', 'solarPanelWp', 'extractionConfidence'
+  'batteryInvestmentEur', 'solarPanelCount', 'solarPanelWp', 'extractionConfidence',
+  'compensatedFeedInKwh', 'tariffWeightNormalKwh', 'tariffWeightOffPeakKwh',
+  'electricityVatPercent', 'electricityVatEur', 'energyTaxEurPerKwh', 'energyTaxElectricityEur', 'energyTaxWeightKwh'
 ] as const;
 
 export function annualBillLogValues(input: AnnualBillInput): Record<string, number> {

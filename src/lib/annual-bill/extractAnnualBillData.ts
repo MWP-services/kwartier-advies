@@ -1,4 +1,10 @@
 import type { AnnualBillField, AnnualBillRawExtract } from './schema';
+import { BILL_NUMBER_PATTERN, parseBillNumber } from './numbers';
+import { isUsableAnnualTariff } from './tariffs';
+import { logAnnualBill } from './logging';
+import { extractElectricityTable } from './extractElectricityTable';
+import { extractElectricityTaxes } from './extractElectricityTaxes';
+import { extractTaxMetadata } from './extractTaxMetadata';
 
 type NumericFieldConfig = {
   field: AnnualBillField;
@@ -63,9 +69,9 @@ const NUMERIC_FIELDS: NumericFieldConfig[] = [
     unit: 'eur'
   },
   {
-    field: 'energyTaxElectricityEur',
-    labels: ['energiebelasting elektriciteit', 'energiebelasting stroom'],
-    unit: 'eur'
+    field: 'energyTaxEurPerKwh',
+    labels: ['energiebelasting elektriciteit', 'energiebelasting stroom', 'belasting op stroom'],
+    unit: 'eur_per_kwh'
   },
   {
     field: 'gridCostElectricityEur',
@@ -78,41 +84,42 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function parseNlNumber(value: string): number | null {
-  const normalized = value
-    .replace(/\s/g, '')
-    .replace(/[€]/g, '')
-    .replace(/\.(?=\d{3}(?:\D|$))/g, '')
-    .replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function findNumericValue(text: string, config: NumericFieldConfig): { value: number; confidence: number; evidence: string } | null {
-  for (const label of config.labels) {
-    const unitPattern =
-      config.unit === 'kwh'
-        ? String.raw`(?:kWh|kwu)?`
-        : config.unit === 'eur_per_kwh'
-          ? String.raw`(?:€|EUR)?\s*(?:\/?\s*kWh|per\s*kWh)?`
-          : String.raw`(?:€|EUR)?`;
-    const pattern = new RegExp(
-      `(${escapeRegExp(label)})[^\\n\\r]{0,80}?(-?\\d{1,3}(?:[.\\s]\\d{3})*(?:,\\d+)?|-?\\d+(?:,\\d+)?)\\s*${unitPattern}`,
-      'i'
-    );
-    const match = text.match(pattern);
-    if (!match) continue;
-
-    const value = parseNlNumber(match[2]);
-    if (value == null) continue;
-
-    return {
-      value,
-      confidence: label.startsWith('totaal') || label.includes('tarief') ? 0.78 : 0.7,
-      evidence: match[0].slice(0, 180)
-    };
+function findNumericValue(text: string, config: NumericFieldConfig, traceId?: string): { value: number; confidence: number; evidence: string } | null {
+  const candidates: { value: number; confidence: number; evidence: string }[] = [];
+  const nextLabelPattern = new RegExp(`\\b(?:${[...NUMERIC_FIELDS.flatMap((entry) => entry.labels), 'teruglevering', 'verbruik', 'afname', 'injectie'].map(escapeRegExp).join('|')})\\b`, 'i');
+  text.split(/\r?\n/).forEach((line, index) => {
+    for (const label of config.labels) {
+      const match = new RegExp(`\\b${escapeRegExp(label)}\\b`, 'i').exec(line);
+      if (!match) continue;
+      let tail = line.slice(match.index + match[0].length);
+      const nextLabel = nextLabelPattern.exec(tail);
+      if (nextLabel) tail = tail.slice(0, nextLabel.index);
+      const rateSuffix = String.raw`\s*(?:(cent|ct|eurocent|€|EUR)\s*)?(?:\/|per)\s*kWh\b`;
+      const suffix = config.unit === 'eur_per_kwh' ? rateSuffix : config.unit === 'kwh' ? String.raw`\s*(kWh|kwu)\b(?!\s*(?:\/|per))` : String.raw`\s*(?:€|EUR)?`;
+      const pattern = new RegExp(`(?<![\\d.,])(${BILL_NUMBER_PATTERN})${suffix}`, 'gi');
+      const matches = [...tail.matchAll(pattern)];
+      if (!matches.length) logAnnualBill('rules.candidate.rejected', traceId, { field: config.field, label, lineNumber: index + 1, reason: 'explicit_unit_or_value_missing' }, 'warn');
+      for (const found of matches) {
+        const parsed = parseBillNumber(found[1], config.unit === 'eur_per_kwh');
+        const cents = config.unit === 'eur_per_kwh' && /^(cent|ct|eurocent)$/i.test(found[2] ?? '');
+        const value = parsed == null ? null : cents ? parsed / 100 : parsed;
+        const accepted = value != null && (config.unit !== 'eur_per_kwh' || isUsableAnnualTariff(value));
+        logAnnualBill(accepted ? 'rules.candidate.accepted' : 'rules.candidate.rejected', traceId, {
+          field: config.field, label, lineNumber: index + 1, parsedValue: parsed, value,
+          unit: cents ? 'cent/kWh' : config.unit, convertedFromCents: cents,
+          reason: accepted ? 'label_and_unit_match' : 'tariff_outside_review_range'
+        }, accepted ? 'info' : 'warn');
+        if (accepted) candidates.push({ value: value!, confidence: 0.78, evidence: `${match[0]}${tail}`.slice(0, 180) });
+      }
+      break;
+    }
+  });
+  const unique = [...new Set(candidates.map((candidate) => candidate.value))];
+  if (unique.length > 1) {
+    logAnnualBill('rules.field.ambiguous', traceId, { field: config.field, values: unique, reason: 'multiple_distinct_values_require_review' }, 'warn');
+    return null;
   }
-  return null;
+  return candidates[0] ?? null;
 }
 
 function findDate(text: string, labels: string[]): { value: string; confidence: number; evidence: string } | null {
@@ -141,13 +148,30 @@ function findSupplierName(text: string): { value: string; confidence: number; ev
   return line ? { value: line.slice(0, 80), confidence: 0.45, evidence: line } : null;
 }
 
-export function extractAnnualBillData(text: string): AnnualBillRawExtract {
+export function extractAnnualBillData(text: string, traceId?: string): AnnualBillRawExtract {
   const raw: AnnualBillRawExtract = {};
 
   NUMERIC_FIELDS.forEach((config) => {
-    const match = findNumericValue(text, config);
+    const match = findNumericValue(text, config, traceId);
     if (match) raw[config.field] = { ...match, source: 'rules', evidenceSnippet: match.evidence };
   });
+
+  const table = extractElectricityTable(text, traceId);
+  if (Object.keys(table).length) {
+    // Preserve separately extracted physical energy totals. Compensated export is not physical export.
+    if (raw.totalUsageKwh || raw.usageNormalKwh || raw.usageOffPeakKwh) {
+      for (const field of ['usageNormalKwh', 'usageOffPeakKwh', 'totalUsageKwh'] as const) delete table[field];
+    }
+    Object.assign(raw, table);
+  }
+  const taxes = extractElectricityTaxes(text, traceId);
+  if (taxes.electricityVatPercent && raw.electricityVatPercent && taxes.electricityVatPercent.value !== raw.electricityVatPercent.value) {
+    logAnnualBill('tax.vat.conflict', traceId, { supplyPercent: raw.electricityVatPercent.value, taxPercent: taxes.electricityVatPercent.value }, 'warn');
+    delete taxes.electricityVatPercent;
+    delete taxes.energyTaxVat;
+  }
+  Object.assign(raw, taxes);
+  extractTaxMetadata(text, raw, traceId);
 
   const periodStart = findDate(text, ['periode van', 'leveringsperiode van', 'van']);
   const periodEnd = findDate(text, ['periode tot', 'leveringsperiode tot', 'tot']);

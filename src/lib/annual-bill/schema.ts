@@ -32,6 +32,7 @@ export type AnnualBillExtractionDiagnostics = {
   aiUsed?: boolean;
   aiModel?: string;
   aiWarnings?: string[];
+  aiFailureCode?: string;
 };
 
 export type AnnualBillAssumption = {

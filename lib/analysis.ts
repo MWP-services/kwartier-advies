@@ -18,6 +18,16 @@ export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
 export type PvInputMode = 'intervalData' | 'annualBill' | 'manualAnnualBill';
 
 export type AnnualBillInput = {
+  tariffBasis?: 'supply_only' | 'all_in';
+  electricityVatPercent?: number;
+  electricityVatEur?: number;
+  supplyTariffVat?: 'included' | 'excluded';
+  energyTaxEurPerKwh?: number;
+  energyTaxVat?: 'included' | 'excluded';
+  energyTaxWeightKwh?: number;
+  compensatedFeedInKwh?: number;
+  tariffWeightNormalKwh?: number;
+  tariffWeightOffPeakKwh?: number;
   traceId?: string;
   supplierName?: string;
   invoiceDate?: string;
@@ -57,6 +67,8 @@ export interface AnalysisSettings {
   pvInputMode: PvInputMode;
   pvStrategy: PvStrategy;
   pvCustomerType: 'auto' | 'home' | 'business';
+  emergencyPowerEnabled: boolean;
+  emergencyPowerReservePercent: number;
   pvPricingMode: PricingMode;
   pvFallbackToAveragePrices: boolean;
   pvImportPriceEurPerKwh: number;
@@ -102,6 +114,8 @@ export const defaultAnalysisSettings: AnalysisSettings = {
   pvInputMode: 'intervalData',
   pvStrategy: 'SELF_CONSUMPTION_ONLY',
   pvCustomerType: 'auto',
+  emergencyPowerEnabled: false,
+  emergencyPowerReservePercent: 10,
   pvPricingMode: 'dynamic',
   pvFallbackToAveragePrices: true,
   pvImportPriceEurPerKwh: 0.3,
@@ -126,6 +140,8 @@ export function analysisSettingsEqual(a: AnalysisSettings, b: AnalysisSettings):
     a.pvInputMode === b.pvInputMode &&
     a.pvStrategy === b.pvStrategy &&
     a.pvCustomerType === b.pvCustomerType &&
+    a.emergencyPowerEnabled === b.emergencyPowerEnabled &&
+    a.emergencyPowerReservePercent === b.emergencyPowerReservePercent &&
     a.pvPricingMode === b.pvPricingMode &&
     a.pvFallbackToAveragePrices === b.pvFallbackToAveragePrices &&
     a.pvImportPriceEurPerKwh === b.pvImportPriceEurPerKwh &&

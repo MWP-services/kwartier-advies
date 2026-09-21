@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { processIntervals } from '@/lib/calculations';
+import { resolveBatteryPhysics } from '@/lib/batteryPhysics';
 import {
   generateScenarioOptions,
   orderScenariosForRecommendationDisplay,
@@ -111,7 +112,7 @@ describe('simulation', () => {
     const result = simulateSingleScenario(intervals, 64, 300, 300, { initialSocRatio: 0 });
 
     expect(result.maxChargeKw).toBe(32);
-    expect(result.endingSocKwh).toBeCloseTo(32 * 0.25 * Math.sqrt(0.9), 5);
+    expect(result.endingSocKwh).toBeCloseTo(6.43 + 32 * 0.25 * Math.sqrt(0.9), 5);
     expect(result.shavedSeries[1].originalKw).toBeCloseTo(2, 5);
     expect(result.shavedSeries[1].shavedKw).toBeCloseTo(34, 5);
   });
@@ -125,7 +126,7 @@ describe('simulation', () => {
     const result = simulateSingleScenario(intervals, 96, 300, 300, { initialSocRatio: 0 });
 
     expect(result.maxChargeKw).toBe(48);
-    expect(result.endingSocKwh).toBeCloseTo(41 * 0.25 * Math.sqrt(0.9), 5);
+    expect(result.endingSocKwh).toBeCloseTo(9.646 + 41 * 0.25 * Math.sqrt(0.9), 5);
   });
 
   it('limits discharge by battery maxDischargeKw (64 kWh => 30 kW)', () => {
@@ -154,11 +155,12 @@ describe('simulation', () => {
     const beforeExcessKwh = 5.72;
     const efficiency = 0.84;
     const kWhNeeded = beforeExcessKwh / efficiency;
+    const { minSocKwh, maxSocKwh } = resolveBatteryPhysics(64);
     const rows = [{ timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: (43 + beforeExcessKwh / 0.25) * 0.25 }];
     const intervals = processIntervals(rows, 43);
 
     const result = simulateSingleScenario(intervals, 64, 100, 100, {
-      initialSocRatio: kWhNeeded / 64,
+      initialSocRatio: kWhNeeded / (maxSocKwh - minSocKwh),
       dischargeEfficiency: efficiency
     });
 

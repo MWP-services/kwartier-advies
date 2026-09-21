@@ -21,6 +21,8 @@ describe('calculate annual bill battery advice', () => {
     expect(result.annualSavingsRangeEur.expected).toBeGreaterThan(0);
     expect(result.paybackRangeYears.expected).toBeGreaterThan(0);
     expect(result.confidence).toBe('medium');
+    expect(result.minimumSocPercent).toBe(10);
+    expect(result.efficiencyPercent).toBe(95);
   });
 
   it('uses fallback prices and lowers confidence when tariffs are missing', () => {
@@ -32,5 +34,24 @@ describe('calculate annual bill battery advice', () => {
     expect(result.confidence).toBe('low');
     expect(result.warnings.some((warning) => warning.includes('Importprijs ontbreekt'))).toBe(true);
     expect(result.warnings.some((warning) => warning.includes('Terugleververgoeding ontbreekt'))).toBe(true);
+  });
+
+  it('keeps 10 percent minimum SOC and applies an extra emergency reserve', () => {
+    const normal = calculateAnnualBillAdvice({
+      totalUsageKwh: 4200,
+      totalFeedInKwh: 1800,
+      batteryOptionsKwh: [64]
+    });
+    const emergency = calculateAnnualBillAdvice({
+      totalUsageKwh: 4200,
+      totalFeedInKwh: 1800,
+      batteryOptionsKwh: [64],
+      emergencyPowerEnabled: true,
+      emergencyPowerReservePercent: 10
+    });
+
+    expect(normal.options[0].usableCapacityKwh).toBe(57.6);
+    expect(emergency.options[0].usableCapacityKwh).toBe(51.2);
+    expect(emergency.options[0].estimatedAnnualStoredSolarKwh).toBeLessThan(normal.options[0].estimatedAnnualStoredSolarKwh);
   });
 });

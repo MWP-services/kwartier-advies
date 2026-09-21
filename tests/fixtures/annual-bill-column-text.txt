@@ -1,0 +1,50 @@
+Levering van stroom
+Elektriciteitsprofiel 2 (3x35 Ampère t/m 3x80
+Ampère)
+kWh terugleververgoeding
+(01-10-2024/01-10-2024)
+Verbruik stroom (daltarief)
+(01-10-2024/01-12-2024)
+Verbruik stroom (normaaltarief)
+(01-10-2024/01-12-2024)
+kWh terugleververgoeding
+(01-10-2024/01-12-2024)
+Vaste leveringskosten voor stroom
+(04-10-2024/01-12-2024)
+Verbruik stroom (daltarief)
+(01-12-2024/29-09-2025)
+Verbruik stroom (normaaltarief)
+(01-12-2024/29-09-2025)
+kWh terugleververgoeding
+(01-12-2024/29-09-2025)
+Vaste leveringskosten voor stroom
+(01-12-2024/04-10-2025)
+Subtotaal
+Levering van gas
+Gasprofiel 2 en regio 3
+Verbruik gas (01-10-2024/01-12-2024)
+0 kWh
+3496 kWh
+1533 kWh
+0 kWh
+1,903 maand
+12183 kWh
+1793 kWh
+0 kWh
+10,097 maand 24,99000 * ¤ 252,32 21% btw
+1263 m3
+¤
+1263
+804
+5246
+Bedrag
+* ¤ 0,00 21% btw
+0,14689 * ¤ 513,53 21% btw
+0,18515 * ¤ 283,83 21% btw
+* ¤ 0,00 21% btw
+7,99000 * ¤ 15,21 21% btw
+0,14824 * ¤ 1.806,01 21% btw
+0,17579 * ¤ 315,20 21% btw
+* ¤ 0,00 21% btw
+3.186,10
+0,56740 * ¤ 716,63 21% btw

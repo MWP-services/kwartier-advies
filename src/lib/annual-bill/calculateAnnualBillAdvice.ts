@@ -1,5 +1,6 @@
-import { annualBillConfidenceLabel, resolveAverageImportPrice, resolveAnnualFeedInKwh, resolveAnnualUsageKwh, resolveEstimatedPvProduction } from './annualBillUx';
+import { annualBillConfidenceLabel, resolveAnnualFeedInKwh, resolveAnnualUsageKwh, resolveEstimatedPvProduction } from './annualBillUx';
 import { logAnnualBill } from './logging';
+import { isUsableAnnualTariff, DEFAULT_IMPORT_PRICE, DEFAULT_FEED_IN_PRICE } from './tariffs';
 
 export type AnnualBillAdviceInput = {
   traceId?: string;
@@ -14,6 +15,8 @@ export type AnnualBillAdviceInput = {
   averageFeedInPriceEurPerKwh?: number;
   batteryInvestmentEur?: number;
   batteryOptionsKwh?: number[];
+  emergencyPowerEnabled?: boolean;
+  emergencyPowerReservePercent?: number;
   periodStart?: string;
   periodEnd?: string;
   solarPanelCount?: number;
@@ -49,14 +52,17 @@ export type AnnualBillAdviceResult = {
     max: number | null;
   };
   confidence: 'low' | 'medium';
+  minimumSocPercent: number;
+  efficiencyPercent: number;
+  emergencyPowerReservePercent: number;
   warnings: string[];
   explanation: string;
 };
 
-const DEFAULT_BATTERY_OPTIONS_KWH = [5, 10, 15, 20, 30, 40, 64, 96];
-const USABLE_FRACTION = 0.9;
-const ROUND_TRIP_EFFICIENCY = 0.9;
+const DEFAULT_BATTERY_OPTIONS_KWH = [64, 96];
+const ROUND_TRIP_EFFICIENCY = 0.95;
 const DAYS_PER_YEAR = 365;
+const MINIMUM_SOC_FRACTION = 0.1;
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
@@ -72,15 +78,15 @@ function resolveTotalFeedInKwh(input: AnnualBillAdviceInput): number {
 
 function resolveImportPrice(input: AnnualBillAdviceInput): { value: number; usedFallback: boolean } {
   return {
-    value: resolveAverageImportPrice(input),
-    usedFallback: input.averageImportPriceEurPerKwh == null
+    value: isUsableAnnualTariff(input.averageImportPriceEurPerKwh) ? input.averageImportPriceEurPerKwh : DEFAULT_IMPORT_PRICE,
+    usedFallback: !isUsableAnnualTariff(input.averageImportPriceEurPerKwh)
   };
 }
 
 function resolveFeedInPrice(input: AnnualBillAdviceInput): { value: number; usedFallback: boolean } {
   return {
-    value: input.averageFeedInPriceEurPerKwh ?? 0.06,
-    usedFallback: input.averageFeedInPriceEurPerKwh == null
+    value: isUsableAnnualTariff(input.averageFeedInPriceEurPerKwh) ? input.averageFeedInPriceEurPerKwh : DEFAULT_FEED_IN_PRICE,
+    usedFallback: !isUsableAnnualTariff(input.averageFeedInPriceEurPerKwh)
   };
 }
 
@@ -96,8 +102,8 @@ function estimateBatteryInvestment(optionKwh: number, input: AnnualBillAdviceInp
   return optionKwh * eurPerKwh;
 }
 
-function calculateStoredSolarKwh(optionKwh: number, totalUsageKwh: number, totalFeedInKwh: number): number {
-  const usableCapacityKwh = optionKwh * USABLE_FRACTION;
+function calculateStoredSolarKwh(optionKwh: number, totalUsageKwh: number, totalFeedInKwh: number, usableFraction: number): number {
+  const usableCapacityKwh = optionKwh * usableFraction;
   const annualEveningDemandKwh = totalUsageKwh * 0.45;
   const practicalAnnualShiftableKwh = Math.min(totalFeedInKwh, annualEveningDemandKwh);
   const dailyFeedInKwh = totalFeedInKwh / DAYS_PER_YEAR;
@@ -105,6 +111,13 @@ function calculateStoredSolarKwh(optionKwh: number, totalUsageKwh: number, total
   const cycleLimitKwh = usableCapacityKwh * 230;
 
   return Math.min(practicalAnnualShiftableKwh * dailyCoverageFactor, cycleLimitKwh) * ROUND_TRIP_EFFICIENCY;
+}
+
+function resolveUsableFraction(input: Pick<AnnualBillAdviceInput, 'emergencyPowerEnabled' | 'emergencyPowerReservePercent'>): number {
+  const emergencyReserve = input.emergencyPowerEnabled
+    ? Math.max(0, Math.min(1 - MINIMUM_SOC_FRACTION, (input.emergencyPowerReservePercent ?? 0) / 100))
+    : 0;
+  return Math.max(0, 1 - MINIMUM_SOC_FRACTION - emergencyReserve);
 }
 
 function confidenceFor(input: AnnualBillAdviceInput, usedPriceFallback: boolean): 'low' | 'medium' {
@@ -130,6 +143,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
   const importPrice = resolveImportPrice(input);
   const feedInPrice = resolveFeedInPrice(input);
   const valuePerStoredKwh = Math.max(0, importPrice.value - feedInPrice.value);
+  logAnnualBill('calculation.prices_used', input.traceId, { requestedImportPrice: input.averageImportPriceEurPerKwh, requestedFeedInPrice: input.averageFeedInPriceEurPerKwh, importPrice: importPrice.value, feedInPrice: feedInPrice.value, importPriceFallback: importPrice.usedFallback, feedInPriceFallback: feedInPrice.usedFallback, valuePerStoredKwh });
   const estimatedPvProductionKwh = estimatePvProduction(input);
   const warnings: string[] = [];
 
@@ -138,17 +152,17 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
   if (importPrice.usedFallback) warnings.push('Importprijs ontbreekt; gerekend met indicatieve fallback van EUR 0,30/kWh.');
   if (feedInPrice.usedFallback) warnings.push('Terugleververgoeding ontbreekt; gerekend met indicatieve fallback van EUR 0,06/kWh.');
   if (!estimatedPvProductionKwh) warnings.push('Jaarlijkse PV-opwek ontbreekt; advies gebruikt alleen verbruik en teruglevering.');
-  if (!input.batteryInvestmentEur) warnings.push('Batterij-investering ontbreekt; terugverdientijd gebruikt een geschatte investering per batterijgrootte.');
 
   const confidence = confidenceFor(input, importPrice.usedFallback || feedInPrice.usedFallback);
+  const usableFraction = resolveUsableFraction(input);
   const batteryOptions = [...new Set(input.batteryOptionsKwh ?? DEFAULT_BATTERY_OPTIONS_KWH)]
     .filter((option) => Number.isFinite(option) && option > 0)
     .sort((a, b) => a - b);
 
   const options = batteryOptions.map<AnnualBillBatteryOptionResult>((batteryKwh) => {
-    const usableCapacityKwh = batteryKwh * USABLE_FRACTION;
+    const usableCapacityKwh = batteryKwh * usableFraction;
     const estimatedAnnualStoredSolarKwh =
-      totalUsageKwh > 0 && totalFeedInKwh > 0 ? calculateStoredSolarKwh(batteryKwh, totalUsageKwh, totalFeedInKwh) : 0;
+      totalUsageKwh > 0 && totalFeedInKwh > 0 ? calculateStoredSolarKwh(batteryKwh, totalUsageKwh, totalFeedInKwh, usableFraction) : 0;
     const estimatedAnnualSavingsEur = estimatedAnnualStoredSolarKwh * valuePerStoredKwh;
     const utilizationScore = usableCapacityKwh > 0
       ? Math.min(1, estimatedAnnualStoredSolarKwh / Math.max(1, usableCapacityKwh * 220))
@@ -182,7 +196,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
       .sort((a, b) => b.score - a.score || a.option.batteryKwh - b.option.batteryKwh);
   const recommended = ranked[0]?.option ?? null;
   logAnnualBill('calculation.ranking', input.traceId, {
-    assumptions: { usableFraction: USABLE_FRACTION, roundTripEfficiency: ROUND_TRIP_EFFICIENCY, eveningDemandFraction: 0.45, maxCycles: 230, daysPerYear: DAYS_PER_YEAR },
+    assumptions: { usableFraction, minimumSocFraction: MINIMUM_SOC_FRACTION, roundTripEfficiency: ROUND_TRIP_EFFICIENCY, emergencyPowerReservePercent: input.emergencyPowerEnabled ? input.emergencyPowerReservePercent ?? 0 : 0, eveningDemandFraction: 0.45, maxCycles: 230, daysPerYear: DAYS_PER_YEAR },
     valuePerStoredKwh,
     ranking: ranked.map(({ option, score }) => ({ batteryKwh: option.batteryKwh, score, estimatedInvestmentEur: estimateBatteryInvestment(option.batteryKwh, input) })),
     recommendedBatteryKwh: recommended?.batteryKwh ?? null
@@ -205,6 +219,9 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
     annualSavingsRangeEur,
     paybackRangeYears: rangePayback(investment, annualSavingsRangeEur),
     confidence,
+    minimumSocPercent: MINIMUM_SOC_FRACTION * 100,
+    efficiencyPercent: ROUND_TRIP_EFFICIENCY * 100,
+    emergencyPowerReservePercent: input.emergencyPowerEnabled ? Math.max(0, Math.min(80, input.emergencyPowerReservePercent ?? 0)) : 0,
     warnings,
     explanation:
       'Dit is een indicatief batterijadvies op basis van jaarnota-totalen. Zonder kwartierprofiel schat de app hoeveel jaarlijkse teruglevering praktisch naar avond/nachtverbruik kan worden verschoven.'
