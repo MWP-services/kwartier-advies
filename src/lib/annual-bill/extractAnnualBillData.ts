@@ -5,6 +5,7 @@ import { logAnnualBill } from './logging';
 import { extractElectricityTable } from './extractElectricityTable';
 import { extractElectricityTaxes } from './extractElectricityTaxes';
 import { extractTaxMetadata } from './extractTaxMetadata';
+import { extractContractType } from './contractType';
 
 type NumericFieldConfig = {
   field: AnnualBillField;
@@ -150,6 +151,8 @@ function findSupplierName(text: string): { value: string; confidence: number; ev
 
 export function extractAnnualBillData(text: string, traceId?: string): AnnualBillRawExtract {
   const raw: AnnualBillRawExtract = {};
+  const contractType = extractContractType(text);
+  if (contractType) raw.contractType = contractType;
 
   NUMERIC_FIELDS.forEach((config) => {
     const match = findNumericValue(text, config, traceId);

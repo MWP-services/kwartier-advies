@@ -22,7 +22,7 @@ jobs:
       - name: Install, test, and build
         run: |
           npm ci
-          npm test -- --run tests/analysisJobClient.test.ts tests/analysisJobs.test.ts
+          npm test -- --run tests/analysisJobClient.test.ts tests/analysisJobs.test.ts tests/extractPdfText.test.ts tests/extractPdfText.integration.test.ts tests/annualBillRoute.test.ts
           npm run build
           node --check scripts/start-webapp.js
           node --check .worker-build/worker/analysis-worker.js
@@ -45,6 +45,7 @@ jobs:
           test -f deploy/scripts/start-webapp.js
           node --check deploy/.worker-build/worker/analysis-worker.js
           node scripts/smoke-test-worker.mjs --bundle deploy/.worker-build/worker/analysis-worker.js
+          node scripts/smoke-test-pdf-runtime.mjs --standalone deploy
           cd deploy
           zip -qr ../next.zip .
 

@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import type { SizingResult } from '@/lib/calculations';
 import { orderScenariosForRecommendationDisplay, type ScenarioResult } from '@/lib/simulation';
+import { PvScenarioImpact } from './PvScenarioImpact';
 
 interface ScenarioChartsProps {
   analysisType: AnalysisType;
@@ -34,7 +35,9 @@ export function ScenarioCharts({
   safetyFactor,
   compliance
 }: ScenarioChartsProps) {
-  const selected = scenarios.find((scenario) => scenario.capacityKwh === selectedScenarioCapacity) ?? scenarios[0];
+  const selected = scenarios.find((scenario) => scenario.capacityKwh === selectedScenarioCapacity)
+    ?? scenarios.find((scenario) => scenario.capacityKwh === sizing.recommendedProduct?.capacityKwh)
+    ?? scenarios[0];
   const displayScenarios =
     analysisType === 'PV_SELF_CONSUMPTION'
       ? scenarios
@@ -74,9 +77,39 @@ export function ScenarioCharts({
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <div className="wx-card">
+      <section className="wx-card min-w-0 lg:col-span-2" aria-label="Impact geselecteerde batterij">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="wx-title !mb-0">Impact geselecteerde batterij</h3>
+          <label className="min-w-0 text-sm sm:max-w-xs">
+            Batterijcapaciteit
+            <select value={selected?.capacityKwh ?? ''} disabled={!selected}
+              onChange={(event) => onSelectScenario(Number(event.target.value))} className="wx-input">
+              {[...scenarios].sort((a, b) => a.capacityKwh - b.capacityKwh).map((scenario) => (
+                <option key={scenario.capacityKwh} value={scenario.capacityKwh}>
+                  {scenario.optionLabel}{scenario.capacityKwh === sizing.recommendedProduct?.capacityKwh ? ' — Aanbevolen' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {selected ? (
+          <div aria-live="polite">
+            <p className="mt-3 font-medium text-slate-900">{selected.capacityKwh} kWh — {selected.optionLabel}</p>
+            {analysisType === 'PV_SELF_CONSUMPTION' ? <PvScenarioImpact scenario={selected} /> : (
+              <p className="mt-2 text-sm text-slate-600">
+                Overschrijdingsenergie: {selected.exceedanceEnergyKwhBefore.toFixed(2)} kWh vóór en{' '}
+                {selected.exceedanceEnergyKwhAfter.toFixed(2)} kWh na batterij.
+              </p>
+            )}
+            {selected.isEligible === false && <p className="mt-2 text-sm text-amber-700">{selected.excludedReason ?? 'Uitgesloten'}</p>}
+            {selected.paybackIndicative && <p className="mt-2 text-xs text-amber-700">Terugverdientijd is indicatief.</p>}
+          </div>
+        ) : <p className="mt-3 text-sm text-slate-600">Geen batterijscenario&apos;s beschikbaar.</p>}
+      </section>
+      <div className="wx-card min-w-0">
         <h3 className="wx-title">{comparisonTitle}</h3>
-        <div className="h-64">
+        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Grafiek vergelijking batterijopties">
+        <div className="h-64" style={{ minWidth: Math.max(360, displayScenarios.length * 85) }}>
           <ResponsiveContainer>
             <ComposedChart data={displayScenarios}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -99,23 +132,14 @@ export function ScenarioCharts({
             </ComposedChart>
           </ResponsiveContainer>
         </div>
+        </div>
       </div>
 
-      <div className="wx-card">
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="wx-title !mb-0">Dimensioneringsopbouw (kWh)</h3>
-          <select
-            value={selectedScenarioCapacity}
-            onChange={(event) => onSelectScenario(Number(event.target.value))}
-            className="wx-input !mt-0 !w-auto !py-1 text-sm"
-          >
-            {displayScenarios.map((scenario) => (
-              <option key={scenario.capacityKwh} value={scenario.capacityKwh}>
-                {scenario.optionLabel}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="wx-card min-w-0">
+        <h3 className="wx-title">Dimensioneringsopbouw algemeen advies (kWh)</h3>
+        <p className="mb-2 text-xs text-slate-600">
+          Deze opbouw hoort bij het algemene batterijadvies en blijft gelijk bij selectie van een andere capaciteit.
+        </p>
         <div className="h-56">
           <ResponsiveContainer>
             <ComposedChart data={sizingBreakdownData}>
@@ -127,11 +151,6 @@ export function ScenarioCharts({
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-        {selected && (
-          <p className="mt-2 text-xs text-slate-600">
-            Geselecteerde scenario-optie voor vergelijking: <span className="font-medium">{selected.optionLabel}</span>
-          </p>
-        )}
         <div className="mt-2 grid gap-1 text-xs text-slate-600 md:grid-cols-2">
           <div>
             {analysisType === 'PV_SELF_CONSUMPTION'

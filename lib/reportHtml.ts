@@ -1,4 +1,5 @@
 import { pvReportStyles } from './reportStyles';
+import { BATTERY_ADVICE_OPTIONS_KWH, batteryBrochureKey } from './batteryAdviceOptions';
 import type { PdfPayload } from './pdf';
 import { generateAnnualBillReportHtml } from './annualBillReportHtml';
 import { logAnnualBill, annualBillErrorDetails } from '../src/lib/annual-bill/logging';
@@ -73,7 +74,7 @@ function getEmbeddedLogoSrc(): string | null {
 function getProductBrochureKey(product: PdfPayload['sizing']['recommendedProduct']): string | null {
   if (!product) return null;
 
-  const brochureKeys = [64, 96, 232, 261, 2090, 5015];
+  const brochureKeys = BATTERY_ADVICE_OPTIONS_KWH;
   const modularKeys = [64, 96, 232, 261];
 
   const unitCapacity = product.unitCapacityKwh == null ? null : Math.round(product.unitCapacityKwh);
@@ -87,14 +88,16 @@ function getProductBrochureKey(product: PdfPayload['sizing']['recommendedProduct
     return String(breakdownCapacity);
   }
 
-  const labelMatch = product.label.match(/(?:^|\D)(64|96|232|261|2090|5015)\s*kWh/i);
+  if (brochureKeys.includes(product.capacityKwh)) return batteryBrochureKey(product.capacityKwh);
+
+  const labelMatch = product.label.match(new RegExp(`(?:^|[^\\d.,])(${brochureKeys.map((key) => String(key).replace('.', '\\.')).join('|')})\\s*kWh`, 'i'));
   if (labelMatch) {
-    return labelMatch[1];
+    return batteryBrochureKey(Number(labelMatch[1]));
   }
 
   const capacity = Math.round(product.capacityKwh);
   if (brochureKeys.includes(capacity)) {
-    return String(capacity);
+    return batteryBrochureKey(capacity);
   }
 
   if (Number.isFinite(product.capacityKwh) && product.capacityKwh > 0) return String(product.capacityKwh);

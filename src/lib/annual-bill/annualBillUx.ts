@@ -97,6 +97,14 @@ export function annualBillConfidenceLabel(input: AnnualBillInput): AnnualBillCon
 
 export function annualBillMissingDetails(input: AnnualBillInput): string[] {
   const missing: string[] = [];
+  if (input.contractType === 'dynamic') {
+    if (input.dynamicImportMarkupEurPerKwh == null) missing.push('inkoopopslag');
+    if (input.dynamicExportDeductionEurPerKwh == null) missing.push('terugleverinhouding');
+    if (input.energyTaxEurPerKwh == null) missing.push('energiebelasting');
+    if (input.electricityVatPercent == null) missing.push('btw');
+    if (input.batteryInvestmentEur == null) missing.push('batterij-investering');
+    return missing;
+  }
   if (!input.periodStart || !input.periodEnd) missing.push('periode');
   if (!isUsableAnnualTariff(input.normalTariffEurPerKwh) && !isUsableAnnualTariff(input.offPeakTariffEurPerKwh)) missing.push('stroomprijs');
   if (!isUsableAnnualTariff(input.feedInTariffEurPerKwh)) missing.push('terugleververgoeding');

@@ -4,11 +4,12 @@ import { isUsableAnnualTariff, tariffFields, MAX_ABS_ANNUAL_TARIFF, annualBillPr
 
 export function validateAnnualBillExtract(input: AnnualBillInput): AnnualBillValidationIssue[] {
   const issues: AnnualBillValidationIssue[] = [];
+  if (!input.contractType || input.contractType === 'unknown') issues.push({ field: 'contractType', severity: 'warning', message: 'Elektriciteitscontract niet eenduidig herkend; controleer vast, variabel of dynamisch.' });
   for (const field of tariffFields) {
     if (input[field] != null && !isUsableAnnualTariff(input[field])) issues.push({ field, severity: 'warning', message: `Tarief ${input[field]} EUR/kWh valt buiten het controlebereik (-${MAX_ABS_ANNUAL_TARIFF} tot ${MAX_ABS_ANNUAL_TARIFF}); controleer eenheid en bedrag. Dit tarief wordt niet gebruikt.` });
   }
-  if (!isUsableAnnualTariff(input.normalTariffEurPerKwh) && !isUsableAnnualTariff(input.offPeakTariffEurPerKwh)) issues.push({ field: 'normalTariffEurPerKwh', severity: 'warning', message: 'Geen bruikbaar afnametarief gevonden; de berekening gebruikt expliciet een schatting van EUR 0,30/kWh.' });
-  for (const message of annualBillPriceWarnings(input)) issues.push({ field: 'normalTariffEurPerKwh', severity: 'warning', message });
+  if (input.contractType !== 'dynamic' && !isUsableAnnualTariff(input.normalTariffEurPerKwh) && !isUsableAnnualTariff(input.offPeakTariffEurPerKwh)) issues.push({ field: 'normalTariffEurPerKwh', severity: 'warning', message: 'Geen bruikbaar afnametarief gevonden; de berekening gebruikt expliciet een schatting van EUR 0,30/kWh.' });
+  for (const message of input.contractType === 'dynamic' ? [] : annualBillPriceWarnings(input)) issues.push({ field: 'normalTariffEurPerKwh', severity: 'warning', message });
   const usage = (input.totalUsageKwh ?? 0) || (input.usageNormalKwh ?? 0) + (input.usageOffPeakKwh ?? 0);
   const feedIn = (input.totalFeedInKwh ?? 0) || (input.feedInNormalKwh ?? 0) + (input.feedInOffPeakKwh ?? 0);
 

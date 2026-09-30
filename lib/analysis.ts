@@ -18,6 +18,10 @@ export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
 export type PvInputMode = 'intervalData' | 'annualBill' | 'manualAnnualBill';
 
 export type AnnualBillInput = {
+  contractType?: 'fixed' | 'variable' | 'dynamic' | 'unknown';
+  dynamicImportMarkupEurPerKwh?: number;
+  dynamicExportDeductionEurPerKwh?: number;
+  consumptionProfile?: 'home' | 'business';
   tariffBasis?: 'supply_only' | 'all_in';
   electricityVatPercent?: number;
   electricityVatEur?: number;
@@ -48,6 +52,8 @@ export type AnnualBillInput = {
   energyTaxElectricityEur?: number;
   gridCostElectricityEur?: number;
   batteryInvestmentEur?: number;
+  batteryInvestmentCapacityKwh?: number;
+  batteryInvestmentsEurByKwh?: Record<string, number>;
   solarPanelCount?: number;
   solarPanelWp?: number;
   roofOrientation?: 'south' | 'east_west' | 'east' | 'west' | 'other';

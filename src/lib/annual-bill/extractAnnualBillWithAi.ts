@@ -7,6 +7,9 @@ const DEFAULT_MODEL = 'gpt-4.1-mini';
 const MAX_TEXT_CHARS = 60000;
 
 const AI_FIELDS = [
+  'contractType',
+  'dynamicImportMarkupEurPerKwh',
+  'dynamicExportDeductionEurPerKwh',
   'supplierName',
   'invoiceDate',
   'periodStart',
@@ -38,6 +41,8 @@ const AI_FIELDS = [
 ] as const satisfies readonly AnnualBillField[];
 
 const NUMERIC_AI_FIELDS = new Set<AnnualBillField>([
+  'dynamicImportMarkupEurPerKwh',
+  'dynamicExportDeductionEurPerKwh',
   'usageNormalKwh',
   'usageOffPeakKwh',
   'feedInNormalKwh',
@@ -117,6 +122,7 @@ function parseNumber(value: string | number, decimalDot: boolean): number | null
 }
 
 function coerceValue(field: AnnualBillField, value: string | number): string | number | null {
+  if (field === 'contractType') return ['fixed', 'variable', 'dynamic', 'unknown'].includes(String(value)) ? value : null;
   if (field === 'supplyTariffVat' || field === 'energyTaxVat') return value === 'included' || value === 'excluded' ? value : null;
   if (field === 'tariffBasis') return value === 'supply_only' || value === 'all_in' ? value : null;
   if (!NUMERIC_AI_FIELDS.has(field)) return typeof value === 'string' ? value.trim() : value;
@@ -220,7 +226,7 @@ export async function extractAnnualBillWithAi(text: string, traceId?: string): P
         {
           role: 'system',
           content:
-            'Je analyseert Nederlandse energie-jaarnotas. Extraheer alleen waarden die in de tekst staan of duidelijk berekend kunnen worden. Geef per bewering een kort letterlijk bronfragment. Verzin geen ontbrekende waarden. Lees energiebelasting op STROOM per periode en schijf: energyTaxElectricityEur is de som van positieve stroombelastingregels, zonder gasbelasting, vermindering energiebelasting of netbeheer. energyTaxWeightKwh is de bijbehorende belaste kWh; energyTaxEurPerKwh is de som gedeeld door die kWh. Bewaar leveringstarieven zoals gedrukt: tel btw of energiebelasting niet zelf bij normalTariffEurPerKwh/offPeakTariffEurPerKwh op. Geef electricityVatPercent alleen als vermeld. Geef supplyTariffVat en energyTaxVat als included of excluded wanneer onderbouwd. Geef tariffBasis=supply_only bij losse leveringscomponenten, all_in uitsluitend als het tarief expliciet inclusief btw EN energiebelasting is. Een gecombineerd btw-totaal van stroom en gas is geen electricityVatEur. Onbekende belastingstatus of ontbrekende bedragen weglaten, nooit het huidige wettelijke tarief invullen.'
+            'Je analyseert Nederlandse energie-jaarnotas. Bepaal contractType uitsluitend voor ELEKTRICITEIT: dynamic, fixed, variable of unknown. Gebruik expliciet contractbewijs, nooit alleen de leveranciernaam, reclame, gascontract of vaste leveringskosten. Bij tegenstrijdige typen of wisseling tijdens het jaar: unknown en requiresReview. dynamicImportMarkupEurPerKwh en dynamicExportDeductionEurPerKwh zijn uitsluitend expliciet genoemde leveranciersopslagen per kWh EXCLUSIEF btw; het leveringstarief of de gemiddelde beursprijs is geen opslag. Laat een opslag weg als de btw-basis niet vastgesteld kan worden. Extraheer alleen waarden die in de tekst staan of duidelijk berekend kunnen worden. Geef per bewering een kort letterlijk bronfragment. Verzin geen ontbrekende waarden. Lees energiebelasting op STROOM per periode en schijf: energyTaxElectricityEur is de som van positieve stroombelastingregels, zonder gasbelasting, vermindering energiebelasting of netbeheer. energyTaxWeightKwh is de bijbehorende belaste kWh; energyTaxEurPerKwh is de som gedeeld door die kWh. Bewaar leveringstarieven zoals gedrukt: tel btw of energiebelasting niet zelf bij normalTariffEurPerKwh/offPeakTariffEurPerKwh op. Geef electricityVatPercent alleen als vermeld. Geef supplyTariffVat en energyTaxVat als included of excluded wanneer onderbouwd. Geef tariffBasis=supply_only bij losse leveringscomponenten, all_in uitsluitend als het tarief expliciet inclusief btw EN energiebelasting is. Een gecombineerd btw-totaal van stroom en gas is geen electricityVatEur. Onbekende belastingstatus of ontbrekende bedragen weglaten, nooit het huidige wettelijke tarief invullen.'
         },
         {
           role: 'user',

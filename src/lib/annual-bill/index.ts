@@ -43,6 +43,11 @@ function mergeRawExtracts(rulesRaw: AnnualBillRawExtract, aiRaw: AnnualBillRawEx
       return;
     }
 
+    if (field === 'contractType' && valuesConflict(rulesValue.value, aiValue.value)) {
+      raw.contractType = { ...rulesValue, value: 'unknown', requiresReview: true };
+      issues.push({ field: 'contractType', severity: 'warning', message: 'Contracttype is niet eenduidig; kies het elektriciteitscontract handmatig.' });
+      return;
+    }
     if (valuesConflict(rulesValue.value, aiValue.value)) {
       issues.push({
         field: typedField,
@@ -73,7 +78,7 @@ export async function extractAnnualBillFromPdf(buffer: Buffer, traceId = crypto.
   logAnnualBill('pdf.text.started', traceId, { bytes: buffer.byteLength });
   let text: string;
   try {
-    text = await extractPdfText(buffer);
+    text = await extractPdfText(buffer, traceId);
   } catch (error) {
     logAnnualBill('pdf.text.failed', traceId, annualBillErrorDetails(error), 'error');
     throw error;

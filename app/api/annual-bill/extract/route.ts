@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { extractAnnualBillFromPdf } from '@/src/lib/annual-bill';
 import { logAnnualBill, annualBillErrorDetails } from '@/src/lib/annual-bill/logging';
 
 export const runtime = 'nodejs';
@@ -41,6 +40,8 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     logAnnualBill('upload.validated', traceId, { bytes: buffer.byteLength });
 
+    // Load the extraction pipeline inside the handler so module-load failures return JSON too.
+    const { extractAnnualBillFromPdf } = await import('@/src/lib/annual-bill');
     const result = await extractAnnualBillFromPdf(buffer, traceId);
     logAnnualBill('upload.completed', traceId, {
       durationMs: Math.round(performance.now() - startedAt),

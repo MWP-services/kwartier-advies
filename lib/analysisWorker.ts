@@ -1,6 +1,7 @@
 import type { AnalysisResult } from './analysis';
 import type { AnalysisJobProgress, AnalysisJobRecord, PersistedAnalyzeInput } from './analysisJobTypes';
 import { buildAnnualBillIndicativeAnalysis } from './annualBillAdvice';
+import { fetchRecentMarketYear } from '../src/lib/annual-bill/recentDynamicPrices';
 import { getAnalysisJobStore } from './analysisJobStore';
 import { compactAnalysisResult } from './analysisResultSerialization';
 import { logAnnualBill, annualBillErrorDetails } from '../src/lib/annual-bill/logging';
@@ -102,7 +103,12 @@ async function executeAnalysisJob(job: AnalysisJobRecord): Promise<AnalysisResul
           throw new Error('Vul eerst de jaarnota-gegevens in.');
         }
 
-        const annualResult = buildAnnualBillIndicativeAnalysis(input.annualBillInput, input.settings);
+        if (input.annualBillInput.contractType === 'dynamic') {
+          await reportProgress({ progress: 25, currentStep: 'Laatste 365 dagen dynamische uurprijzen ophalen' });
+        }
+        const marketYear = input.annualBillInput.contractType === 'dynamic' ? await fetchRecentMarketYear() : undefined;
+        await reportProgress({ progress: 55, currentStep: 'Verbruik en batterijopties doorrekenen' });
+        const annualResult = buildAnnualBillIndicativeAnalysis(input.annualBillInput, input.settings, marketYear);
         if (!annualResult) {
           throw new Error('Voor indicatief jaarnota-advies zijn minimaal totaal verbruik en totale teruglevering nodig.');
         }

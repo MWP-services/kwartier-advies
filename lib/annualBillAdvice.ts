@@ -1,5 +1,7 @@
 import type { AnalysisResult, AnalysisSettings, AnnualBillInput } from './analysis';
 import type { IntervalRecord } from './calculations';
+import type { MarketYear } from '../src/lib/annual-bill/recentDynamicPrices';
+import { prepareDynamicAnnualContext } from '../src/lib/annual-bill/simulateDynamicAnnualBill';
 import { runAnalysis } from './clientAnalysis';
 import { calculateAnnualBillAdvice, type AnnualBillAdviceInput } from '../src/lib/annual-bill/calculateAnnualBillAdvice';
 import { logAnnualBill, annualBillLogValues } from '../src/lib/annual-bill/logging';
@@ -105,6 +107,8 @@ function toAnnualBillAdviceInput(input: AnnualBillInput, settings: AnalysisSetti
     averageImportPriceEurPerKwh: weightedImportPrice(input),
     averageFeedInPriceEurPerKwh: input.feedInTariffEurPerKwh,
     batteryInvestmentEur: input.batteryInvestmentEur,
+    batteryInvestmentCapacityKwh: input.batteryInvestmentCapacityKwh,
+    batteryInvestmentsEurByKwh: input.batteryInvestmentsEurByKwh,
     emergencyPowerEnabled: settings.emergencyPowerEnabled,
     emergencyPowerReservePercent: settings.emergencyPowerReservePercent,
     solarPanelCount: input.solarPanelCount,
@@ -115,8 +119,14 @@ function toAnnualBillAdviceInput(input: AnnualBillInput, settings: AnalysisSetti
 
 export function buildAnnualBillIndicativeAnalysis(
   input: AnnualBillInput,
-  settings: AnalysisSettings
+  settings: AnalysisSettings,
+  marketYear?: MarketYear
 ): AnalysisResult | null {
+  if (input.contractType === 'dynamic' && !marketYear) throw new Error('Voor een dynamisch contract is een volledig jaar actuele marktprijzen nodig.');
+  if (input.contractType === 'dynamic' && (
+    (input.totalUsageKwh == null && input.usageNormalKwh == null && input.usageOffPeakKwh == null) ||
+    (input.totalFeedInKwh == null && input.feedInNormalKwh == null && input.feedInOffPeakKwh == null)
+  )) throw new Error('Vul voor de dynamische simulatie zowel netafname als teruglevering in. Geen teruglevering? Vul 0 in.');
   const startedAt = performance.now();
   logAnnualBill('calculation.started', input.traceId, { inputMode: settings.pvInputMode, values: annualBillLogValues(input) });
   const missingFields = getMissingFields(input);
@@ -134,7 +144,7 @@ export function buildAnnualBillIndicativeAnalysis(
       completedInput[field] = undefined;
     }
   }
-  tariffWarnings.push(...annualBillPriceWarnings(completedInput));
+  if (input.contractType !== 'dynamic') tariffWarnings.push(...annualBillPriceWarnings(completedInput));
   const completedMissingFields = [...new Set([...(completedInput.missingFields ?? []), ...missingFields])];
   logAnnualBill('calculation.inputs_resolved', input.traceId, {
     original: annualBillLogValues(input), resolved: annualBillLogValues(completedInput),
@@ -145,8 +155,7 @@ export function buildAnnualBillIndicativeAnalysis(
     importPrice: weightedImportPrice(completedInput) ?? 0.3,
     feedInPrice: completedInput.feedInTariffEurPerKwh ?? 0.06,
     importPriceFallback: weightedImportPrice(completedInput) == null,
-    feedInPriceFallback: completedInput.feedInTariffEurPerKwh == null,
-    investmentEstimated: !completedInput.batteryInvestmentEur
+    feedInPriceFallback: completedInput.feedInTariffEurPerKwh == null
   });
   const rows = buildSyntheticPvRows(completedInput);
   logAnnualBill('calculation.synthetic_profile', input.traceId, { rowCount: rows.length, sampleDays: SYNTHETIC_PROFILE_DAYS, measuredQuarterData: false, purpose: 'compatibility_analysis_not_annual_recommendation' });
@@ -161,7 +170,10 @@ export function buildAnnualBillIndicativeAnalysis(
     return null;
   }
 
-  const annualBillAdvice = calculateAnnualBillAdvice(toAnnualBillAdviceInput(completedInput, settings));
+  const dynamicContext = input.contractType === 'dynamic' && marketYear
+    ? prepareDynamicAnnualContext(completedInput, marketYear, resolveTotalUsageKwh(completedInput), resolveTotalFeedInKwh(completedInput)) : undefined;
+  const annualBillAdvice = calculateAnnualBillAdvice({ ...toAnnualBillAdviceInput(completedInput, settings), dynamicContext });
+  if (!input.contractType || input.contractType === 'unknown') annualBillAdvice.warnings.push('Contracttype onbekend: gerekend met gemiddelde notatarieven. Kies dynamisch als dit bij uw contract hoort.');
   annualBillAdvice.warnings.push(...tariffWarnings);
   const annualWarnings = [...new Set([
     ...annualBillAdvice.warnings,
@@ -172,6 +184,7 @@ export function buildAnnualBillIndicativeAnalysis(
     annualSavingsRangeEur: annualBillAdvice.annualSavingsRangeEur,
     paybackRangeYears: annualBillAdvice.paybackRangeYears,
     confidence: annualBillAdvice.confidence,
+    investmentEstimated: annualBillAdvice.options.some((option) => option.investmentSource === 'estimated'),
     options: annualBillAdvice.options.map(({ batteryKwh, estimatedAnnualStoredSolarKwh, estimatedAnnualSavingsEur, estimatedPaybackYears, utilizationScore }) => ({ batteryKwh, estimatedAnnualStoredSolarKwh, estimatedAnnualSavingsEur, estimatedPaybackYears, utilizationScore })),
     warningCount: annualBillAdvice.warnings.length,
     durationMs: Math.round(performance.now() - startedAt)

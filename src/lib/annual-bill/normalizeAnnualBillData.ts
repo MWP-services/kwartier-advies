@@ -37,6 +37,9 @@ export function normalizeAnnualBillData(raw: AnnualBillRawExtract, traceId?: str
   );
 
   const input: AnnualBillInput = {
+    contractType: ['fixed', 'variable', 'dynamic', 'unknown'].includes(String(raw.contractType?.value)) ? raw.contractType!.value as AnnualBillInput['contractType'] : 'unknown',
+    dynamicImportMarkupEurPerKwh: numeric(raw, 'dynamicImportMarkupEurPerKwh'),
+    dynamicExportDeductionEurPerKwh: numeric(raw, 'dynamicExportDeductionEurPerKwh'),
     tariffBasis: raw.tariffBasis?.value === 'supply_only' || raw.tariffBasis?.value === 'all_in' ? raw.tariffBasis.value : undefined,
     electricityVatPercent: numeric(raw, 'electricityVatPercent'),
     electricityVatEur: numeric(raw, 'electricityVatEur'),

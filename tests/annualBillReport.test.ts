@@ -3,6 +3,8 @@ import { defaultAnalysisSettings } from '../lib/analysis';
 import { buildAnnualBillIndicativeAnalysis } from '../lib/annualBillAdvice';
 import { generateInteractiveReportHtml } from '../lib/reportHtml';
 import type { PdfPayload } from '../lib/pdf';
+import { readFileSync } from 'node:fs';
+import { STACK_BATTERY_OPTIONS_KWH, batteryBrochureKey } from '../lib/batteryAdviceOptions';
 
 function payload(capacity?: number): PdfPayload {
   const result = buildAnnualBillIndicativeAnalysis({ totalUsageKwh: 4200, totalFeedInKwh: 1800, supplierName: '<script>alert(1)</script>', source: 'manual' }, { ...defaultAnalysisSettings, analysisType: 'PV_SELF_CONSUMPTION', pvInputMode: 'manualAnnualBill' })!;
@@ -15,13 +17,25 @@ function payload(capacity?: number): PdfPayload {
 }
 
 describe('annual bill report', () => {
+  it.each(STACK_BATTERY_OPTIONS_KWH)('embeds the shared brochure without rounding %s kWh', (capacity) => {
+    const html = generateInteractiveReportHtml(payload(capacity));
+    expect(html).toContain('WattsNext-brochure-2.5_22.5.pdf');
+    expect(html).toContain(`${capacity.toLocaleString('nl-NL')} kWh`);
+    expect(html).toContain(readFileSync('public/assets/2.5_22.5.pdf').toString('base64'));
+  });
+  it.each([30, 40, 64, 96, 232, 261, 2090, 5015])('attaches the matching brochure for %i kWh', (capacity) => {
+    const html = generateInteractiveReportHtml(payload(capacity));
+    expect(html).toContain(`WattsNext-brochure-${capacity}.pdf`);
+    expect(html).toContain('data:application/pdf;base64,');
+  });
+
   it('uses annual totals and recommendation, embeds matching brochure, escapes user text and renders offline charts', () => {
     const input = payload();
     const html = generateInteractiveReportHtml(input);
     expect(html).toContain('Batterijadvies op basis van jaarnota');
     expect(html).toContain('4.200');
-    expect(html).toContain(`${input.annualBill!.advice.recommendedBatteryKwh} kWh`);
-    expect(html).toContain(`WattsNext-brochure-${input.annualBill!.advice.recommendedBatteryKwh}.pdf`);
+    expect(html).toContain(`${input.annualBill!.advice.recommendedBatteryKwh!.toLocaleString('nl-NL')} kWh`);
+    expect(html).toContain(`WattsNext-brochure-${batteryBrochureKey(input.annualBill!.advice.recommendedBatteryKwh!)}.pdf`);
     expect(html).toContain('data:application/pdf;base64,');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('<script>alert(1)</script>');
