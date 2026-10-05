@@ -36,7 +36,10 @@ export type AnnualBillBatteryOptionResult = {
   batteryKwh: number;
   usableCapacityKwh: number;
   estimatedAnnualStoredSolarKwh: number;
+  /** Fraction 0..1 of the maximum modeled annual solar shift across the compared options. */
+  percentOfMaximumSavings: number;
   estimatedAnnualSavingsEur: number;
+  /** Informational financial fields, retained for compatibility; never used for selection. */
   estimatedInvestmentEur: number;
   investmentSource: 'quoted' | 'estimated';
   estimatedPaybackYears: number | null;
@@ -73,6 +76,24 @@ export type AnnualBillAdviceResult = {
 const ROUND_TRIP_EFFICIENCY = 0.95;
 const DAYS_PER_YEAR = 365;
 const MINIMUM_SOC_FRACTION = 0.1;
+const ANNUAL_ENERGY_SAVINGS_TARGET = 0.90;
+
+/** Compare energy results only. Prices, costs and payback are deliberately not selection inputs. */
+export function selectAnnualBillBatteryByEnergy<T extends Pick<AnnualBillBatteryOptionResult, 'batteryKwh' | 'estimatedAnnualStoredSolarKwh'>>(
+  options: readonly T[]
+) {
+  const maxAnnualSavingsKwh = options.reduce((max, option) =>
+    Number.isFinite(option.estimatedAnnualStoredSolarKwh) ? Math.max(max, option.estimatedAnnualStoredSolarKwh) : max, 0);
+  const compared = [...options].sort((a, b) => a.batteryKwh - b.batteryKwh).map((option) => ({
+    ...option,
+    percentOfMaximumSavings: maxAnnualSavingsKwh > 0 && Number.isFinite(option.estimatedAnnualStoredSolarKwh)
+      ? Math.max(0, option.estimatedAnnualStoredSolarKwh) / maxAnnualSavingsKwh : 0
+  }));
+  const recommended = maxAnnualSavingsKwh > 0
+    ? compared.find((option) => option.percentOfMaximumSavings >= ANNUAL_ENERGY_SAVINGS_TARGET) ?? null
+    : null;
+  return { options: compared, maxAnnualSavingsKwh, recommended };
+}
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
@@ -116,7 +137,7 @@ function resolveBatteryInvestment(optionKwh: number, input: AnnualBillAdviceInpu
   if (positiveFinite(input.batteryInvestmentEur) && quoteApplies) {
     return { estimatedInvestmentEur: input.batteryInvestmentEur, investmentSource: 'quoted' as const };
   }
-  // Existing indicative cost model, not supplier quotations or verified market prices.
+  // Legacy financial estimate only; not supplier quotations and never a sizing/selection input.
   const eurPerKwh = optionKwh <= 20 ? 900 : optionKwh <= 40 ? 775 : 625;
   return { estimatedInvestmentEur: optionKwh * eurPerKwh, investmentSource: 'estimated' as const };
 }
@@ -187,7 +208,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
     warnings.push('Een of meer investeringen per optie zijn ongeldig. Deze bedragen worden niet gebruikt; per capaciteit geldt een geldige gekoppelde offerte of de indicatieve prijsraming.');
   }
 
-  const options = batteryOptions.map<AnnualBillBatteryOptionResult>((batteryKwh) => {
+  const simulatedOptions = batteryOptions.map<Omit<AnnualBillBatteryOptionResult, 'percentOfMaximumSavings'>>((batteryKwh) => {
     const investment = resolveBatteryInvestment(batteryKwh, input, batteryOptions.length);
     const usableCapacityKwh = batteryKwh * usableFraction;
     const dynamicSimulation = input.dynamicContext ? simulateDynamicBattery(input.dynamicContext.hours, batteryKwh, usableFraction, ROUND_TRIP_EFFICIENCY) : undefined;
@@ -217,25 +238,19 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
     };
   });
 
+  const { options, maxAnnualSavingsKwh, recommended } = selectAnnualBillBatteryByEnergy(simulatedOptions);
   const hasEstimatedInvestments = options.some((option) => option.investmentSource === 'estimated');
-  if (hasEstimatedInvestments) warnings.push('Investeringskosten zijn geheel of gedeeltelijk geschat met de bestaande prijsraming: t/m 20 kWh EUR 900/kWh, boven 20 t/m 40 kWh EUR 775/kWh, boven 40 kWh EUR 625/kWh. Dit zijn geen geverifieerde offertes; de prijsstaffels kunnen de rangschikking beïnvloeden. Controleer complete installatieprijzen per capaciteit op dezelfde btw- en kostenbasis.');
-  if (!input.dynamicContext) warnings.push('De selectie vergelijkt jaarlijkse besparing per geïnvesteerde euro (kortste eenvoudige terugverdientijd). Zonder onderbouwde levensduur is dit geen uitspraak over rendabiliteit. Onderhoud, degradatie, financiering en toekomstige tariefwijzigingen zijn niet doorgerekend. Het verbruiksprofiel is geschat uit jaarvolumes; de besparingsband van -25% tot +25% is een modelaanname, geen statistisch betrouwbaarheidsinterval.');
+  if (hasEstimatedInvestments) warnings.push('Uitsluitend voor de informatieve terugverdientijd zijn investeringskosten geheel of gedeeltelijk geschat: t/m 20 kWh EUR 900/kWh, boven 20 t/m 40 kWh EUR 775/kWh, boven 40 kWh EUR 625/kWh. Dit zijn geen geverifieerde offertes. Investeringen, prijsstaffels en terugverdientijden hebben geen invloed op de aanbevolen capaciteit.');
+  warnings.push('De batterijselectie gebruikt de verschoven zonnestroom in kWh, niet de eurobesparing. Dit is geen uitspraak over rendabiliteit. Onderhoud, degradatie, financiering en toekomstige tariefwijzigingen zijn niet doorgerekend. Het verbruiksprofiel is geschat uit jaarvolumes; de financiële besparingsband van -25% tot +25% is een modelaanname, geen statistisch betrouwbaarheidsinterval.');
   const confidence = !input.dynamicContext && hasEstimatedInvestments ? 'low' : baseConfidence;
 
-  const ranked =
-    options
-      .filter((option) => option.estimatedAnnualSavingsEur > 0)
-      .map((option) => ({ option, annualSavingsPerInvestedEuro: option.estimatedAnnualSavingsEur / option.estimatedInvestmentEur }))
-      .sort((a, b) => input.dynamicContext
-        ? (a.option.estimatedPaybackYears ?? Infinity) - (b.option.estimatedPaybackYears ?? Infinity) || a.option.batteryKwh - b.option.batteryKwh
-        : b.annualSavingsPerInvestedEuro - a.annualSavingsPerInvestedEuro || a.option.batteryKwh - b.option.batteryKwh);
-  const recommended = ranked[0]?.option ?? null;
-  if (!input.dynamicContext && !recommended) warnings.push('Geen batterij aanbevolen: geen positieve jaarlijkse besparing bij deze volumes en tarieven.');
+  if (!recommended) warnings.push('Geen batterij aanbevolen: geen positieve jaarlijkse verschuiving van zonnestroom berekend. Eventuele eurobesparing door energiehandel is geen selectiecriterium.');
   logAnnualBill('calculation.ranking', input.traceId, {
     assumptions: { usableFraction, minimumSocFraction: MINIMUM_SOC_FRACTION, roundTripEfficiency: ROUND_TRIP_EFFICIENCY, emergencyPowerReservePercent: input.emergencyPowerEnabled ? input.emergencyPowerReservePercent ?? 0 : 0, eveningDemandFraction: 0.45, maxCycles: input.dynamicContext ? null : 230, daysPerYear: DAYS_PER_YEAR },
-    valuePerStoredKwh,
-    rankingMethod: 'simple_payback',
-    ranking: ranked.map(({ option, annualSavingsPerInvestedEuro }) => ({ batteryKwh: option.batteryKwh, annualSavingsPerInvestedEuro, estimatedInvestmentEur: option.estimatedInvestmentEur, investmentSource: option.investmentSource })),
+    rankingMethod: 'smallest_capacity_at_90_percent_energy',
+    maxAnnualSavingsKwh,
+    targetSavingsFraction: ANNUAL_ENERGY_SAVINGS_TARGET,
+    ranking: options.map(({ batteryKwh, estimatedAnnualStoredSolarKwh, percentOfMaximumSavings }) => ({ batteryKwh, estimatedAnnualStoredSolarKwh, percentOfMaximumSavings })),
     recommendedBatteryKwh: recommended?.batteryKwh ?? null
   });
 
@@ -261,9 +276,10 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
     efficiencyPercent: ROUND_TRIP_EFFICIENCY * 100,
     emergencyPowerReservePercent: input.emergencyPowerEnabled ? Math.max(0, Math.min(80, input.emergencyPowerReservePercent ?? 0)) : 0,
     warnings,
-    explanation: input.dynamicContext
+    explanation: 'Dit is een indicatief batterijadvies op basis van jaarnota-totalen. De aanbevolen batterij is de kleinste beschikbare batterij die minimaal 90% van de maximaal haalbare jaarlijkse energiebesparing realiseert, gemeten als extra eigen gebruik van zonnestroom binnen de doorgerekende opties. Een grotere batterij levert volgens het model relatief weinig extra jaarlijkse energiebesparing op. Prijzen, investeringen en terugverdientijden bepalen de keuze niet. '
+      + (input.dynamicContext
       ? 'Dynamisch contract: de jaarvolumes zijn verdeeld over een geschat uurprofiel. De laatste 365 volledige dagen marktprijzen bepalen de stroomkosten met en zonder batterij, inclusief verschoven zonnestroom, laden uit het net en batterijverlies. De besparing is het verschil tussen die kosten; vermeden afname telt eenmaal mee. Dit blijft een indicatie, geen gemeten verbruiksprofiel.'
       :
-      'Dit is een indicatief batterijadvies op basis van jaarnota-totalen. De voorkeursoptie heeft de hoogste geschatte jaarlijkse besparing per geïnvesteerde euro, niet automatisch de hoogste benutting. Zonder kwartierprofiel schat de app hoeveel jaarlijkse teruglevering praktisch naar avond/nachtverbruik kan worden verschoven. De kortste eenvoudige terugverdientijd bewijst niet dat een investering zich binnen de levensduur terugverdient; controleer prijzen per capaciteit en het werkelijke verbruiksprofiel.'
+      'Zonder kwartierprofiel schat de app hoeveel jaarlijkse teruglevering praktisch naar avond/nachtverbruik kan worden verschoven. Dit is geen exacte dimensionering; controleer het werkelijke verbruiksprofiel met kwartierdata.')
   };
 }

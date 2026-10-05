@@ -44,6 +44,21 @@ describe('annual bill report', () => {
     expect(html.match(/<svg /g)).toHaveLength(3);
     expect(html).not.toContain('Formulebasis plus kwartiersimulatie');
     expect(input.annualBill!.input.totalUsageKwh).toBe(4200);
+    expect(html).toContain('minimaal 90%');
+    expect(html).not.toContain('kortste eenvoudige terugverdientijd');
+    expect(html).not.toContain('jaarlijkse besparing per geïnvesteerde euro');
+    const document = new DOMParser().parseFromString(html, 'text/html');
+    expect(document.querySelector('svg[aria-label="Extra eigen zonnestroom per batterijgrootte"]')?.textContent).toContain('kWh/jaar');
+    expect(document.querySelector('.annual-table thead')?.textContent).toContain('Van maximale kWh-besparing');
+    const rows = [...document.querySelectorAll('.annual-table tbody tr')];
+    expect(rows).toHaveLength(input.annualBill!.advice.options.length);
+    input.annualBill!.advice.options.forEach((option, index) => {
+      const cells = rows[index].querySelectorAll('td');
+      expect(cells[0].textContent).toContain(`${option.batteryKwh.toLocaleString('nl-NL')} kWh`);
+      expect(cells[1].textContent).toBe(`${option.estimatedAnnualStoredSolarKwh.toLocaleString('nl-NL', { maximumFractionDigits: 2 })} kWh`);
+      expect(cells[2].textContent).toBe(`${(option.percentOfMaximumSavings * 100).toLocaleString('nl-NL', { maximumFractionDigits: 2 })}%`);
+      expect(rows[index].classList.contains('recommended')).toBe(option.batteryKwh === input.annualBill!.advice.recommendedBatteryKwh);
+    });
   });
 
   it('does not attach another battery brochure when the matching asset is absent', () => {

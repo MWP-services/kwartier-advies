@@ -185,7 +185,7 @@ export function buildAnnualBillIndicativeAnalysis(
     paybackRangeYears: annualBillAdvice.paybackRangeYears,
     confidence: annualBillAdvice.confidence,
     investmentEstimated: annualBillAdvice.options.some((option) => option.investmentSource === 'estimated'),
-    options: annualBillAdvice.options.map(({ batteryKwh, estimatedAnnualStoredSolarKwh, estimatedAnnualSavingsEur, estimatedPaybackYears, utilizationScore }) => ({ batteryKwh, estimatedAnnualStoredSolarKwh, estimatedAnnualSavingsEur, estimatedPaybackYears, utilizationScore })),
+    options: annualBillAdvice.options.map(({ batteryKwh, estimatedAnnualStoredSolarKwh, percentOfMaximumSavings, estimatedAnnualSavingsEur, estimatedPaybackYears, utilizationScore }) => ({ batteryKwh, estimatedAnnualStoredSolarKwh, percentOfMaximumSavings, estimatedAnnualSavingsEur, estimatedPaybackYears, utilizationScore })),
     warningCount: annualBillAdvice.warnings.length,
     durationMs: Math.round(performance.now() - startedAt)
   });

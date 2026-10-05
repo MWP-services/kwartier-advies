@@ -138,7 +138,7 @@ describe('dynamic annual consumption and battery simulation', () => {
     expect(result.annualSavingsRangeEur.expected).toBe(0);
     expect(result.paybackRangeYears.expected).toBeNull();
   });
-  it('preserves dynamic simulation and shortest-payback selection; an unbound quote cannot distort costs', () => {
+  it('preserves dynamic simulation but selects by solar kWh independently of investment', () => {
     const dynamicContext = prepareDynamicAnnualContext(costs, marketYear(), 4200, 1800);
     const input = { totalUsageKwh: 4200, totalFeedInKwh: 1800, batteryOptionsKwh: [5, 10, 15], dynamicContext };
     const result = calculateAnnualBillAdvice(input);
@@ -148,15 +148,25 @@ describe('dynamic annual consumption and battery simulation', () => {
       expect(option.estimatedInvestmentEur).toBe(option.batteryKwh * 900);
       expect(option.estimatedPaybackYears).toBe(Math.round(option.estimatedInvestmentEur / simulated.savingsEur * 100) / 100);
     }
-    const expected = [...result.options].filter(option => option.estimatedAnnualSavingsEur > 0)
-      .sort((a, b) => (a.estimatedPaybackYears ?? Infinity) - (b.estimatedPaybackYears ?? Infinity) || a.batteryKwh - b.batteryKwh)[0];
+    const maxSolar = Math.max(...result.options.map(option => option.estimatedAnnualStoredSolarKwh));
+    const expected = result.options.find(option => option.estimatedAnnualStoredSolarKwh / maxSolar >= 0.9)!;
     expect(result.recommendedBatteryKwh).toBe(expected.batteryKwh);
+    const extremePrices = calculateAnnualBillAdvice({ ...input, batteryInvestmentsEurByKwh: { 5: 0.01, 10: 1e12, 15: 1e15 } });
+    expect(extremePrices.recommendedBatteryKwh).toBe(result.recommendedBatteryKwh);
     const ambiguousQuote = calculateAnnualBillAdvice({ ...input, batteryInvestmentEur: 7000 });
     expect(ambiguousQuote.options).toEqual(result.options);
     expect(ambiguousQuote.recommendedBatteryKwh).toBe(result.recommendedBatteryKwh);
   });
-  it('integrates dynamic results and report provenance, without requiring solar export', () => {
-    const input = { ...costs, contractType: 'dynamic' as const, totalUsageKwh: 4200, totalFeedInKwh: 0 };
+  it('does not recommend a battery for trading profit alone when there is no solar shift', () => {
+    const dynamicContext = prepareDynamicAnnualContext(costs, marketYear(), 4200, 0);
+    const result = calculateAnnualBillAdvice({ totalUsageKwh: 4200, totalFeedInKwh: 0, dynamicContext });
+    expect(result.options.some(option => option.estimatedAnnualSavingsEur > 0)).toBe(true);
+    expect(result.options.every(option => option.percentOfMaximumSavings === 0)).toBe(true);
+    expect(result.recommendedBatteryKwh).toBeNull();
+  });
+
+  it('integrates dynamic results and report provenance using the solar energy selection', () => {
+    const input = { ...costs, contractType: 'dynamic' as const, totalUsageKwh: 4200, totalFeedInKwh: 1800 };
     expect(() => buildAnnualBillIndicativeAnalysis(input, defaultAnalysisSettings)).toThrow('marktprijzen');
     const result = buildAnnualBillIndicativeAnalysis(input, defaultAnalysisSettings, marketYear())!;
     expect(result.annualBillAdvice!.annualSavingsRangeEur.expected).toBeGreaterThan(0);

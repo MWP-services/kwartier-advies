@@ -20,10 +20,14 @@ describe('annual bill PV advice', () => {
     expect(result).not.toBeNull();
     expect(result?.analysisType).toBe('PV_SELF_CONSUMPTION');
     const advice = result!.annualBillAdvice!;
-    const bestReturn = [...advice.options].sort((a, b) => b.estimatedAnnualSavingsEur / b.estimatedInvestmentEur - a.estimatedAnnualSavingsEur / a.estimatedInvestmentEur)[0];
-    expect(advice.recommendedBatteryKwh).toBe(bestReturn.batteryKwh);
+    expect(advice.recommendedBatteryKwh).toBe(20.48);
+    const selected = advice.options.find(option => option.batteryKwh === advice.recommendedBatteryKwh)!;
+    expect(selected.percentOfMaximumSavings).toBeGreaterThanOrEqual(0.9);
+    expect(advice.options.filter(option => option.batteryKwh < selected.batteryKwh).every(option => option.percentOfMaximumSavings < 0.9)).toBe(true);
     expect(result?.sizing.recommendedProduct).not.toBeNull();
     expect(result?.annualBillAdvice?.explanation).toContain('indicatief batterijadvies');
+    expect(result?.annualBillAdvice?.explanation).toContain('minimaal 90%');
+    expect(result?.annualBillAdvice?.explanation).not.toContain('kortste eenvoudige terugverdientijd');
     expect(result?.pvWarnings?.join(' ')).toContain('geen uitspraak over rendabiliteit');
     expect(result?.pvWarnings?.join(' ')).toContain('geen geverifieerde offertes');
     expect(result?.quality.warnings).toEqual([]);

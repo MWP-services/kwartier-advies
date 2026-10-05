@@ -1569,11 +1569,11 @@ export default function HomePage() {
                   <p className="text-lg font-semibold text-slate-900">
                     {annualBillAdvice.recommendedBatteryKwh != null
                       ? `${annualBillAdvice.recommendedBatteryKwh} kWh`
-                      : 'Onvoldoende data'}
+                      : 'Geen batterij aanbevolen'}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500">Jaarlijkse besparing</p>
+                  <p className="text-xs text-slate-500">Jaarlijkse eurobesparing (informatief)</p>
                   <p className="text-lg font-semibold text-slate-900">
                     {formatEuro(annualBillAdvice.annualSavingsRangeEur.expected)}
                   </p>
@@ -1636,8 +1636,9 @@ export default function HomePage() {
                     <thead>
                       <tr className="border-b text-xs text-slate-500">
                         <th className="py-2">Batterij</th>
-                        <th className="py-2">Opgeslagen zonnestroom/jaar</th>
-                        <th className="py-2">Besparing/jaar</th>
+                        <th className="py-2">Extra eigen zon/jaar</th>
+                        <th className="py-2">Van maximale kWh-besparing</th>
+                        <th className="py-2">Eurobesparing/jaar (informatief)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1645,6 +1646,7 @@ export default function HomePage() {
                         <tr key={option.batteryKwh} className="border-b border-slate-100">
                           <td className="py-2">{option.batteryKwh} kWh{option.batteryKwh === annualBillAdvice.recommendedBatteryKwh && <span className="ml-2 rounded bg-lime-100 px-2 py-1 text-xs font-semibold text-lime-900">Aanbevolen</span>}</td>
                           <td className="py-2">{formatKwh(option.estimatedAnnualStoredSolarKwh)}</td>
+                          <td className="py-2">{(option.percentOfMaximumSavings * 100).toLocaleString('nl-NL', { maximumFractionDigits: 2 })}%</td>
                           <td className="py-2">{formatEuro(option.estimatedAnnualSavingsEur)}</td>
                         </tr>
                       ))}
@@ -1659,8 +1661,9 @@ export default function HomePage() {
                       <div className="flex items-center justify-between">
                         <strong>{option.batteryKwh} kWh{option.batteryKwh === annualBillAdvice.recommendedBatteryKwh ? ' ? Aanbevolen' : ''}</strong>
                       </div>
-                      <p className="mt-2 text-slate-600">Opgeslagen zon: {formatKwh(option.estimatedAnnualStoredSolarKwh)}</p>
-                      <p className="text-slate-600">Besparing: {formatEuro(option.estimatedAnnualSavingsEur)} per jaar</p>
+                      <p className="mt-2 text-slate-600">Extra eigen zon: {formatKwh(option.estimatedAnnualStoredSolarKwh)} per jaar</p>
+                      <p className="text-slate-600">Van maximale kWh-besparing: {(option.percentOfMaximumSavings * 100).toLocaleString('nl-NL', { maximumFractionDigits: 2 })}%</p>
+                      <p className="text-slate-600">Eurobesparing (informatief): {formatEuro(option.estimatedAnnualSavingsEur)} per jaar</p>
                     </div>
                   ))}
                 </div>
