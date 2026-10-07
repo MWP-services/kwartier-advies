@@ -1,3 +1,4 @@
+import { annualBillShape } from './buildAnnualBillSyntheticProfile';
 import type { AnnualBillInput } from '../../../lib/analysis';
 import type { MarketYear } from './recentDynamicPrices';
 import { validateMarketYear } from './recentDynamicPrices';
@@ -56,16 +57,8 @@ export function prepareDynamicAnnualContext(input: AnnualBillInput, year: Market
     const parts = Object.fromEntries(localParts.formatToParts(new Date(point.start)).map((part) => [part.type, part.value]));
     const hour = Number(parts.hour);
     const month = Number(parts.month);
-    const winter = 1 + 0.25 * Math.cos((month - 1) * Math.PI / 6);
-    const weekend = ['Sat', 'Sun'].includes(parts.weekday);
-    const loadShape = profile === 'business'
-      ? (hour >= 8 && hour < 18 ? 1.8 : 0.35) * (weekend ? 0.45 : 1)
-      : (hour >= 17 && hour < 23 ? 1.9 : hour >= 6 && hour < 9 ? 1.3 : hour < 6 ? 0.4 : 0.8) * (weekend ? 1.08 : 1);
-    const summer = 1 - 0.7 * Math.cos((month - 1) * Math.PI / 6);
-    const daylight = 12 - 4 * Math.cos((month - 1) * Math.PI / 6);
-    const solarShape = Math.max(0, Math.sin(Math.PI * (hour + 0.5 - (13 - daylight / 2)) / daylight));
-    const inDaylight = Math.abs(hour + 0.5 - 13) < daylight / 2;
-    return { ...point, load: loadShape * winter, solar: inDaylight ? solarShape * summer : 0 };
+    const { load, solar } = annualBillShape(month, hour + 0.5, ['Sat', 'Sun'].includes(parts.weekday), profile);
+    return { ...point, load, solar };
   });
   const loadSum = shaped.reduce((sum, hour) => sum + hour.load, 0);
   const solarSum = shaped.reduce((sum, hour) => sum + hour.solar, 0);

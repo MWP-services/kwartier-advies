@@ -1,5 +1,6 @@
 export interface BatterySpec {
   capacityKwh: number;
+  fallback?: boolean;
   maxChargeKw: number;
   maxDischargeKw: number;
   roundTripEfficiency: number;
@@ -118,6 +119,7 @@ export function getBatterySpecForCapacity(capacityKwh: number): BatterySpec {
   }
 
   return {
+    fallback: true,
     capacityKwh,
     maxChargeKw: capacityKwh / 2,
     maxDischargeKw: capacityKwh / 2,

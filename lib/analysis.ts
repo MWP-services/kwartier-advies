@@ -17,7 +17,7 @@ export type Method = 'MAX_PEAK' | 'P95' | 'FULL_COVERAGE';
 export type AnalysisType = 'PEAK_SHAVING' | 'PV_SELF_CONSUMPTION';
 export type PvInputMode = 'intervalData' | 'annualBill' | 'manualAnnualBill';
 
-export type AnnualBillInput = {
+export type AnnualBillInput = import('../src/lib/annual-bill/energyBasis').EnergyBasisInput & {
   contractType?: 'fixed' | 'variable' | 'dynamic' | 'unknown';
   dynamicImportMarkupEurPerKwh?: number;
   dynamicExportDeductionEurPerKwh?: number;
