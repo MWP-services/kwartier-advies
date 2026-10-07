@@ -48,9 +48,9 @@ describe('electricity tax and VAT', () => {
   });
   it('uses the same tax-inclusive price in advice and report', () => {
     const input = normalizeAnnualBillData(extractAnnualBillData(`Totaal teruglevering 1338 kWh\n${supply}\n${tax}`));
-    const result = buildAnnualBillIndicativeAnalysis(input, { ...defaultAnalysisSettings, analysisType: 'PV_SELF_CONSUMPTION', pvInputMode: 'annualBill' })!;
+    const result = buildAnnualBillIndicativeAnalysis({ ...input, energyTotalsConfirmed: true }, { ...defaultAnalysisSettings, analysisType: 'PV_SELF_CONSUMPTION', pvInputMode: 'annualBill' })!;
     const option = result.annualBillAdvice!.options[0];
-    expect(option.estimatedAnnualSavingsEur).toBeCloseTo(option.estimatedAnnualStoredSolarKwh * (resolveAnnualBillPrices(input).importPrice - 0.06), 1);
+    expect(option.estimatedAnnualSavingsEur).toBeCloseTo(option.annualGridImportReductionKwh! * resolveAnnualBillPrices(input).importPrice - option.annualExportReductionKwh! * 0.06, 1);
     const html = generateAnnualBillReportHtml({ input: result.annualBillInput!, advice: result.annualBillAdvice! }, null, null);
     expect(html).toContain('0,29803');
     expect(html).toContain('Energiebelasting per kWh');

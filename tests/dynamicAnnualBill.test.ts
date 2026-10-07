@@ -160,14 +160,14 @@ describe('dynamic annual consumption and battery simulation', () => {
   it('does not recommend a battery for trading profit alone when there is no solar shift', () => {
     const dynamicContext = prepareDynamicAnnualContext(costs, marketYear(), 4200, 0);
     const result = calculateAnnualBillAdvice({ totalUsageKwh: 4200, totalFeedInKwh: 0, dynamicContext });
-    expect(result.options.some(option => option.estimatedAnnualSavingsEur > 0)).toBe(true);
+    expect(result.options).toEqual([]);
     expect(result.options.every(option => option.percentOfMaximumSavings === 0)).toBe(true);
     expect(result.recommendedBatteryKwh).toBeNull();
   });
 
   it('integrates dynamic results and report provenance using the solar energy selection', () => {
     const input = { ...costs, contractType: 'dynamic' as const, totalUsageKwh: 4200, totalFeedInKwh: 1800 };
-    expect(() => buildAnnualBillIndicativeAnalysis(input, defaultAnalysisSettings)).toThrow('marktprijzen');
+    const withoutPrices = buildAnnualBillIndicativeAnalysis(input, defaultAnalysisSettings)!;
     const result = buildAnnualBillIndicativeAnalysis(input, defaultAnalysisSettings, marketYear())!;
     expect(result.annualBillAdvice!.annualSavingsRangeEur.expected).toBeGreaterThan(0);
     const html = generateAnnualBillReportHtml({ input, advice: result.annualBillAdvice! }, null, null);
@@ -175,6 +175,22 @@ describe('dynamic annual consumption and battery simulation', () => {
     expect(html).toContain('2025-09-30');
     expect(html).toContain('8760 uurprijzen');
     expect(html).toContain('Gemiste terugleveropbrengst');
-    expect(result.annualBillAdvice!.warnings.join(' ')).not.toContain('fallback');
+    expect(withoutPrices.annualBillAdvice!.recommendedBatteryKwh).toBe(result.annualBillAdvice!.recommendedBatteryKwh);
+    expect(withoutPrices.annualBillAdvice!.warnings.join(' ')).toContain('marktprijzen ontbreken');
+  });
+
+  it('fixed, variable, dynamic and a different market year have exactly the same technical advice', () => {
+    const input = { ...costs, source: 'manual' as const, totalUsageKwh: 4200, totalFeedInKwh: 1800, consumptionProfile: 'home' as const };
+    const otherYear = marketYear();
+    otherYear.start = '2024-09-30T00:00:00.000Z'; otherYear.end = '2025-09-30T00:00:00.000Z';
+    otherYear.hours = otherYear.hours.map((hour, i) => ({ start: new Date(Date.parse(otherYear.start) + i * 3600000).toISOString(), marketPriceEurPerKwh: -hour.marketPriceEurPerKwh }));
+    const results = (['fixed', 'variable', 'dynamic', 'dynamic'] as const).map((contractType, i) => buildAnnualBillIndicativeAnalysis({ ...input, contractType }, defaultAnalysisSettings, i === 3 ? otherYear : marketYear())!.annualBillAdvice!);
+    for (const result of results.slice(1)) {
+      expect([result.recommendedBatteryKwh, result.conservativeBatteryKwh, result.spaciousBatteryKwh, result.confidence]).toEqual([results[0].recommendedBatteryKwh, results[0].conservativeBatteryKwh, results[0].spaciousBatteryKwh, results[0].confidence]);
+      expect(result.options.map(o => o.technicalSimulation)).toEqual(results[0].options.map(o => o.technicalSimulation));
+    }
+    const invalidFinance = buildAnnualBillIndicativeAnalysis({ ...input, contractType: 'dynamic', electricityVatPercent: -1 }, defaultAnalysisSettings, marketYear())!.annualBillAdvice!;
+    expect(invalidFinance.recommendedBatteryKwh).toBe(results[0].recommendedBatteryKwh);
+    expect(invalidFinance.warnings.join(' ')).toContain('financieel model niet beschikbaar');
   });
 });

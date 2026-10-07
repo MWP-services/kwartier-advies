@@ -168,6 +168,7 @@ function rangePayback(investmentEur: number, savings: AnnualBillAdviceResult['an
 export function practicalAnnualBillOptions(options: readonly number[], p90: number, usableFraction: number) {
   const sorted = [...new Set(options)].filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
   const limit = usableFraction > 0 ? p90 / usableFraction * 1.25 : 0;
+  if (!(p90 > 0) || !Number.isFinite(p90) || !(usableFraction > 0)) return [];
   const within = sorted.filter(n => n <= limit);
   return [...within, ...sorted.filter(n => n > limit).slice(0, 2)];
 }
@@ -180,7 +181,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
   let baseConfidence = energyBasis.confidence;
   if (!input.consumptionProfile) { baseConfidence = 'low'; warnings.push('Verbruiksprofiel niet bevestigd: huishouden aangenomen.'); }
   if (input.annualPvProductionKwh != null && input.annualPvProductionKwh > 0 && input.annualPvProductionKwh < totalFeedInKwh) {
-    baseConfidence = 'low'; warnings.push('PV-opwek is lager dan netteruglevering: controleer energiegrondslag en periode.');
+    energyBasis.status = 'insufficient_data'; baseConfidence = 'low'; warnings.push('PV-opwek is lager dan netteruglevering: controleer energiegrondslag en periode.');
   }
   const profile = buildAnnualBillSyntheticProfile(totalUsageKwh, totalFeedInKwh, consumptionProfile);
   const storageStatistics = dailyStorageStatistics(profile);
@@ -202,7 +203,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
   const simulatedOptions = batteryOptions.map((batteryKwh) => {
     const spec = getBatterySpecForCapacity(batteryKwh);
     const technicalSimulation = simulateAnnualBillBattery(profile, spec, { minimumSocFraction: MINIMUM_SOC_FRACTION, emergencyReserveFraction });
-    if (spec.fallback) warnings.push(`${batteryKwh} kWh: fallback-specificatie (0,5C, 90% rendement); productspecificatie ontbreekt.`);
+    if (spec.fallback) warnings.push(`${batteryKwh} kWh: fallback-specificatie; ${spec.assumptions ?? '0,5C en 90% rendement aangenomen wegens ontbrekende productspecificatie.'}`);
     const investment = resolveBatteryInvestment(batteryKwh, input, batteryOptions.length);
     // Finance is evaluated after the technical physics and cannot influence its output.
     const dynamicSimulation = input.dynamicContext ? simulateDynamicBattery(input.dynamicContext.hours, batteryKwh, usableFraction, ROUND_TRIP_EFFICIENCY) : undefined;
@@ -219,7 +220,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
       utilizationScore: Math.min(1, technicalSimulation.equivalentCyclesPerYear / 365),
       confidence: spec.fallback ? 'low' as const : baseConfidence,
       specSource: spec.fallback ? 'fallback' as const : 'product' as const,
-      explanation: `Fysiek gesimuleerd: ${round2(technicalSimulation.annualGridImportReductionKwh)} kWh minder netafname per jaar. Financi?n uitsluitend informatief.`
+      explanation: `Fysiek gesimuleerd: ${round2(technicalSimulation.annualGridImportReductionKwh)} kWh minder netafname per jaar. Financiën uitsluitend informatief.`
     };
   });
   const selection = selectAnnualBillBatteryByEnergy(simulatedOptions);
@@ -232,7 +233,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
   const threshold = (target: number) => selection.maxAnnualSavingsKwh > 0 ? options.find(x => x.percentOfMaximumSavings + 1e-12 >= target)?.batteryKwh ?? null : null;
   if (options.some(x => x.investmentSource === 'estimated')) warnings.push('Investering is een indicatieve prijsraming, geen offerte; uitsluitend gebruikt voor informatieve terugverdientijd.');
   warnings.push('Indicatief advies op basis van jaarnota; kwartierdata geeft een nauwkeuriger dimensionering.',
-    'Geschatte seizoen- en weekpatronen; kwartiergemiddelden kunnen zowel import als export bevatten. P75 is uitsluitend een basisindicatie. Geen degradatie of gemeten pieken; financi?le band ?25% is een modelaanname.');
+    'Geschatte seizoen- en weekpatronen; alleen netto kwartieroverschot of -tekort is beschikbaar voor de batterij. Bruto jaartotalen blijven behouden. P75 is uitsluitend een basisindicatie. Geen degradatie of gemeten pieken; financiële band ±25% is een modelaanname.');
   const expected = recommended?.estimatedAnnualSavingsEur ?? 0;
   const annualSavingsRangeEur = { min: round2(Math.min(expected * 0.75, expected * 1.25)), expected, max: round2(Math.max(expected * 0.75, expected * 1.25)) };
   const recommendationStatus = energyBasis.status === 'insufficient_data' ? 'insufficient_data' : recommended ? 'recommended' : 'no_solar_shift';
@@ -244,12 +245,12 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
     recommendedBatteryKwh: recommended?.batteryKwh ?? null,
     totalUsageKwh, totalFeedInKwh, estimatedPvProductionKwh: input.annualPvProductionKwh,
     options, annualSavingsRangeEur, paybackRangeYears: rangePayback(recommended?.estimatedInvestmentEur ?? 0, annualSavingsRangeEur),
-    confidence: recommended?.confidence ?? baseConfidence,
+    confidence: energyBasis.status === 'insufficient_data' ? 'low' : recommended?.confidence ?? baseConfidence,
     minimumSocPercent: 10, efficiencyPercent: recommended ? getBatterySpecForCapacity(recommended.batteryKwh).roundTripEfficiency * 100 : 90,
     emergencyPowerReservePercent: emergencyReserveFraction * 100,
     warnings,
     explanation: recommendationStatus === 'insufficient_data' ? 'Geen betrouwbaar batterijcapaciteitsadvies mogelijk: controleer de energiegrondslag.'
       : recommended ? `${recommended.batteryKwh} kWh is de kleinste relevante batterij die minimaal 90% van de maximaal praktisch haalbare reductie van netafname realiseert. Een grotere batterij levert volgens het geschatte jaarprofiel relatief weinig extra energiebesparing op. Prijzen, investering en terugverdientijd wijzigen de capaciteit niet.`
-      : 'Geen batterij aanbevolen: geen positieve reductie van netafname door opgeslagen zonnestroom.'
+      : 'Op basis van de beschikbare teruglevering is geen PV-opslagbatterij aanbevolen.'
   };
 }

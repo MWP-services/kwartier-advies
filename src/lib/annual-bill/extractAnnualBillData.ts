@@ -6,6 +6,7 @@ import { extractElectricityTable } from './extractElectricityTable';
 import { extractElectricityTaxes } from './extractElectricityTaxes';
 import { extractTaxMetadata } from './extractTaxMetadata';
 import { extractContractType } from './contractType';
+import { extractEnergyProvenance, extractEnergyPeriod } from './extractEnergyProvenance';
 
 type NumericFieldConfig = {
   field: AnnualBillField;
@@ -161,7 +162,7 @@ export function extractAnnualBillData(text: string, traceId?: string): AnnualBil
 
   const table = extractElectricityTable(text, traceId);
   if (Object.keys(table).length) {
-    // Preserve separately extracted physical energy totals. Compensated export is not physical export.
+    // Preserve separately labelled scalar totals, but do not infer physical provenance.
     if (raw.totalUsageKwh || raw.usageNormalKwh || raw.usageOffPeakKwh) {
       for (const field of ['usageNormalKwh', 'usageOffPeakKwh', 'totalUsageKwh'] as const) delete table[field];
     }
@@ -187,6 +188,14 @@ export function extractAnnualBillData(text: string, traceId?: string): AnnualBil
   if (invoiceDate) raw.invoiceDate = { ...invoiceDate, source: 'rules', evidenceSnippet: invoiceDate.evidence };
   if (ean) raw.eanElectricity = { ...ean, source: 'rules', evidenceSnippet: ean.evidence };
   if (supplier) raw.supplierName = { ...supplier, source: 'rules', evidenceSnippet: supplier.evidence };
+
+  const period = extractEnergyPeriod(text);
+  if (period) {
+    raw.periodStart = { value: period.periodStart!, confidence: 0.85, source: 'rules' };
+    raw.periodEnd = { value: period.periodEnd!, confidence: 0.85, source: 'rules' };
+    raw.periodEndInclusive = { value: Number(period.periodEndInclusive), confidence: 0.85, source: 'rules' };
+  }
+  Object.assign(raw, extractEnergyProvenance(text));
 
   return raw;
 }

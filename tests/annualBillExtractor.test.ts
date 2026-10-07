@@ -39,13 +39,13 @@ describe('annual bill extractor', () => {
     expect(input.totalFeedInKwh).toBe(1200);
   });
 
-  it('only blocks when usage and feed-in are both missing', () => {
+  it('requires both usage and feed-in without estimating the missing direction', () => {
     const issues = validateAnnualBillExtract({ source: 'pdf', extractionConfidence: 0.2 });
 
     expect(issues.some((issue) => issue.field === 'totalUsageKwh' && issue.severity === 'missing')).toBe(true);
     expect(issues.some((issue) => issue.field === 'extractionConfidence' && issue.severity === 'warning')).toBe(true);
 
     const partialIssues = validateAnnualBillExtract({ totalFeedInKwh: 1200, source: 'pdf', extractionConfidence: 0.6 });
-    expect(partialIssues.some((issue) => issue.severity === 'missing')).toBe(false);
+    expect(partialIssues.some((issue) => issue.field === 'totalUsageKwh' && issue.severity === 'missing')).toBe(true);
   });
 });

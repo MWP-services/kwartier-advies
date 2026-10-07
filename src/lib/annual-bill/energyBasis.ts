@@ -1,6 +1,9 @@
 export type EnergyPair = {
   gridImportKwh: number; gridExportKwh: number;
   periodStart?: string; periodEnd?: string; annualized?: boolean;
+  /** Dates are UTC calendar dates. Unmarked end dates are exclusive; t/m is inclusive. */
+  periodEndInclusive?: boolean;
+  evidence?: string; extractionConfidence?: number;
 };
 export type EnergyBasisInput = {
   physicalEnergy?: EnergyPair; annualizedEnergy?: EnergyPair; confirmedEnergy?: EnergyPair;
@@ -8,6 +11,7 @@ export type EnergyBasisInput = {
   usageNormalKwh?: number; usageOffPeakKwh?: number; feedInNormalKwh?: number; feedInOffPeakKwh?: number;
   periodStart?: string; periodEnd?: string; source?: 'pdf' | 'manual';
   energyTotalsConfirmed?: boolean; extractionConfidence?: number; missingFields?: string[];
+  periodEndInclusive?: boolean; energyConflicts?: string[];
 };
 export type AnnualBillEnergyBasis = {
   gridImportKwh: number; gridExportKwh: number;
@@ -16,6 +20,7 @@ export type AnnualBillEnergyBasis = {
   source: 'physical_meter' | 'annualized_summary' | 'billing' | 'manual';
   annualized: boolean; confidence: 'low' | 'medium'; warnings: string[];
   status: 'usable' | 'insufficient_data';
+  periodEndInclusive: boolean; evidence?: string;
 };
 const valid = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
 function total(value?: number, a?: number, b?: number) {
@@ -24,12 +29,15 @@ function total(value?: number, a?: number, b?: number) {
 }
 export function resolveAnnualBillEnergyBasis(input: EnergyBasisInput): AnnualBillEnergyBasis {
   const pair = input.physicalEnergy ?? input.annualizedEnergy ?? input.confirmedEnergy;
-  const source = input.physicalEnergy ? 'physical_meter' : input.annualizedEnergy ? 'annualized_summary' : input.confirmedEnergy || input.source === 'manual' ? 'manual' : 'billing';
-  const imp = pair?.gridImportKwh ?? total(input.totalUsageKwh, input.usageNormalKwh, input.usageOffPeakKwh);
-  const exp = pair?.gridExportKwh ?? total(input.totalFeedInKwh, input.feedInNormalKwh, input.feedInOffPeakKwh);
+  const source = input.physicalEnergy ? 'physical_meter' : input.annualizedEnergy ? 'annualized_summary' : input.confirmedEnergy || input.source !== 'pdf' ? 'manual' : 'billing';
+  // An incomplete pair must never borrow the other direction from billing data.
+  const imp = pair ? pair.gridImportKwh : total(input.totalUsageKwh, input.usageNormalKwh, input.usageOffPeakKwh);
+  const exp = pair ? pair.gridExportKwh : total(input.totalFeedInKwh, input.feedInNormalKwh, input.feedInOffPeakKwh);
   const start = pair?.periodStart ?? input.periodStart;
   const end = pair?.periodEnd ?? input.periodEnd;
-  const days = start && end ? (Date.parse(end) - Date.parse(start)) / 86400000 : undefined;
+  const periodEndInclusive = pair?.periodEndInclusive ?? input.periodEndInclusive ?? false;
+  const date = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value ? Date.parse(value) : NaN;
+  const days = start && end ? (date(end) - date(start)) / 86400000 + Number(periodEndInclusive) : undefined;
   const annualized = !!input.annualizedEnergy && !input.physicalEnergy || pair?.annualized === true;
   const warnings: string[] = [];
   let status: AnnualBillEnergyBasis['status'] = 'usable';
@@ -42,16 +50,24 @@ export function resolveAnnualBillEnergyBasis(input: EnergyBasisInput): AnnualBil
   }
   if (source === 'billing') { confidence = 'low'; warnings.push('Generieke factuurtotalen: fysieke energiegrondslag niet afzonderlijk vastgelegd.'); }
   if (days !== undefined && (!Number.isFinite(days) || days <= 0 || (!annualized && (days < 270 || days > 450)))) {
-    status = 'insufficient_data'; warnings.push('Factuurperiode ongeschikt voor automatisch jaaradvies (vereist 270?450 dagen of expliciete jaarvolumes).');
+    status = 'insufficient_data'; warnings.push('Factuurperiode ongeschikt voor automatisch jaaradvies (vereist 270–450 dagen of expliciete jaarvolumes).');
   } else if (!annualized && days !== undefined && (days < 330 || days > 400)) {
     confidence = 'low'; warnings.push('Afwijkende factuurperiode: sterke annualisering, seizoenvertekening mogelijk.');
   }
-  if (days === undefined && !annualized) { confidence = 'low'; warnings.push('Periode ontbreekt: ingevulde totalen worden als jaarvolumes behandeld.'); }
-  if ((input.extractionConfidence != null && input.extractionConfidence < 0.8) || input.missingFields?.some(x => /conflict|review|controle/i.test(x))) {
+  if (days === undefined && !annualized) {
+    confidence = 'low';
+    if (start || end || (source !== 'manual' && !input.energyTotalsConfirmed)) {
+      status = 'insufficient_data'; warnings.push('Een volledige representatieve periode of expliciete jaarvolumes ontbreken.');
+    } else warnings.push('Periode ontbreekt: handmatig ingevoerde of bevestigde totalen worden als jaarvolumes behandeld.');
+  }
+  if (input.energyConflicts?.length) {
+    status = 'insufficient_data'; warnings.push(...input.energyConflicts);
+  }
+  if (((pair?.extractionConfidence ?? input.extractionConfidence) != null && (pair?.extractionConfidence ?? input.extractionConfidence)! < 0.8) || input.missingFields?.some(x => /conflict|review|controle/i.test(x))) {
     confidence = 'low'; warnings.push('Extractie vereist controle op conflicten of onzekerheid.');
   }
   const factor = !annualized && days && Number.isFinite(days) && days > 0 ? 365 / days : 1;
   return { gridImportKwh: valid(imp) ? imp * factor : 0, gridExportKwh: valid(exp) ? exp * factor : 0,
     originalImportKwh: imp, originalExportKwh: exp, periodStart: start, periodEnd: end, periodDays: days,
-    annualizationFactor: factor, source, annualized, confidence, warnings, status };
+    annualizationFactor: factor, source, annualized, confidence, warnings, status, periodEndInclusive, evidence: pair?.evidence };
 }

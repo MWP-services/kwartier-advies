@@ -106,7 +106,9 @@ async function executeAnalysisJob(job: AnalysisJobRecord): Promise<AnalysisResul
         if (input.annualBillInput.contractType === 'dynamic') {
           await reportProgress({ progress: 25, currentStep: 'Laatste 365 dagen dynamische uurprijzen ophalen' });
         }
-        const marketYear = input.annualBillInput.contractType === 'dynamic' ? await fetchRecentMarketYear() : undefined;
+        // Price availability must never block the independent technical advice.
+        const marketYear = input.annualBillInput.contractType === 'dynamic'
+          ? await fetchRecentMarketYear().catch(() => undefined) : undefined;
         await reportProgress({ progress: 55, currentStep: 'Verbruik en batterijopties doorrekenen' });
         const annualResult = buildAnnualBillIndicativeAnalysis(input.annualBillInput, input.settings, marketYear);
         if (!annualResult) {

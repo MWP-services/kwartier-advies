@@ -8,7 +8,7 @@ import {
   resolveAverageImportPrice,
   resolveAnnualFeedInKwh,
   resolveAnnualUsageKwh,
-  validateAnnualBillRequiredFields
+  validateAnnualBillRequiredFields, annualBillMissingDetails, toAnnualBillAdviceInput, updateAnnualBillEnergyInput
 } from '@/src/lib/annual-bill/annualBillUx';
 
 describe('annual bill UX helpers', () => {
@@ -34,10 +34,29 @@ describe('annual bill UX helpers', () => {
         periodEnd: '2025-12-31',
         normalTariffEurPerKwh: 0.3
       })
-    ).toBe('medium');
+    ).toBe('low'); // Default profile and fallback product, irrespective of tariffs.
     expect(annualBillConfidenceLabel({ totalFeedInKwh: 1500 })).toBe('low');
-    expect(validateAnnualBillRequiredFields({})).toEqual(['verbruik of teruglevering']);
-    expect(validateAnnualBillRequiredFields({ totalFeedInKwh: 1500 })).toEqual([]);
+    expect(validateAnnualBillRequiredFields({}).join(' ')).toContain('netafname');
+    expect(validateAnnualBillRequiredFields({ totalFeedInKwh: 1500 }).join(' ')).toContain('netafname');
+    expect(validateAnnualBillRequiredFields({ source: 'manual', totalUsageKwh: 4200, totalFeedInKwh: 0 })).toEqual([]);
+  });
+
+  it('does not require financial fields or replace missing export with zero in the adapter', () => {
+    expect(toAnnualBillAdviceInput({ totalUsageKwh: 4200 }).totalFeedInKwh).toBeUndefined();
+    expect(annualBillMissingDetails({ source: 'manual', totalUsageKwh: 4200, totalFeedInKwh: 1800 })).toEqual([]);
+    expect(annualBillMissingDetails({ contractType: 'dynamic', source: 'manual', totalUsageKwh: 4200, totalFeedInKwh: 0 })).toEqual([]);
+  });
+  it('shows extracted meter values and clears obsolete provenance on a manual energy correction', () => {
+    const input = { source: 'pdf' as const, totalUsageKwh: 19005, physicalEnergy: { gridImportKwh: 35444, gridExportKwh: 16439, periodStart: '2025-01-01', periodEnd: '2026-01-01' } };
+    expect(resolveAnnualUsageKwh(input)).toBe(35444);
+    expect(updateAnnualBillEnergyInput(input, { normalTariffEurPerKwh: 0.3 }).physicalEnergy).toEqual(input.physicalEnergy);
+    const corrected = updateAnnualBillEnergyInput(input, { totalUsageKwh: 35000 });
+    expect(corrected.physicalEnergy).toBeUndefined();
+    expect(corrected.totalFeedInKwh).toBe(16439);
+    expect(corrected.totalUsageKwh).toBe(35000);
+    expect(corrected.energyTotalsConfirmed).toBe(false);
+    expect(validateAnnualBillRequiredFields(corrected).length).toBeGreaterThan(0);
+    expect(validateAnnualBillRequiredFields({ ...corrected, energyTotalsConfirmed: true })).toEqual([]);
   });
 });
 

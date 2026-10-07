@@ -1,6 +1,8 @@
 export interface BatterySpec {
   capacityKwh: number;
   fallback?: boolean;
+  source?: string;
+  assumptions?: string;
   maxChargeKw: number;
   maxDischargeKw: number;
   roundTripEfficiency: number;
@@ -9,36 +11,50 @@ export interface BatterySpec {
 // Values below come from the product brochures provided by the user.
 const BASE_BATTERY_SPECS: Record<number, BatterySpec> = {
   64: {
+    source: 'public/assets/64.pdf, pagina 2: ES64/30K-A/EU',
+    fallback: true,
+    assumptions: 'Capaciteit en vermogen uit brochure; round-trip rendement ontbreekt, 90% aangenomen.',
     capacityKwh: 64.3,
     maxChargeKw: 32,
     maxDischargeKw: 30,
     roundTripEfficiency: 0.9
   },
   96: {
+    source: 'public/assets/96.pdf, pagina 2: ES96/48K-A/EU',
+    fallback: true,
+    assumptions: 'Capaciteit en vermogen uit brochure; round-trip rendement ontbreekt, 90% aangenomen.',
     capacityKwh: 96.46,
     maxChargeKw: 48,
     maxDischargeKw: 48,
     roundTripEfficiency: 0.9
   },
   232: {
+    source: 'public/assets/232.pdf, pagina 2: ES232/115K-A/EU',
+    assumptions: 'Nominale capaciteit afgerond op 232 kWh. Brochure Max. Efficiency 90% als systeemefficiëntie geïnterpreteerd.',
     capacityKwh: 232,
     maxChargeKw: 115,
     maxDischargeKw: 115,
     roundTripEfficiency: 0.9
   },
   261: {
+    source: 'public/assets/261.pdf, pagina 2: ESS261/125K-A/EU',
+    assumptions: 'Brochure Max. Efficiency 90% als systeemefficiëntie geïnterpreteerd.',
     capacityKwh: 261.24,
     maxChargeKw: 125,
     maxDischargeKw: 125,
     roundTripEfficiency: 0.9
   },
   2090: {
+    source: 'public/assets/2090.pdf, pagina 2: ES2090/1000K-A/EU',
+    assumptions: 'Brochure Max. Efficiency 90% als systeemefficiëntie geïnterpreteerd.',
     capacityKwh: 2090,
     maxChargeKw: 1000,
     maxDischargeKw: 1000,
     roundTripEfficiency: 0.9
   },
   5015: {
+    source: 'public/assets/5015.pdf, pagina 2: ES5015/2580K-C/EU',
+    assumptions: 'Brochure Max. Efficiency 88% als systeemefficiëntie geïnterpreteerd.',
     capacityKwh: 5015.88,
     maxChargeKw: 2580,
     maxDischargeKw: 2580,
@@ -110,6 +126,9 @@ export function getBatterySpecForCapacity(capacityKwh: number): BatterySpec {
     if (count >= 1 && isNear(countRaw, count, MODULAR_TOLERANCE_KWH)) {
       const baseSpec = BASE_BATTERY_SPECS[baseSize];
       return {
+        source: baseSpec.source,
+        assumptions: baseSpec.assumptions,
+        fallback: baseSpec.fallback,
         capacityKwh,
         maxChargeKw: baseSpec.maxChargeKw * count,
         maxDischargeKw: baseSpec.maxDischargeKw * count,
@@ -120,6 +139,10 @@ export function getBatterySpecForCapacity(capacityKwh: number): BatterySpec {
 
   return {
     fallback: true,
+    source: [7.68, 10.24, 12.8, 15.36, 17.92, 20.48, 23.04].includes(capacityKwh)
+      ? 'public/assets/2.5_22.5.pdf, pagina 2: alleen DC-modulespecificatie'
+      : 'Geen volledige productspecificatie beschikbaar',
+    assumptions: '0,5C AC-laad-/ontlaadvermogen en 90% round-trip rendement aangenomen; omvormer en systeemrendement niet gespecificeerd.',
     capacityKwh,
     maxChargeKw: capacityKwh / 2,
     maxDischargeKw: capacityKwh / 2,

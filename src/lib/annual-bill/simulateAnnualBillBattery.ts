@@ -14,16 +14,23 @@ export function simulateAnnualBillBattery(profile: AnnualBillInterval[], spec: B
     unusedExportBecauseBatteryFullKwh: 0, unusedExportBecausePowerLimitKwh: 0,
     startingSocKwh: soc, endingSocKwh: soc, minimumObservedSocKwh: soc, maximumObservedSocKwh: soc, usableCapacityKwh });
   let result = empty();
+  if (profile.some(row => ![row.importKwh, row.exportKwh].every(n => Number.isFinite(n) && n >= 0))) throw new Error('Ongeldige kwartierenergie');
   for (let year = 0; year < 2; year++) {
     result = empty();
     for (const row of profile) {
-      const powerLimited = Math.min(row.exportKwh, spec.maxChargeKw * 0.25);
+      // Preserve measured annual import/export in the generator. Only the net
+      // surplus/deficit is dispatchable: never charge and discharge one interval.
+      // Overlap is neither battery throughput nor claimed direct self-consumption.
+      const net = row.importKwh - row.exportKwh;
+      const exportAvailable = Math.max(0, -net);
+      const importAvailable = Math.max(0, net);
+      const powerLimited = Math.min(exportAvailable, spec.maxChargeKw * 0.25);
       const charge = Math.max(0, Math.min(powerLimited, (spec.capacityKwh - soc) / efficiency));
-      result.unusedExportBecausePowerLimitKwh += row.exportKwh - powerLimited;
+      result.unusedExportBecausePowerLimitKwh += exportAvailable - powerLimited;
       result.unusedExportBecauseBatteryFullKwh += powerLimited - charge;
       soc += charge * efficiency;
       result.maximumObservedSocKwh = Math.max(result.maximumObservedSocKwh, soc);
-      const delivered = Math.max(0, Math.min(row.importKwh, spec.maxDischargeKw * 0.25, (soc - reserve) * efficiency));
+      const delivered = Math.max(0, Math.min(importAvailable, spec.maxDischargeKw * 0.25, (soc - reserve) * efficiency));
       soc -= delivered / efficiency;
       result.minimumObservedSocKwh = Math.min(result.minimumObservedSocKwh, soc);
       result.annualChargedFromSolarKwh += charge;
@@ -34,6 +41,8 @@ export function simulateAnnualBillBattery(profile: AnnualBillInterval[], spec: B
   result.endingSocKwh = soc;
   result.annualGridImportReductionKwh = result.annualDeliveredFromBatteryKwh;
   result.annualExportReductionKwh = result.annualChargedFromSolarKwh;
+  // Discharge-side battery throughput / usable capacity; excludes conversion
+  // losses after the battery, reserve energy and unfinished charge at year end.
   result.equivalentCyclesPerYear = usableCapacityKwh > 0 ? result.annualDeliveredFromBatteryKwh / efficiency / usableCapacityKwh : 0;
   return result;
 }

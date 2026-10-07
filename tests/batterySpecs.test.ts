@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { getBatterySpecForCapacity } from '@/lib/batterySpecs';
 
 describe('batterySpecs', () => {
+  it.each([[64, 64.3, 32, 30, 0.9], [96, 96.46, 48, 48, 0.9], [232, 232, 115, 115, 0.9], [261, 261.24, 125, 125, 0.9], [2090, 2090, 1000, 1000, 0.9], [5015, 5015.88, 2580, 2580, 0.88]])('records brochure source and verified fields for %s kWh', (key, capacity, charge, discharge, efficiency) => {
+    expect(getBatterySpecForCapacity(key)).toMatchObject({ capacityKwh: capacity, maxChargeKw: charge, maxDischargeKw: discharge, roundTripEfficiency: efficiency });
+    expect(getBatterySpecForCapacity(key).source).toContain(`public/assets/${key}.pdf`);
+  });
+  it.each([7.68, 10.24, 12.8, 15.36, 17.92, 20.48, 23.04, 30, 40])('keeps %s kWh fallback where no complete AC system sheet exists', capacity => {
+    const spec = getBatterySpecForCapacity(capacity);
+    expect(spec.fallback).toBe(true);
+    expect(spec.maxChargeKw).toBe(capacity / 2);
+    expect(spec.maxDischargeKw).toBe(capacity / 2);
+    expect(spec.roundTripEfficiency).toBe(0.9);
+    expect(spec.assumptions).toContain('aangenomen');
+  });
+  it.each([64, 96])('marks missing efficiency as an assumption without discarding verified %s kWh power', capacity => {
+    expect(getBatterySpecForCapacity(capacity).fallback).toBe(true);
+    expect(getBatterySpecForCapacity(capacity).assumptions).toContain('rendement ontbreekt');
+  });
   it('returns brochure specs for 64 kWh cabinet family', () => {
     const spec64 = getBatterySpecForCapacity(64);
     expect(spec64.maxChargeKw).toBe(32);

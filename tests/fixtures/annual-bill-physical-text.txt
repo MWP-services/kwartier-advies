@@ -1,0 +1,8 @@
+Synthetische testnota elektriciteit - geen persoonsgegevens
+Meteroverzicht
+Periode 01-01-2025 t/m 31-12-2025
+Fysieke import 35.444 kWh
+Fysieke export 16.439 kWh
+Factuurregels
+Totaal verbruik na saldering 19.005 kWh
+Terugleververgoeding 0,06 EUR/kWh

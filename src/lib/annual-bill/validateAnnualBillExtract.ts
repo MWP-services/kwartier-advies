@@ -1,6 +1,7 @@
 import type { AnnualBillInput } from '@/lib/analysis';
 import type { AnnualBillValidationIssue } from './schema';
 import { isUsableAnnualTariff, tariffFields, MAX_ABS_ANNUAL_TARIFF, annualBillPriceWarnings } from './tariffs';
+import { resolveAnnualBillEnergyBasis } from './energyBasis';
 
 export function validateAnnualBillExtract(input: AnnualBillInput): AnnualBillValidationIssue[] {
   const issues: AnnualBillValidationIssue[] = [];
@@ -10,15 +11,11 @@ export function validateAnnualBillExtract(input: AnnualBillInput): AnnualBillVal
   }
   if (input.contractType !== 'dynamic' && !isUsableAnnualTariff(input.normalTariffEurPerKwh) && !isUsableAnnualTariff(input.offPeakTariffEurPerKwh)) issues.push({ field: 'normalTariffEurPerKwh', severity: 'warning', message: 'Geen bruikbaar afnametarief gevonden; de berekening gebruikt expliciet een schatting van EUR 0,30/kWh.' });
   for (const message of input.contractType === 'dynamic' ? [] : annualBillPriceWarnings(input)) issues.push({ field: 'normalTariffEurPerKwh', severity: 'warning', message });
-  const usage = (input.totalUsageKwh ?? 0) || (input.usageNormalKwh ?? 0) + (input.usageOffPeakKwh ?? 0);
-  const feedIn = (input.totalFeedInKwh ?? 0) || (input.feedInNormalKwh ?? 0) + (input.feedInOffPeakKwh ?? 0);
-
-  if (usage <= 0 && feedIn <= 0) {
-    issues.push({ field: 'totalUsageKwh', message: 'Verbruik en teruglevering ontbreken allebei.', severity: 'missing' });
-  } else {
-    if (usage <= 0) issues.push({ field: 'totalUsageKwh', message: 'Verbruik ontbreekt; dit wordt indicatief geschat.', severity: 'warning' });
-    if (feedIn <= 0 && input.totalFeedInKwh == null && input.feedInNormalKwh == null && input.feedInOffPeakKwh == null) issues.push({ field: 'totalFeedInKwh', message: 'Teruglevering ontbreekt; dit wordt indicatief geschat.', severity: 'warning' });
+  const basis = resolveAnnualBillEnergyBasis(input);
+  for (const [field, value] of [['totalUsageKwh', basis.originalImportKwh], ['totalFeedInKwh', basis.originalExportKwh]] as const) {
+    if (value == null || !Number.isFinite(value) || value < 0) issues.push({ field, message: 'Fysieke netafname en netteruglevering zijn beide vereist; ontbrekende energie wordt niet geschat.', severity: 'missing' });
   }
+  if (basis.status === 'insufficient_data') issues.push({ field: 'energyTotalsConfirmed', message: basis.warnings.join(' '), severity: 'warning' });
   if (!input.periodStart || !input.periodEnd) {
     issues.push({ field: 'periodStart', message: 'Factuurperiode is niet volledig herkend.', severity: 'warning' });
   }

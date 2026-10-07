@@ -60,7 +60,7 @@ describe('annual bill tariff regressions', () => {
     const base = { totalUsageKwh: 4200, totalFeedInKwh: 1800, averageFeedInPriceEurPerKwh: 0.06 };
     const low = calculateAnnualBillAdvice({ ...base, averageImportPriceEurPerKwh: 0.2 });
     const high = calculateAnnualBillAdvice({ ...base, averageImportPriceEurPerKwh: 0.4 });
-    expect(high.options[0].estimatedAnnualSavingsEur / low.options[0].estimatedAnnualSavingsEur).toBeCloseTo(0.34 / 0.14, 3);
+    expect(high.options[0].estimatedAnnualSavingsEur - low.options[0].estimatedAnnualSavingsEur).toBeCloseTo(low.options[0].annualGridImportReductionKwh! * 0.2, 1);
   });
 
   it('preserves explicit zero feed-in and gives no storage recommendation', () => {

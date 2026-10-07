@@ -11,8 +11,14 @@ import { getBatterySpecForCapacity } from './batterySpecs';
 export function buildAnnualBillIndicativeAnalysis(input: AnnualBillInput, settings: AnalysisSettings, marketYear?: MarketYear): AnalysisResult | null {
   const basis = resolveAnnualBillEnergyBasis(input);
   const prices = resolveAnnualBillPrices(input);
-  const dynamicContext = input.contractType === 'dynamic' && marketYear && basis.status === 'usable'
-    ? prepareDynamicAnnualContext(input, marketYear, basis.gridImportKwh, basis.gridExportKwh) : undefined;
+  let dynamicContext;
+  let financeWarning: string | undefined;
+  try {
+    dynamicContext = input.contractType === 'dynamic' && marketYear && basis.status === 'usable'
+      ? prepareDynamicAnnualContext(input, marketYear, basis.gridImportKwh, basis.gridExportKwh) : undefined;
+  } catch {
+    financeWarning = 'Dynamisch financieel model niet beschikbaar door ongeldige prijzen of financiële invoer; technische dimensionering blijft beschikbaar.';
+  }
   const advice = calculateAnnualBillAdvice({ ...input,
     averageImportPriceEurPerKwh: prices.importSource === 'fallback' ? undefined : prices.importPrice,
     averageFeedInPriceEurPerKwh: prices.feedInPrice,
@@ -21,6 +27,7 @@ export function buildAnnualBillIndicativeAnalysis(input: AnnualBillInput, settin
     dynamicContext
   });
   if (input.contractType === 'dynamic' && !marketYear) advice.warnings.push('Dynamische marktprijzen ontbreken: technische capaciteit beschikbaar, euroberekening gebruikt indicatieve gemiddelde tarieven.');
+  if (financeWarning) advice.warnings.push(financeWarning);
   if (input.contractType !== 'dynamic') advice.warnings.push(...annualBillPriceWarnings(input));
   const recommended = advice.options.find(x => x.batteryKwh === advice.recommendedBatteryKwh);
   const product = (capacity: number | null | undefined) => capacity == null ? null : ({

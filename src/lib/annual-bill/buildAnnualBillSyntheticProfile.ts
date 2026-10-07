@@ -22,10 +22,20 @@ export function buildAnnualBillSyntheticProfile(importKwh: number, exportKwh: nu
 }
 export function dailyStorageStatistics(profile: AnnualBillInterval[]) {
   const days: number[] = [];
-  for (let i = 0; i < profile.length; i += 96) {
-    const day = profile.slice(i, i + 96);
-    days.push(Math.min(day.reduce((s, x) => s + x.importKwh, 0), day.reduce((s, x) => s + x.exportKwh, 0)));
+  let date = ''; let available = 0; let shifted = 0;
+  for (const row of profile) {
+    const nextDate = row.start.slice(0, 10);
+    if (nextDate !== date) {
+      if (date) days.push(shifted);
+      date = nextDate; available = 0; shifted = 0;
+    }
+    const net = row.importKwh - row.exportKwh;
+    // Unlimited, lossless theoretical storage, reset daily: morning demand cannot
+    // borrow afternoon solar. Net direction matches the technical dispatch rule.
+    if (net < 0) available -= net;
+    else { const used = Math.min(available, net); shifted += used; available -= used; }
   }
+  if (date) days.push(shifted);
   days.sort((a, b) => a - b);
   const percentile = (p: number) => days[Math.ceil(p * days.length) - 1] ?? 0;
   return { p50: percentile(0.5), p75: percentile(0.75), p90: percentile(0.9) };

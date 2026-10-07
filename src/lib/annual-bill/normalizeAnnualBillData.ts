@@ -14,7 +14,9 @@ function text(raw: AnnualBillRawExtract, field: keyof AnnualBillInput): string |
 }
 
 function confidence(raw: AnnualBillRawExtract): number {
-  const values = Object.values(raw).map((entry) => entry?.confidence).filter((value): value is number => Number.isFinite(value));
+  // Technical confidence must not be affected by tariff, supplier or tax extraction.
+  const fields = ['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh'] as const;
+  const values = fields.map(field => raw[field]?.confidence).filter((value): value is number => Number.isFinite(value));
   if (values.length === 0) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
@@ -30,13 +32,17 @@ export function normalizeAnnualBillData(raw: AnnualBillRawExtract, traceId?: str
   const feedInNormalKwh = numeric(raw, 'feedInNormalKwh');
   const feedInOffPeakKwh = numeric(raw, 'feedInOffPeakKwh');
   const totalUsageKwh = numeric(raw, 'totalUsageKwh') ?? (
-    usageNormalKwh != null || usageOffPeakKwh != null ? (usageNormalKwh ?? 0) + (usageOffPeakKwh ?? 0) : undefined
+    usageNormalKwh != null && usageOffPeakKwh != null ? usageNormalKwh + usageOffPeakKwh : undefined
   );
   const totalFeedInKwh = numeric(raw, 'totalFeedInKwh') ?? (
-    feedInNormalKwh != null || feedInOffPeakKwh != null ? (feedInNormalKwh ?? 0) + (feedInOffPeakKwh ?? 0) : undefined
+    feedInNormalKwh != null && feedInOffPeakKwh != null ? feedInNormalKwh + feedInOffPeakKwh : undefined
   );
 
   const input: AnnualBillInput = {
+    physicalEnergy: raw.physicalEnergy?.source === 'rules' ? raw.physicalEnergy.energyPair : undefined,
+    annualizedEnergy: raw.annualizedEnergy?.source === 'rules' ? raw.annualizedEnergy.energyPair : undefined,
+    energyConflicts: raw.energyConflicts?.energyConflicts ?? (['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh'] as const).filter(field => raw[field]?.requiresReview).map(field => `Conflicterende extractie voor ${field}: controleer fysieke waarden.`),
+    periodEndInclusive: raw.periodEndInclusive?.value === 1,
     contractType: ['fixed', 'variable', 'dynamic', 'unknown'].includes(String(raw.contractType?.value)) ? raw.contractType!.value as AnnualBillInput['contractType'] : 'unknown',
     dynamicImportMarkupEurPerKwh: numeric(raw, 'dynamicImportMarkupEurPerKwh'),
     dynamicExportDeductionEurPerKwh: numeric(raw, 'dynamicExportDeductionEurPerKwh'),

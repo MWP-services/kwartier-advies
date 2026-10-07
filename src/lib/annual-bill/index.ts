@@ -24,6 +24,8 @@ function mergeRawExtracts(rulesRaw: AnnualBillRawExtract, aiRaw: AnnualBillRawEx
   Object.entries(aiRaw).forEach(([field, aiValue]) => {
     if (!aiValue) return;
     const typedField = field as keyof AnnualBillRawExtract;
+    // Only paired deterministic evidence can establish energy provenance.
+    if (['physicalEnergy', 'annualizedEnergy', 'confirmedEnergy', 'energyConflicts', 'energyTotalsConfirmed', 'periodEndInclusive'].includes(field)) return;
     const rulesValue = raw[typedField];
     const verifiedComponent = ['normalTariffEurPerKwh', 'offPeakTariffEurPerKwh', 'supplyTariffVat', 'tariffBasis', 'energyTaxElectricityEur', 'energyTaxEurPerKwh', 'energyTaxWeightKwh', 'energyTaxVat', 'electricityVatPercent'].includes(field);
     if (verifiedComponent && rulesValue && (rulesRaw.tariffWeightNormalKwh || rulesRaw.energyTaxWeightKwh)) {

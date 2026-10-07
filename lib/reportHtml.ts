@@ -760,7 +760,7 @@ function generatePvInteractiveReportHtmlV2(payload: PdfPayload): string {
               ? `<br /><br />${
                   pricingMode === 'dynamic'
                     ? 'De dynamische prijsmodule berekent per interval het verschil tussen de situatie zonder batterij en met batterij. In deze PV-zelfverbruikmodus wordt niet actief geladen vanaf het net voor energiehandel.'
-                    : 'De financi??le waarde is gebaseerd op gemiddelde import- en exporttarieven en is dus een indicatieve benadering.'
+                    : 'De financiële waarde is gebaseerd op gemiddelde import- en exporttarieven en is dus een indicatieve benadering.'
                 }`
               : ''
           }

@@ -1,9 +1,13 @@
 import type { AnnualBillInput } from '@/lib/analysis';
+import type { EnergyPair } from './energyBasis';
 
 export type AnnualBillField = keyof AnnualBillInput;
 
 export type AnnualBillExtractValue = {
   value: string | number;
+  /** Rules-only paired energy evidence; AI scalar fields cannot establish provenance. */
+  energyPair?: EnergyPair;
+  energyConflicts?: string[];
   confidence: number;
   evidence?: string;
   source?: 'rules' | 'ai' | 'merged';

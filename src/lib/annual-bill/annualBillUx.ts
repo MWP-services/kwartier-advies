@@ -1,6 +1,8 @@
 import type { AnnualBillInput } from '@/lib/analysis';
 import type { AnnualBillAdviceInput } from './calculateAnnualBillAdvice';
-import { isUsableAnnualTariff, resolveAnnualBillPrices } from './tariffs';
+import { resolveAnnualBillPrices } from './tariffs';
+import { resolveAnnualBillEnergyBasis } from './energyBasis';
+import { calculateAnnualBillAdvice } from './calculateAnnualBillAdvice';
 
 export type AnnualBillConfidenceLabel = 'low' | 'medium';
 
@@ -25,14 +27,12 @@ export function maskEan(ean: string | undefined): string {
   return lastFour ? `•••• ${lastFour}` : '-';
 }
 
-export function resolveAnnualUsageKwh(input: Pick<AnnualBillInput, 'totalUsageKwh' | 'usageNormalKwh' | 'usageOffPeakKwh'>): number {
-  const split = (input.usageNormalKwh ?? 0) + (input.usageOffPeakKwh ?? 0);
-  return input.totalUsageKwh ?? (split > 0 ? split : 0);
+export function resolveAnnualUsageKwh(input: AnnualBillInput): number | undefined {
+  return resolveAnnualBillEnergyBasis(input).originalImportKwh;
 }
 
-export function resolveAnnualFeedInKwh(input: Pick<AnnualBillInput, 'totalFeedInKwh' | 'feedInNormalKwh' | 'feedInOffPeakKwh'>): number {
-  const split = (input.feedInNormalKwh ?? 0) + (input.feedInOffPeakKwh ?? 0);
-  return input.totalFeedInKwh ?? (split > 0 ? split : 0);
+export function resolveAnnualFeedInKwh(input: AnnualBillInput): number | undefined {
+  return resolveAnnualBillEnergyBasis(input).originalExportKwh;
 }
 
 export function resolveAverageImportPrice(input: AnnualBillInput): number {
@@ -59,6 +59,7 @@ export function resolveEstimatedPvProduction(input: Pick<AnnualBillInput, 'annua
 
 export function toAnnualBillAdviceInput(input: AnnualBillInput): AnnualBillAdviceInput {
   return {
+    ...input,
     usageNormalKwh: input.usageNormalKwh,
     usageOffPeakKwh: input.usageOffPeakKwh,
     feedInNormalKwh: input.feedInNormalKwh,
@@ -78,37 +79,29 @@ export function toAnnualBillAdviceInput(input: AnnualBillInput): AnnualBillAdvic
 }
 
 export function validateAnnualBillRequiredFields(input: AnnualBillInput): string[] {
-  const usage = resolveAnnualUsageKwh(input);
-  const feedIn = resolveAnnualFeedInKwh(input);
-  if (usage <= 0 && feedIn <= 0) return ['verbruik of teruglevering'];
-  return [];
+  const basis = resolveAnnualBillEnergyBasis(input);
+  return basis.status === 'insufficient_data' ? basis.warnings : [];
 }
 
 export function annualBillConfidenceLabel(input: AnnualBillInput): AnnualBillConfidenceLabel {
-  const usage = resolveAnnualUsageKwh(input);
-  const feedIn = resolveAnnualFeedInKwh(input);
-  const hasLogicalPeriod = Boolean(input.periodStart && input.periodEnd && input.periodStart <= input.periodEnd);
-  const hasPrices = isUsableAnnualTariff(input.normalTariffEurPerKwh) || isUsableAnnualTariff(input.offPeakTariffEurPerKwh) || isUsableAnnualTariff(input.feedInTariffEurPerKwh);
-  const hasPv = (input.annualPvProductionKwh ?? 0) > 0 || ((input.solarPanelCount ?? 0) > 0 && (input.solarPanelWp ?? 0) > 0);
-
-  if (usage > 0 && feedIn > 0 && hasLogicalPeriod && (hasPrices || hasPv)) return 'medium';
-  return 'low';
+  return calculateAnnualBillAdvice(toAnnualBillAdviceInput(input)).confidence;
 }
 
 export function annualBillMissingDetails(input: AnnualBillInput): string[] {
-  const missing: string[] = [];
-  if (input.contractType === 'dynamic') {
-    if (input.dynamicImportMarkupEurPerKwh == null) missing.push('inkoopopslag');
-    if (input.dynamicExportDeductionEurPerKwh == null) missing.push('terugleverinhouding');
-    if (input.energyTaxEurPerKwh == null) missing.push('energiebelasting');
-    if (input.electricityVatPercent == null) missing.push('btw');
-    if (input.batteryInvestmentEur == null) missing.push('batterij-investering');
-    return missing;
-  }
-  if (!input.periodStart || !input.periodEnd) missing.push('periode');
-  if (!isUsableAnnualTariff(input.normalTariffEurPerKwh) && !isUsableAnnualTariff(input.offPeakTariffEurPerKwh)) missing.push('stroomprijs');
-  if (!isUsableAnnualTariff(input.feedInTariffEurPerKwh)) missing.push('terugleververgoeding');
-  if (!resolveEstimatedPvProduction(input)) missing.push('PV-opwek');
-  if (input.batteryInvestmentEur == null) missing.push('batterij-investering');
-  return missing;
+  return validateAnnualBillRequiredFields(input);
+}
+
+/** Editing displayed energy invalidates extracted provenance. Never silently keep
+ * using the old PDF pair after a user corrects a value or its period. */
+export function updateAnnualBillEnergyInput(input: AnnualBillInput, patch: Partial<AnnualBillInput>): AnnualBillInput {
+  const energyFields = ['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh', 'periodStart', 'periodEnd', 'periodEndInclusive'];
+  if (!energyFields.some(field => field in patch)) return { ...input, ...patch };
+  const basis = resolveAnnualBillEnergyBasis(input);
+  const result = { ...input, totalUsageKwh: basis.originalImportKwh, totalFeedInKwh: basis.originalExportKwh,
+    periodStart: basis.periodStart, periodEnd: basis.periodEnd, periodEndInclusive: basis.periodEndInclusive,
+    ...patch, physicalEnergy: undefined, annualizedEnergy: undefined, confirmedEnergy: undefined,
+    energyTotalsConfirmed: false, energyConflicts: [], extractionConfidence: undefined };
+  if ('usageNormalKwh' in patch || 'usageOffPeakKwh' in patch) result.totalUsageKwh = undefined;
+  if ('feedInNormalKwh' in patch || 'feedInOffPeakKwh' in patch) result.totalFeedInKwh = undefined;
+  return result;
 }

@@ -32,7 +32,7 @@ import type { AnnualBillAdviceResult } from '@/src/lib/annual-bill/calculateAnnu
 import type { AnnualBillExtract } from '@/src/lib/annual-bill/schema';
 import { logAnnualBill, annualBillLogValues, annualBillErrorDetails } from '@/src/lib/annual-bill/logging';
 import { resolveAnnualBillPrices, annualBillPriceWarnings } from '@/src/lib/annual-bill/tariffs';
-import { annualBillMissingDetails, formatEuro, formatKwh, maskEan, resolveAverageFeedInPrice, resolveAverageImportPrice, resolveAnnualFeedInKwh, resolveAnnualUsageKwh } from '@/src/lib/annual-bill/annualBillUx';
+import { annualBillMissingDetails, formatEuro, formatKwh, maskEan, resolveAverageFeedInPrice, resolveAverageImportPrice, resolveAnnualFeedInKwh, resolveAnnualUsageKwh, updateAnnualBillEnergyInput } from '@/src/lib/annual-bill/annualBillUx';
 
 const Charts = dynamic(() => import('@/components/Charts').then((module) => module.Charts), {
   ssr: false,
@@ -280,8 +280,8 @@ export default function HomePage() {
   const usesIntervalData = !isPvMode || inputMode === 'intervalData';
   const hasPvInputs = !!draftMapping.pvKwh || !!draftMapping.exportKwh;
   const hasAnnualBillInputs =
-    resolveAnnualUsageKwh(annualBillInput) > 0 ||
-    resolveAnnualFeedInKwh(annualBillInput) > 0;
+    (resolveAnnualUsageKwh(annualBillInput) ?? 0) > 0 ||
+    (resolveAnnualFeedInKwh(annualBillInput) ?? 0) > 0;
   const annualBillMissing = annualBillMissingDetails(annualBillInput);
   const annualBillUsedImportPrice = resolveAverageImportPrice(annualBillInput);
   const annualBillPriceDetails = resolveAnnualBillPrices(annualBillInput);
@@ -478,7 +478,7 @@ export default function HomePage() {
   const updateAnnualBillInput = (patch: Partial<AnnualBillInput>) => {
     const traceId = annualBillInput.traceId ?? crypto.randomUUID();
     logAnnualBill('browser.input.changed', traceId, { fields: Object.keys(patch), values: annualBillLogValues(patch) });
-    setAnnualBillInput((prev) => ({ ...prev, ...patch, traceId }));
+    setAnnualBillInput((prev) => ({ ...updateAnnualBillEnergyInput(prev, patch), traceId }));
     setAnnualBillAdvice(null);
     setAnalysisResult(null);
     setAnalysisId(null);
@@ -664,12 +664,12 @@ export default function HomePage() {
       draftSettings.pvPricingMode === 'variable' &&
       !variablePricePeriods.some((period) => !!period.startTs && !!period.endTs)
     ) {
-      setError('Vul minimaal ÃƒÂ©ÃƒÂ©n geldige tariefperiode in.');
+      setError('Vul minimaal één geldige tariefperiode in.');
       return;
     }
 
     setIsCalculatingFinancials(true);
-    setFinancialProgress({ percent: 10, label: 'FinanciÃƒÂ«le berekening voorbereiden...' });
+    setFinancialProgress({ percent: 10, label: 'Financiële berekening voorbereiden...' });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
@@ -679,7 +679,7 @@ export default function HomePage() {
         draftSettings.pvPricingMode === 'variable'
           ? variablePricePeriods.filter((period) => period.startTs && period.endTs)
           : priceIntervals;
-      setFinancialProgress({ percent: 70, label: 'FinanciÃƒÂ«le batterijscenarioÃ¢â‚¬â„¢s doorrekenen...' });
+      setFinancialProgress({ percent: 70, label: 'Financiële batterijscenario’s doorrekenen...' });
       await new Promise((resolve) => setTimeout(resolve, 0));
       const response = await fetch('/api/financial-analysis', {
         method: 'POST',
@@ -707,7 +707,7 @@ export default function HomePage() {
       setFinancialProgress({ percent: 90, label: 'Rapportgrafieken en terugverdientijd klaarzetten...' });
       setFinancialResult(financialAdvice);
       setFinancialPvAdviceCharts(payload.charts);
-      setFinancialProgress({ percent: 100, label: 'FinanciÃƒÂ«le berekening gereed.' });
+      setFinancialProgress({ percent: 100, label: 'Financiële berekening gereed.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Financiele berekening kon niet worden uitgevoerd. Probeer opnieuw.');
     } finally {
@@ -957,7 +957,7 @@ export default function HomePage() {
             />
             <PageTitle
               title={draftSettings.analysisType === 'PV_SELF_CONSUMPTION' ? 'PV Self Consumption Adviseur' : 'Peak Shaving Adviseur'}
-              description="batterij-analyse met scenariovergelijking, rapportage en financiÃƒÂ«le onderbouwing."
+              description="batterij-analyse met scenariovergelijking, rapportage en financiële onderbouwing."
             />
           </div>
           <PremiumBadge tone="success">ENERGIEOPLOSSINGEN</PremiumBadge>
@@ -1087,8 +1087,8 @@ export default function HomePage() {
                 {annualBillInput.contractType !== 'dynamic' && annualBillInput.tariffBasis === 'supply_only' && (
                   <div className="mb-3 rounded-md border border-lime-200 bg-lime-50 p-3 text-sm text-lime-900">
                     <p className="font-semibold">Opbouw gebruikte stroomprijs</p>
-                    <p>Levering: Ã¢â€šÂ¬ {annualBillPriceDetails.components.supplyPrice.toFixed(5).replace('.', ',')}/kWh Ã‚Â· Energiebelasting: Ã¢â€šÂ¬ {annualBillPriceDetails.components.energyTaxPrice.toFixed(5).replace('.', ',')}/kWh Ã‚Â· Toegevoegde btw: Ã¢â€šÂ¬ {(annualBillPriceDetails.components.vatOnSupply + annualBillPriceDetails.components.vatOnEnergyTax).toFixed(5).replace('.', ',')}/kWh.</p>
-                    <p>Totaal: Ã¢â€šÂ¬ {annualBillUsedImportPrice.toFixed(5).replace('.', ',')}/kWh. Btw die al in een tarief zit, wordt niet opnieuw opgeteld.</p>
+                    <p>Levering: € {annualBillPriceDetails.components.supplyPrice.toFixed(5).replace('.', ',')}/kWh · Energiebelasting: € {annualBillPriceDetails.components.energyTaxPrice.toFixed(5).replace('.', ',')}/kWh · Toegevoegde btw: € {(annualBillPriceDetails.components.vatOnSupply + annualBillPriceDetails.components.vatOnEnergyTax).toFixed(5).replace('.', ',')}/kWh.</p>
+                    <p>Totaal: € {annualBillUsedImportPrice.toFixed(5).replace('.', ',')}/kWh. Btw die al in een tarief zit, wordt niet opnieuw opgeteld.</p>
                   </div>
                 )}
                 <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-3">
@@ -1116,11 +1116,11 @@ export default function HomePage() {
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                       <p className="text-xs text-slate-500">Gemiddelde stroomprijs op nota</p>
-                      <p className="text-sm font-semibold text-slate-900">Ã¢â€šÂ¬ {annualBillUsedImportPrice.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}/kWh</p>
+                      <p className="text-sm font-semibold text-slate-900">€ {annualBillUsedImportPrice.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}/kWh</p>
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                       <p className="text-xs text-slate-500">Terugleververgoeding op nota</p>
-                      <p className="text-sm font-semibold text-slate-900">Ã¢â€šÂ¬ {annualBillUsedFeedInPrice.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}/kWh</p>
+                      <p className="text-sm font-semibold text-slate-900">€ {annualBillUsedFeedInPrice.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 5 })}/kWh</p>
                     </div>
                   </div>
                   )}
@@ -1173,16 +1173,16 @@ export default function HomePage() {
                   )}
                   <label className="text-sm font-medium">
                     Stroom afgenomen van het net (kWh per jaar)
-                    <input className="wx-input" type="number" min="0" inputMode="decimal" step="1" value={annualBillInput.totalUsageKwh ?? (resolveAnnualUsageKwh(annualBillInput) || '')} onChange={(event) => updateAnnualBillInput({ totalUsageKwh: toOptionalNumber(event.target.value), ...(event.target.value === '' ? { usageNormalKwh: undefined, usageOffPeakKwh: undefined } : {}) })} />
-                    <span className="mt-1 block text-xs font-normal text-slate-500">Dit heet op je nota ook verbruik of levering. Tel normaal- en dalverbruik bij elkaar op.</span>
+                    <input className="wx-input" type="number" min="0" inputMode="decimal" step="1" value={resolveAnnualUsageKwh(annualBillInput) ?? ''} onChange={(event) => updateAnnualBillInput({ totalUsageKwh: toOptionalNumber(event.target.value), ...(event.target.value === '' ? { usageNormalKwh: undefined, usageOffPeakKwh: undefined } : {}) })} />
+                    <span className="mt-1 block text-xs font-normal text-slate-500">Gebruik fysieke meterafname voor saldering. Netto of gefactureerd verbruik is hiervoor niet geschikt.</span>
                   </label>
                   <label className="text-sm font-medium">
                     Stroom teruggeleverd aan het net (kWh per jaar)
-                    <input className="wx-input" type="number" min="0" inputMode="decimal" step="1" value={annualBillInput.totalFeedInKwh ?? (resolveAnnualFeedInKwh(annualBillInput) || '')} onChange={(event) => updateAnnualBillInput({ totalFeedInKwh: toOptionalNumber(event.target.value), ...(event.target.value === '' ? { feedInNormalKwh: undefined, feedInOffPeakKwh: undefined } : {}) })} />
+                    <input className="wx-input" type="number" min="0" inputMode="decimal" step="1" value={resolveAnnualFeedInKwh(annualBillInput) ?? ''} onChange={(event) => updateAnnualBillInput({ totalFeedInKwh: toOptionalNumber(event.target.value), ...(event.target.value === '' ? { feedInNormalKwh: undefined, feedInOffPeakKwh: undefined } : {}) })} />
                     <span className="mt-1 block text-xs font-normal text-slate-500">Dit is de zonnestroom die je teruglevert, niet de totale opwek van je zonnepanelen. Geen teruglevering? Vul 0 in.</span>
                   </label>
                   <details className="md:col-span-3 rounded-md border border-slate-200 bg-white p-3 text-sm" open={annualBillDetailsOpen} onToggle={(event) => setAnnualBillDetailsOpen(event.currentTarget.open)}>
-                    <summary className="cursor-pointer font-medium text-slate-900">Aanvullende gegevens en tarieven aanpassen (optioneel)</summary>
+                    <summary className="cursor-pointer font-medium text-slate-900">Periode controleren en financiële gegevens aanpassen (prijzen optioneel)</summary>
                     <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <label className="text-sm">
                     Leverancier
@@ -1193,7 +1193,7 @@ export default function HomePage() {
                     <input className="wx-input" type="date" value={annualBillInput.periodStart ?? ''} onChange={(event) => updateAnnualBillInput({ periodStart: event.target.value })} />
                   </label>
                   <label className="text-sm">
-                    Periode einde
+                    Periode einde (standaard exclusief)
                     <input className="wx-input" type="date" value={annualBillInput.periodEnd ?? ''} onChange={(event) => updateAnnualBillInput({ periodEnd: event.target.value })} />
                   </label>
 
@@ -1227,7 +1227,7 @@ export default function HomePage() {
                     <input className="wx-input" type="number" step="5" value={annualBillInput.solarPanelWp ?? ''} onChange={(event) => updateAnnualBillInput({ solarPanelWp: toOptionalNumber(event.target.value) })} />
                   </label>
                   <label className="text-sm">
-                    DakoriÃƒÂ«ntatie
+                    Dakoriëntatie
                     <select className="wx-input" value={annualBillInput.roofOrientation ?? 'other'} onChange={(event) => updateAnnualBillInput({ roofOrientation: event.target.value as AnnualBillInput['roofOrientation'] })}>
                       <option value="south">Zuid</option>
                       <option value="east_west">Oost-west</option>
@@ -1493,7 +1493,7 @@ export default function HomePage() {
             </label>
           )}
           <label className="text-sm">
-            EfficiÃƒÂ«ntie
+            Efficiëntie
             <input
               className="wx-input"
               type="number"
@@ -1591,24 +1591,26 @@ export default function HomePage() {
               </div>
               <div className="rounded-md border border-slate-200 p-3 text-sm">
                 <h3 className="font-semibold">Passende capaciteit</h3>
+                <p>Status: {annualBillAdvice.recommendationStatus}</p>
+                <p>Oorspronkelijke netafname / teruglevering: {formatKwh(annualBillAdvice.energyBasis?.originalImportKwh)} / {formatKwh(annualBillAdvice.energyBasis?.originalExportKwh)}</p>
                 <p>Conservatief: {annualBillAdvice.conservativeBatteryKwh ?? 'Geen'} kWh | Aanbevolen: {annualBillAdvice.recommendedBatteryKwh ?? 'Geen'} kWh | Ruim: {annualBillAdvice.spaciousBatteryKwh ?? 'Geen'} kWh</p>
                 <p>Jaarlijkse netafname: {annualBillAdvice.totalUsageKwh.toFixed(0)} kWh | Netteruglevering: {annualBillAdvice.totalFeedInKwh.toFixed(0)} kWh</p>
                 <p>Profiel: {annualBillAdvice.consumptionProfile === 'business' ? 'bedrijf' : 'huishouden'} | Technische confidence: {annualBillAdvice.confidence} | Bron: {annualBillAdvice.energyBasis?.source}</p>
-                <p>Periode: {annualBillAdvice.energyBasis?.periodStart ?? 'onbekend'} tot {annualBillAdvice.energyBasis?.periodEnd ?? 'onbekend'} | Annualisatiefactor: {annualBillAdvice.energyBasis?.annualizationFactor.toFixed(4)}</p>
+                <p>Periode: {annualBillAdvice.energyBasis?.periodStart ?? 'onbekend'} tot {annualBillAdvice.energyBasis?.periodEnd ?? 'onbekend'} ({annualBillAdvice.energyBasis?.periodEndInclusive ? 'einde inclusief' : 'einde exclusief'}) | Annualisatiefactor: {annualBillAdvice.energyBasis?.annualizationFactor.toFixed(4)}</p>
                 <p>Dagelijkse opslagbehoefte P50/P75/P90: {annualBillAdvice.storageStatistics && [annualBillAdvice.storageStatistics.p50, annualBillAdvice.storageStatistics.p75, annualBillAdvice.storageStatistics.p90].map(x => x.toFixed(1)).join(' / ')} kWh</p>
                 {annualBillAdvice.options.filter(x => x.batteryKwh === annualBillAdvice.recommendedBatteryKwh).map(option => {
                   const next = annualBillAdvice.options.find(x => x.batteryKwh > option.batteryKwh);
-                  return <div key={option.batteryKwh}><p>Minder netafname: {option.annualGridImportReductionKwh?.toFixed(0)} kWh/jaar ? Minder teruglevering: {option.annualExportReductionKwh?.toFixed(0)} kWh/jaar ? Equivalente cycli: {option.technicalSimulation?.equivalentCyclesPerYear.toFixed(1)} | {(option.percentOfMaximumSavings * 100).toFixed(1)}% van praktisch maximum.</p>
+                  return <div key={option.batteryKwh}><p>Minder netafname: {option.annualGridImportReductionKwh?.toFixed(0)} kWh/jaar · Minder teruglevering: {option.annualExportReductionKwh?.toFixed(0)} kWh/jaar · Equivalente cycli: {option.technicalSimulation?.equivalentCyclesPerYear.toFixed(1)} | {(option.percentOfMaximumSavings * 100).toFixed(1)}% van praktisch maximum.</p>
                     <p>{next ? `Volgende grotere batterij (${next.batteryKwh} kWh): ${next.marginalGainKwh?.toFixed(0)} kWh/jaar extra, ${next.marginalGainPerAddedKwh?.toFixed(1)} kWh/jaar per extra kWh capaciteit.` : 'Geen grotere optie binnen de praktische kandidaatset.'}</p></div>;
                 })}
                 <p>Indicatief advies op basis van jaarnota; kwartierdata geeft een nauwkeuriger dimensionering.</p>
               </div>
               {annualBillAdvice.dynamicPricing && (
                 <div className="mt-3 rounded-md border border-slate-200 p-3 text-sm">
-                  <p className="font-semibold">Dynamische prijssimulatie</p>
+                  <p className="font-semibold">Dynamische prijssimulatie (apart financieel model, informatief)</p>
                   <p>{annualBillAdvice.dynamicPricing.source}</p>
                   <p>Prijsperiode: {annualBillAdvice.dynamicPricing.start.slice(0, 10)} tot {annualBillAdvice.dynamicPricing.end.slice(0, 10)} (einde exclusief, UTC), {annualBillAdvice.dynamicPricing.hourCount} uur.</p>
-                  <p>Geschat profiel: {annualBillAdvice.dynamicPricing.profile === 'home' ? 'huishouden' : 'bedrijf'}. Gewogen afnameprijs: ? {annualBillAdvice.dynamicPricing.averageImportPrice.toFixed(4)}/kWh; gewogen terugleverprijs: ? {annualBillAdvice.dynamicPricing.averageExportPrice.toFixed(4)}/kWh.</p>
+                  <p>Geschat profiel: {annualBillAdvice.dynamicPricing.profile === 'home' ? 'huishouden' : 'bedrijf'}. Gewogen afnameprijs: € {annualBillAdvice.dynamicPricing.averageImportPrice.toFixed(4)}/kWh; gewogen terugleverprijs: € {annualBillAdvice.dynamicPricing.averageExportPrice.toFixed(4)}/kWh.</p>
                   {annualBillAdvice.options.filter((option) => option.batteryKwh === annualBillAdvice.recommendedBatteryKwh).map((option) => option.dynamicSimulation && (
                     <div key={option.batteryKwh} className="mt-2">
                       <p>Variabele stroomkosten zonder batterij: {formatEuro(option.dynamicSimulation.baselineCostEur)}; met batterij: {formatEuro(option.dynamicSimulation.batteryCostEur)} per jaar.</p>
@@ -1676,7 +1678,7 @@ export default function HomePage() {
                   {annualBillAdvice.options.map((option) => (
                     <div key={option.batteryKwh} className="rounded-md border border-slate-200 bg-white p-3 text-sm">
                       <div className="flex items-center justify-between">
-                        <strong>{option.batteryKwh} kWh{option.batteryKwh === annualBillAdvice.recommendedBatteryKwh ? ' ? Aanbevolen' : ''}</strong>
+                        <strong>{option.batteryKwh} kWh{option.batteryKwh === annualBillAdvice.recommendedBatteryKwh ? ' · Aanbevolen' : ''}</strong>
                       </div>
                       <p className="mt-2 text-slate-600">Extra eigen zon: {formatKwh(option.estimatedAnnualStoredSolarKwh)} per jaar</p>
                       <p className="text-slate-600">Van maximale kWh-besparing: {(option.percentOfMaximumSavings * 100).toLocaleString('nl-NL', { maximumFractionDigits: 2 })}%</p>
@@ -1804,7 +1806,7 @@ export default function HomePage() {
                       <div className="mt-1 text-lg font-semibold text-slate-900">
                         P75 {advice.percentiles.p75StorageNeedKwh.toFixed(1)} kWh
                       </div>
-                      <div className="mt-1 text-xs text-slate-600">Representatieve dagelijkse opslagbehoefte vÃƒÂ³ÃƒÂ³r safety factor en DoD-correctie.</div>
+                      <div className="mt-1 text-xs text-slate-600">Representatieve dagelijkse opslagbehoefte vóór safety factor en DoD-correctie.</div>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <div className="text-xs uppercase tracking-wide text-slate-500">Datadekking</div>
@@ -1835,7 +1837,7 @@ export default function HomePage() {
                           {hybrid.simulationAdvice.recommended.cyclesPerYear.toFixed(1)} cycli/jaar.
                         </p>
                         <p>
-                          Financi?le berekening en terugverdientijd worden pas hieronder apart doorgerekend op basis van contracttype en prijsdata.
+                          Financiële berekening en terugverdientijd worden pas hieronder apart doorgerekend op basis van contracttype en prijsdata.
                         </p>
                       </>
                     )}
@@ -1884,9 +1886,9 @@ export default function HomePage() {
 
           {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && (
             <div className="wx-card">
-              <h3 className="wx-title">FinanciÃƒÂ«le berekening na advies</h3>
+              <h3 className="wx-title">Financiële berekening na advies</h3>
               <p className="text-sm text-slate-600">
-                Eerst is het technische batterijadvies bepaald. Vul daarna de financiÃƒÂ«le aannames in om de terugverdientijd en onderbouwing apart te berekenen en te downloaden.
+                Eerst is het technische batterijadvies bepaald. Vul daarna de financiële aannames in om de terugverdientijd en onderbouwing apart te berekenen en te downloaden.
               </p>
               <div className="mt-4 grid gap-4 lg:grid-cols-3">
                 <label className="text-sm">
@@ -2046,7 +2048,7 @@ export default function HomePage() {
               </div>
               {draftSettings.pvPricingMode !== 'average' && (
                 <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600">
-                  <p>Prijsbestand: {priceFileName ?? 'Nog niet geÃƒÂ¼pload'}</p>
+                  <p>Prijsbestand: {priceFileName ?? 'Nog niet geüpload'}</p>
                   <p>Gekoppelde prijspunten: {draftSettings.pvPricingMode === 'dynamic' ? priceIntervals.length : variablePricePeriods.length}</p>
                   {financialResult?.configUsed.pricingStats && (
                     <>
