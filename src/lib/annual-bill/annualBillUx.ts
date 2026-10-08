@@ -94,14 +94,17 @@ export function annualBillMissingDetails(input: AnnualBillInput): string[] {
 /** Editing displayed energy invalidates extracted provenance. Never silently keep
  * using the old PDF pair after a user corrects a value or its period. */
 export function updateAnnualBillEnergyInput(input: AnnualBillInput, patch: Partial<AnnualBillInput>): AnnualBillInput {
-  const energyFields = ['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh', 'periodStart', 'periodEnd', 'periodEndInclusive'];
+  const energyFields = ['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh', 'periodStart', 'periodEnd', 'periodEndInclusive', 'energyVolumesAnnualized'];
   if (!energyFields.some(field => field in patch)) return { ...input, ...patch };
   const basis = resolveAnnualBillEnergyBasis(input);
   const result = { ...input, totalUsageKwh: basis.originalImportKwh, totalFeedInKwh: basis.originalExportKwh,
-    periodStart: basis.periodStart, periodEnd: basis.periodEnd, periodEndInclusive: basis.periodEndInclusive,
+    ...(input.physicalEnergy || input.annualizedEnergy || input.confirmedEnergy ? { usageNormalKwh: undefined, usageOffPeakKwh: undefined, feedInNormalKwh: undefined, feedInOffPeakKwh: undefined } : {}),
+    periodStart: basis.periodStart, periodEnd: basis.periodEnd, periodEndInclusive: basis.periodEndInclusive, energyVolumesAnnualized: basis.annualized,
     ...patch, physicalEnergy: undefined, annualizedEnergy: undefined, confirmedEnergy: undefined,
     energyTotalsConfirmed: false, energyConflicts: [], extractionConfidence: undefined };
   if ('usageNormalKwh' in patch || 'usageOffPeakKwh' in patch) result.totalUsageKwh = undefined;
   if ('feedInNormalKwh' in patch || 'feedInOffPeakKwh' in patch) result.totalFeedInKwh = undefined;
+  if ('totalUsageKwh' in patch) { result.usageNormalKwh = undefined; result.usageOffPeakKwh = undefined; }
+  if ('totalFeedInKwh' in patch) { result.feedInNormalKwh = undefined; result.feedInOffPeakKwh = undefined; }
   return result;
 }

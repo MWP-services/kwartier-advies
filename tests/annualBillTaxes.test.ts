@@ -47,7 +47,8 @@ describe('electricity tax and VAT', () => {
     expect(resolveAnnualBillPrices(input).importPrice).toBe(0.3);
   });
   it('uses the same tax-inclusive price in advice and report', () => {
-    const input = normalizeAnnualBillData(extractAnnualBillData(`Totaal teruglevering 1338 kWh\n${supply}\n${tax}`));
+    // Enough explicit solar export for this test to exercise financial valuation.
+    const input = normalizeAnnualBillData(extractAnnualBillData(`Totaal teruglevering 16000 kWh\n${supply}\n${tax}`));
     const result = buildAnnualBillIndicativeAnalysis({ ...input, energyTotalsConfirmed: true }, { ...defaultAnalysisSettings, analysisType: 'PV_SELF_CONSUMPTION', pvInputMode: 'annualBill' })!;
     const option = result.annualBillAdvice!.options[0];
     expect(option.estimatedAnnualSavingsEur).toBeCloseTo(option.annualGridImportReductionKwh! * resolveAnnualBillPrices(input).importPrice - option.annualExportReductionKwh! * 0.06, 1);

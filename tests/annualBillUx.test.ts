@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveAnnualBillEnergyBasis } from '../src/lib/annual-bill/energyBasis';
 import {
   annualBillConfidenceLabel,
   formatEuro,
@@ -57,6 +58,10 @@ describe('annual bill UX helpers', () => {
     expect(corrected.energyTotalsConfirmed).toBe(false);
     expect(validateAnnualBillRequiredFields(corrected).length).toBeGreaterThan(0);
     expect(validateAnnualBillRequiredFields({ ...corrected, energyTotalsConfirmed: true })).toEqual([]);
+  });
+  it('does not double-annualize an edited explicit annual summary', () => {
+    const edited = updateAnnualBillEnergyInput({ source: 'pdf', annualizedEnergy: { gridImportKwh: 4200, gridExportKwh: 1800, periodStart: '2025-01-01', periodEnd: '2025-10-28' } }, { totalUsageKwh: 4500 });
+    expect(resolveAnnualBillEnergyBasis({ ...edited, energyTotalsConfirmed: true })).toMatchObject({ status: 'usable', annualizationFactor: 1, gridImportKwh: 4500 });
   });
 });
 

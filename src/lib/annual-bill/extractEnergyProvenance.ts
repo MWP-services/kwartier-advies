@@ -15,7 +15,14 @@ export function extractEnergyPeriod(text: string): Pick<EnergyPair, 'periodStart
  */
 export function extractEnergyProvenance(text: string): AnnualBillRawExtract {
   type Kind = 'physicalEnergy' | 'annualizedEnergy';
-  type Row = { value: number; evidence: string };
+  type Row = { value: number; evidence: string; register: 'total' | 'normal' | 'offPeak' };
+  const aggregate = (rows: Row[]) => {
+    const values = (register: Row['register']) => [...new Set(rows.filter(r => r.register === register).map(r => r.value))];
+    const total = values('total'); const normal = values('normal'); const offPeak = values('offPeak');
+    const split = normal.length === 1 && offPeak.length === 1 ? normal[0] + offPeak[0] : undefined;
+    return { value: total[0] ?? split, conflict: [total, normal, offPeak].some(x => x.length > 1)
+      || (total.length === 1 && split != null && Math.abs(total[0] - split) > 1) };
+  };
   const groups = new Map<string, { kind: Kind; period: ReturnType<typeof extractEnergyPeriod>; imports: Row[]; exports: Row[] }>();
   let kind: Kind | undefined;
   let period: ReturnType<typeof extractEnergyPeriod>;
@@ -34,20 +41,21 @@ export function extractEnergyProvenance(text: string): AnnualBillRawExtract {
       : /\b(?:netafname|afname|import|verbruik|levering)\b/i.test(line) ? 'imports' : undefined;
     if (!direction) continue;
     const quantities = [...line.matchAll(new RegExp(`(${BILL_NUMBER_PATTERN})\\s*kWh\\b(?!\\s*(?:/|per))`, 'gi'))];
-    if (quantities.length !== 1 || /normaal|daltarief|\bdal\b/i.test(line)) continue;
+    if (quantities.length !== 1) continue;
     const value = parseBillNumber(quantities[0][1]);
     const pairedPeriod = rowPeriod ?? period;
-    if (value == null || value < 0 || !pairedPeriod) continue;
+    if (value == null || value < 0 || (!pairedPeriod && rowKind !== 'annualizedEnergy')) continue;
     const key = JSON.stringify([section, rowKind, pairedPeriod]);
     const group = groups.get(key) ?? { kind: rowKind, period: pairedPeriod, imports: [], exports: [] };
-    group[direction].push({ value, evidence: line }); groups.set(key, group);
+    const register = /normaal/i.test(line) ? 'normal' : /daltarief|\bdal\b/i.test(line) ? 'offPeak' : 'total';
+    group[direction].push({ value, evidence: line, register }); groups.set(key, group);
   }
   const raw: AnnualBillRawExtract = {};
   for (const energyKind of ['physicalEnergy', 'annualizedEnergy'] as const) {
-    const candidates = [...groups.values()].filter(g => g.kind === energyKind);
-    const complete = candidates.filter(g => g.imports.length && g.exports.length);
-    const conflicts = candidates.some(g => new Set(g.imports.map(r => r.value)).size > 1 || new Set(g.exports.map(r => r.value)).size > 1)
-      || new Set(complete.map(g => JSON.stringify([g.period, g.imports[0].value, g.exports[0].value]))).size > 1;
+    const candidates = [...groups.values()].filter(g => g.kind === energyKind).map(g => ({ ...g, imp: aggregate(g.imports), exp: aggregate(g.exports) }));
+    const complete = candidates.filter(g => g.imp.value != null && g.exp.value != null);
+    const conflicts = candidates.some(g => g.imp.conflict || g.exp.conflict)
+      || new Set(complete.map(g => JSON.stringify([g.period, g.imp.value, g.exp.value]))).size > 1;
     if (conflicts) {
       raw.energyConflicts = { value: 'conflict', confidence: 0, energyConflicts: ['Conflicterende energieoverzichten: bevestig eerst de juiste fysieke waarden en periode.'], requiresReview: true, source: 'rules' };
       continue;
@@ -56,7 +64,7 @@ export function extractEnergyProvenance(text: string): AnnualBillRawExtract {
     if (!group) continue;
     const evidence = [...group.imports, ...group.exports].map(r => r.evidence).join('\n');
     raw[energyKind] = { value: energyKind, confidence: 0.95, source: 'rules', evidenceSnippet: evidence,
-      energyPair: { gridImportKwh: group.imports[0].value, gridExportKwh: group.exports[0].value,
+      energyPair: { gridImportKwh: group.imp.value!, gridExportKwh: group.exp.value!,
         ...group.period, annualized: energyKind === 'annualizedEnergy', evidence, extractionConfidence: 0.95 } };
   }
   return raw;

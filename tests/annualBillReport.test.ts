@@ -5,6 +5,7 @@ import { generateInteractiveReportHtml } from '../lib/reportHtml';
 import type { PdfPayload } from '../lib/pdf';
 import { readFileSync } from 'node:fs';
 import { STACK_BATTERY_OPTIONS_KWH, batteryBrochureKey } from '../lib/batteryAdviceOptions';
+import { calculateAnnualBillAdvice } from '../src/lib/annual-bill/calculateAnnualBillAdvice';
 
 function payload(capacity?: number): PdfPayload {
   const result = buildAnnualBillIndicativeAnalysis({ totalUsageKwh: 4200, totalFeedInKwh: 1800, supplierName: '<script>alert(1)</script>', source: 'manual' }, { ...defaultAnalysisSettings, analysisType: 'PV_SELF_CONSUMPTION', pvInputMode: 'manualAnnualBill' })!;
@@ -12,7 +13,7 @@ function payload(capacity?: number): PdfPayload {
     analysisType: 'PV_SELF_CONSUMPTION', reportVariant: 'advice', contractedPowerKw: 0,
     maxObservedKw: 0, exceedanceCount: 0, compliance: 1, method: 'P95', efficiency: 0.9, safetyFactor: 1,
     sizing: result.sizing, quality: result.quality, topEvents: [], scenarios: result.scenarios,
-    annualBill: { input: result.annualBillInput!, advice: { ...result.annualBillAdvice!, ...(capacity == null ? {} : { recommendedBatteryKwh: capacity }) }, warnings: result.pvWarnings }
+    annualBill: { input: result.annualBillInput!, advice: capacity == null ? result.annualBillAdvice! : calculateAnnualBillAdvice({ ...result.annualBillInput!, batteryOptionsKwh: [capacity] }), warnings: result.pvWarnings }
   };
 }
 
@@ -67,12 +68,32 @@ describe('annual bill report', () => {
     expect(html).not.toContain('data:application/pdf;base64,');
   });
 
-  it('identifies estimated annual totals in the report', () => {
+  it('reports insufficient energy without inventing export or recommending a battery', () => {
     const result = buildAnnualBillIndicativeAnalysis({ totalUsageKwh: 4200 }, { ...defaultAnalysisSettings, analysisType: 'PV_SELF_CONSUMPTION', pvInputMode: 'manualAnnualBill' })!;
     const input = payload();
     input.annualBill = { input: result.annualBillInput!, advice: result.annualBillAdvice! };
     const html = generateInteractiveReportHtml(input);
-    expect(html).toContain('totale teruglevering geschat');
-    expect(html).toContain('1.050');
+    expect(html).toContain('insufficient_data');
+    expect(html).toContain('Geen batterij aanbevolen');
+    expect(html).not.toContain('teruglevering geschat');
+    expect(html).not.toContain('data:application/pdf;base64,');
+  });
+
+  it('contains V2 evidence and product details without legacy formula text or mojibake', () => {
+    const html = generateInteractiveReportHtml(payload());
+    for (const text of ['Energiegrondslag', 'Oorspronkelijke energieperiode', 'Annualisatiefactor', 'P50 / P75 / P90', 'conservatief / aanbevolen / ruim', 'Productspecificatiebron', 'Laadvermogen / ontlaadvermogen', 'Round-trip rendement', 'Jaarlijkse importreductie', 'Jaarlijkse exportreductie', 'Marginale meeropbrengst', 'Technische confidence', '35.040 kwartieren']) expect(html).toContain(text);
+    expect(html).not.toMatch(/45%|230 cycli|geen gesimuleerd dagprofiel|wordt niet geannualiseerd|\u00c3|\u00c2|\u00e2\u20ac|financi\?/i);
+    const ui = readFileSync('app/page.tsx', 'utf8');
+    expect(ui).not.toMatch(/\u00c3|\u00c2|\u00e2\u20ac|Financi\?/);
+    expect(ui).toContain('recommendationStatus');
+    expect(ui).toContain('originalImportKwh');
+    expect(ui).toContain('storageStatistics.p90');
+  });
+  it('reports no PV storage recommendation for explicit zero export', () => {
+    const input = payload();
+    input.annualBill!.advice = calculateAnnualBillAdvice({ source: 'manual', totalUsageKwh: 4200, totalFeedInKwh: 0 });
+    const html = generateInteractiveReportHtml(input);
+    expect(html).toContain('no_solar_shift');
+    expect(html).toContain('Op basis van de beschikbare teruglevering is geen PV-opslagbatterij aanbevolen.');
   });
 });

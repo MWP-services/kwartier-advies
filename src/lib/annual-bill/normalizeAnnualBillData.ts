@@ -41,7 +41,7 @@ export function normalizeAnnualBillData(raw: AnnualBillRawExtract, traceId?: str
   const input: AnnualBillInput = {
     physicalEnergy: raw.physicalEnergy?.source === 'rules' ? raw.physicalEnergy.energyPair : undefined,
     annualizedEnergy: raw.annualizedEnergy?.source === 'rules' ? raw.annualizedEnergy.energyPair : undefined,
-    energyConflicts: raw.energyConflicts?.energyConflicts ?? (['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh'] as const).filter(field => raw[field]?.requiresReview).map(field => `Conflicterende extractie voor ${field}: controleer fysieke waarden.`),
+    energyConflicts: raw.energyConflicts?.energyConflicts ?? (raw.physicalEnergy?.energyPair || raw.annualizedEnergy?.energyPair ? [] : (['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh'] as const).filter(field => raw[field]?.requiresReview).map(field => `Conflicterende extractie voor ${field}: controleer fysieke waarden.`)),
     periodEndInclusive: raw.periodEndInclusive?.value === 1,
     contractType: ['fixed', 'variable', 'dynamic', 'unknown'].includes(String(raw.contractType?.value)) ? raw.contractType!.value as AnnualBillInput['contractType'] : 'unknown',
     dynamicImportMarkupEurPerKwh: numeric(raw, 'dynamicImportMarkupEurPerKwh'),

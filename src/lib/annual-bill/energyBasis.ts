@@ -12,6 +12,8 @@ export type EnergyBasisInput = {
   periodStart?: string; periodEnd?: string; source?: 'pdf' | 'manual';
   energyTotalsConfirmed?: boolean; extractionConfidence?: number; missingFields?: string[];
   periodEndInclusive?: boolean; energyConflicts?: string[];
+  /** Explicit user declaration, retained when correcting extracted annual volumes. */
+  energyVolumesAnnualized?: boolean;
 };
 export type AnnualBillEnergyBasis = {
   gridImportKwh: number; gridExportKwh: number;
@@ -33,17 +35,25 @@ export function resolveAnnualBillEnergyBasis(input: EnergyBasisInput): AnnualBil
   // An incomplete pair must never borrow the other direction from billing data.
   const imp = pair ? pair.gridImportKwh : total(input.totalUsageKwh, input.usageNormalKwh, input.usageOffPeakKwh);
   const exp = pair ? pair.gridExportKwh : total(input.totalFeedInKwh, input.feedInNormalKwh, input.feedInOffPeakKwh);
-  const start = pair?.periodStart ?? input.periodStart;
-  const end = pair?.periodEnd ?? input.periodEnd;
-  const periodEndInclusive = pair?.periodEndInclusive ?? input.periodEndInclusive ?? false;
+  // Dates belong to their pair too: never borrow a billing period for meter data.
+  const start = pair ? pair.periodStart : input.periodStart;
+  const end = pair ? pair.periodEnd : input.periodEnd;
+  const periodEndInclusive = (pair ? pair.periodEndInclusive : input.periodEndInclusive) ?? false;
   const date = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value ? Date.parse(value) : NaN;
   const days = start && end ? (date(end) - date(start)) / 86400000 + Number(periodEndInclusive) : undefined;
-  const annualized = !!input.annualizedEnergy && !input.physicalEnergy || pair?.annualized === true;
+  const annualized = pair ? (!!input.annualizedEnergy && !input.physicalEnergy || pair.annualized === true) : input.energyVolumesAnnualized === true;
   const warnings: string[] = [];
   let status: AnnualBillEnergyBasis['status'] = 'usable';
   let confidence: AnnualBillEnergyBasis['confidence'] = 'medium';
   for (const [value, label] of [[imp, 'netafname'], [exp, 'netteruglevering']] as const) {
     if (!valid(value)) { status = 'insufficient_data'; warnings.push(`Geen betrouwbaar batterijcapaciteitsadvies mogelijk: jaarlijkse ${label} ontbreekt of is ongeldig.`); }
+  }
+  if (!pair) {
+    for (const [value, normal, offPeak] of [[input.totalUsageKwh, input.usageNormalKwh, input.usageOffPeakKwh], [input.totalFeedInKwh, input.feedInNormalKwh, input.feedInOffPeakKwh]]) {
+      if (valid(value) && valid(normal) && valid(offPeak) && Math.abs(value - normal - offPeak) > 1) {
+        status = 'insufficient_data'; warnings.push('Energietotaal conflicteert met normaal- en dalregisters; corrigeer eerst de fysieke waarden.');
+      }
+    }
   }
   if (!pair && input.source === 'pdf' && !input.energyTotalsConfirmed) {
     status = 'insufficient_data'; warnings.push('Bevestig dat de factuurtotalen fysieke netafname en netteruglevering over dezelfde periode zijn; gesaldeerde waarden zijn niet bruikbaar.');
@@ -63,7 +73,8 @@ export function resolveAnnualBillEnergyBasis(input: EnergyBasisInput): AnnualBil
   if (input.energyConflicts?.length) {
     status = 'insufficient_data'; warnings.push(...input.energyConflicts);
   }
-  if (((pair?.extractionConfidence ?? input.extractionConfidence) != null && (pair?.extractionConfidence ?? input.extractionConfidence)! < 0.8) || input.missingFields?.some(x => /conflict|review|controle/i.test(x))) {
+  const extractionConfidence = pair?.extractionConfidence ?? input.extractionConfidence;
+  if (extractionConfidence != null && (!Number.isFinite(extractionConfidence) || extractionConfidence < 0.8)) {
     confidence = 'low'; warnings.push('Extractie vereist controle op conflicten of onzekerheid.');
   }
   const factor = !annualized && days && Number.isFinite(days) && days > 0 ? 365 / days : 1;

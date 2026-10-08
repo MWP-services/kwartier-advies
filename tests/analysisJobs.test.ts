@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as dynamicPrices from '../src/lib/annual-bill/recentDynamicPrices';
 import { POST as startAnalyze } from '@/app/api/analyze/route';
 import { GET as getAnalyzeHealth } from '@/app/api/analyze/health/route';
 import { GET as getAnalyzeStatus } from '@/app/api/analyze/status/route';
@@ -45,6 +46,7 @@ describe('analysis jobs', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     setAnalysisJobStoreForTests(null);
     stopAnalysisWorkerForTests();
     if (previousDisableWorker == null) {
@@ -72,6 +74,16 @@ describe('analysis jobs', () => {
     expect(statusResponse.status).toBe(200);
     const statusPayload = await readJson<{ status: string }>(statusResponse);
     expect(statusPayload.status).toBe('queued');
+  });
+
+  it('completes technical annual advice even if dynamic price retrieval fails', async () => {
+    vi.spyOn(dynamicPrices, 'fetchRecentMarketYear').mockRejectedValue(new Error('Price provider unavailable'));
+    const job = await store.createJob({ settings: { ...settings, analysisType: 'PV_SELF_CONSUMPTION', pvInputMode: 'manualAnnualBill' }, annualBillInput: { source: 'manual', contractType: 'dynamic', totalUsageKwh: 4200, totalFeedInKwh: 1800 } });
+    await processAnalysisQueueOnce();
+    const completed = await store.getJob(job.jobId);
+    expect(completed?.status).toBe('completed');
+    expect(completed?.result?.annualBillAdvice?.recommendationStatus).toBe('recommended');
+    expect(completed?.result?.annualBillAdvice?.warnings.join(' ')).toContain('marktprijzen ontbreken');
   });
 
   it('reuses an active job for duplicate analysis start requests', async () => {

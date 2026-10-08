@@ -29,6 +29,7 @@ import type { PdfPayload } from '@/lib/pdf';
 import type { PriceInterval } from '@/lib/pricing';
 import type { ScenarioResult } from '@/lib/simulation';
 import type { AnnualBillAdviceResult } from '@/src/lib/annual-bill/calculateAnnualBillAdvice';
+import { resolveAnnualBillEnergyBasis } from '@/src/lib/annual-bill/energyBasis';
 import type { AnnualBillExtract } from '@/src/lib/annual-bill/schema';
 import { logAnnualBill, annualBillLogValues, annualBillErrorDetails } from '@/src/lib/annual-bill/logging';
 import { resolveAnnualBillPrices, annualBillPriceWarnings } from '@/src/lib/annual-bill/tariffs';
@@ -283,6 +284,7 @@ export default function HomePage() {
     (resolveAnnualUsageKwh(annualBillInput) ?? 0) > 0 ||
     (resolveAnnualFeedInKwh(annualBillInput) ?? 0) > 0;
   const annualBillMissing = annualBillMissingDetails(annualBillInput);
+  const annualBillEnergyBasis = resolveAnnualBillEnergyBasis(annualBillInput);
   const annualBillUsedImportPrice = resolveAverageImportPrice(annualBillInput);
   const annualBillPriceDetails = resolveAnnualBillPrices(annualBillInput);
   const annualBillUsedFeedInPrice = resolveAverageFeedInPrice(annualBillInput);
@@ -1108,7 +1110,7 @@ export default function HomePage() {
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                       <p className="text-xs text-slate-500">Periode</p>
-                      <p className="text-sm font-semibold text-slate-900">{annualBillInput.periodStart || '-'} t/m {annualBillInput.periodEnd || '-'}</p>
+                      <p className="text-sm font-semibold text-slate-900">{annualBillEnergyBasis.periodStart || '-'} tot {annualBillEnergyBasis.periodEnd || '-'} ({annualBillEnergyBasis.periodEndInclusive ? 'inclusief' : 'exclusief'})</p>
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                       <p className="text-xs text-slate-500">Leverancier</p>
@@ -1190,11 +1192,17 @@ export default function HomePage() {
                   </label>
                   <label className="text-sm">
                     Periode start
-                    <input className="wx-input" type="date" value={annualBillInput.periodStart ?? ''} onChange={(event) => updateAnnualBillInput({ periodStart: event.target.value })} />
+                    <input className="wx-input" type="date" value={annualBillEnergyBasis.periodStart ?? ''} onChange={(event) => updateAnnualBillInput({ periodStart: event.target.value })} />
                   </label>
                   <label className="text-sm">
                     Periode einde (standaard exclusief)
-                    <input className="wx-input" type="date" value={annualBillInput.periodEnd ?? ''} onChange={(event) => updateAnnualBillInput({ periodEnd: event.target.value })} />
+                    <input className="wx-input" type="date" value={annualBillEnergyBasis.periodEnd ?? ''} onChange={(event) => updateAnnualBillInput({ periodEnd: event.target.value })} />
+                  </label>
+                  <label className="text-sm">
+                    <input type="checkbox" checked={annualBillEnergyBasis.periodEndInclusive} onChange={(event) => updateAnnualBillInput({ periodEndInclusive: event.target.checked })} /> Einddatum telt mee (t/m op de nota)
+                  </label>
+                  <label className="text-sm">
+                    <input type="checkbox" checked={annualBillEnergyBasis.annualized} onChange={(event) => updateAnnualBillInput({ energyVolumesAnnualized: event.target.checked })} /> Totalen zijn al geannualiseerde jaarvolumes
                   </label>
 
 
@@ -1592,6 +1600,7 @@ export default function HomePage() {
               <div className="rounded-md border border-slate-200 p-3 text-sm">
                 <h3 className="font-semibold">Passende capaciteit</h3>
                 <p>Status: {annualBillAdvice.recommendationStatus}</p>
+                {annualBillAdvice.energyBasis?.evidence && <p>Bronregels: {annualBillAdvice.energyBasis.evidence}</p>}
                 <p>Oorspronkelijke netafname / teruglevering: {formatKwh(annualBillAdvice.energyBasis?.originalImportKwh)} / {formatKwh(annualBillAdvice.energyBasis?.originalExportKwh)}</p>
                 <p>Conservatief: {annualBillAdvice.conservativeBatteryKwh ?? 'Geen'} kWh | Aanbevolen: {annualBillAdvice.recommendedBatteryKwh ?? 'Geen'} kWh | Ruim: {annualBillAdvice.spaciousBatteryKwh ?? 'Geen'} kWh</p>
                 <p>Jaarlijkse netafname: {annualBillAdvice.totalUsageKwh.toFixed(0)} kWh | Netteruglevering: {annualBillAdvice.totalFeedInKwh.toFixed(0)} kWh</p>

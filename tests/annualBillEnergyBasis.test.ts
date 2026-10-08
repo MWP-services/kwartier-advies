@@ -54,6 +54,9 @@ describe('energy basis and annualization', () => {
     expect(resolve({ physicalEnergy: { ...pair, gridExportKwh: 0 } }).status).toBe('usable');
     expect(resolve({ physicalEnergy: pair, energyConflicts: ['Twee verschillende fysieke totalen'] }).status).toBe('insufficient_data');
     expect(resolve({ physicalEnergy: pair, extractionConfidence: 0.3 }).confidence).toBe('low');
+    expect(resolve({ physicalEnergy: pair, missingFields: ['tariff_review', 'battery_investment_controle'] }).confidence).toBe('medium');
+    expect(resolve({ source: 'manual', totalUsageKwh: 4200, usageNormalKwh: 1000, usageOffPeakKwh: 1000, totalFeedInKwh: 0 }).status).toBe('insufficient_data');
+    expect(resolve({ physicalEnergy: { gridImportKwh: 4200, gridExportKwh: 1800 }, periodStart: '2025-01-01', periodEnd: '2026-01-01' }).status).toBe('insufficient_data');
   });
 });
 
@@ -71,6 +74,7 @@ describe('PDF provenance through normalization and advice', () => {
   it('recognizes an explicit annualized pair without double scaling', () => {
     const input = parse('Geannualiseerd jaaroverzicht elektriciteit\nPeriode 01-01-2025 tot 28-10-2025\nNetafname 4200 kWh\nNetteruglevering 1800 kWh');
     expect(resolve(input)).toMatchObject({ source: 'annualized_summary', annualizationFactor: 1, gridImportKwh: 4200 });
+    expect(resolve(parse('Geannualiseerd jaaroverzicht elektriciteit\nNetafname 4200 kWh\nNetteruglevering 1800 kWh'))).toMatchObject({ source: 'annualized_summary', annualizationFactor: 1, status: 'usable' });
   });
   it.each([
     'Fysieke import 35444 kWh 01-01-2025 tot 01-01-2026\nFysieke export 16439 kWh 01-02-2025 tot 01-02-2026',
@@ -87,6 +91,12 @@ describe('PDF provenance through normalization and advice', () => {
     const input = parse('Meteroverzicht\n01-01-2025 tot 01-01-2026\nAfname 35444 kWh\nAfname 19005 kWh\nTeruglevering 16439 kWh');
     expect(input.energyConflicts?.length).toBeGreaterThan(0);
     expect(resolve({ ...input, energyTotalsConfirmed: true }).status).toBe('insufficient_data');
+  });
+  it('pairs complete normal/off-peak registers only within a physical meter section', () => {
+    const text = 'Meteroverzicht\n01-01-2025 tot 01-01-2026\nAfname normaal 20000 kWh\nAfname dal 15444 kWh\nTeruglevering normaal 12000 kWh\nTeruglevering dal 4439 kWh';
+    expect(parse(text).physicalEnergy).toMatchObject({ gridImportKwh: 35444, gridExportKwh: 16439 });
+    expect(parse(text.replace('Afname dal 15444 kWh', '')).physicalEnergy).toBeUndefined();
+    expect(resolve(parse(text + '\nTotaal afname 19005 kWh')).status).toBe('insufficient_data');
   });
   it('does not lower technical extraction confidence because a tariff is uncertain', () => {
     const raw = extractAnnualBillData('Totaal verbruik 4200 kWh\nTotale teruglevering 1800 kWh');

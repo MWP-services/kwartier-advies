@@ -94,18 +94,18 @@ const MINIMUM_SOC_FRACTION = 0.1;
 const ANNUAL_ENERGY_SAVINGS_TARGET = 0.90;
 
 /** Compare energy results only. Prices, costs and payback are deliberately not selection inputs. */
-export function selectAnnualBillBatteryByEnergy<T extends Pick<AnnualBillBatteryOptionResult, 'batteryKwh' | 'estimatedAnnualStoredSolarKwh'>>(
-  options: readonly T[]
+export function selectAnnualBillBatteryByEnergy<T extends { batteryKwh: number; annualGridImportReductionKwh: number }>(
+  options: readonly T[], target = ANNUAL_ENERGY_SAVINGS_TARGET
 ) {
   const maxAnnualSavingsKwh = options.reduce((max, option) =>
-    Number.isFinite(option.estimatedAnnualStoredSolarKwh) ? Math.max(max, option.estimatedAnnualStoredSolarKwh) : max, 0);
+    Number.isFinite(option.annualGridImportReductionKwh) ? Math.max(max, option.annualGridImportReductionKwh) : max, 0);
   const compared = [...options].sort((a, b) => a.batteryKwh - b.batteryKwh).map((option) => ({
     ...option,
-    percentOfMaximumSavings: maxAnnualSavingsKwh > 0 && Number.isFinite(option.estimatedAnnualStoredSolarKwh)
-      ? Math.max(0, option.estimatedAnnualStoredSolarKwh) / maxAnnualSavingsKwh : 0
+    percentOfMaximumSavings: maxAnnualSavingsKwh > 0 && Number.isFinite(option.annualGridImportReductionKwh)
+      ? Math.max(0, option.annualGridImportReductionKwh) / maxAnnualSavingsKwh : 0
   }));
   const recommended = maxAnnualSavingsKwh > 0
-    ? compared.find((option) => option.percentOfMaximumSavings >= ANNUAL_ENERGY_SAVINGS_TARGET) ?? null
+    ? compared.find((option) => option.percentOfMaximumSavings + 1e-12 >= target) ?? null
     : null;
   return { options: compared, maxAnnualSavingsKwh, recommended };
 }

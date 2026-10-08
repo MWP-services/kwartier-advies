@@ -88,12 +88,16 @@ describe('V2 selection and finance', () => {
 });
 
 describe('annual energy selection', () => {
+  it.each([0.8, 0.9, 0.95])('uses the exact %s energy threshold and picks the smallest matching option', target => {
+    const options = [{ batteryKwh: 5, annualGridImportReductionKwh: target * 1000 - 0.001 }, { batteryKwh: 10, annualGridImportReductionKwh: target * 1000 }, { batteryKwh: 20, annualGridImportReductionKwh: 1000 }];
+    expect(selectAnnualBillBatteryByEnergy(options, target).recommended?.batteryKwh).toBe(10);
+  });
   const example = [
-    { batteryKwh: 20.48, estimatedAnnualStoredSolarKwh: 2190 },
-    { batteryKwh: 64, estimatedAnnualStoredSolarKwh: 5080 },
-    { batteryKwh: 96, estimatedAnnualStoredSolarKwh: 6261 },
-    { batteryKwh: 232, estimatedAnnualStoredSolarKwh: 6700 },
-    { batteryKwh: 5015, estimatedAnnualStoredSolarKwh: 6850 }
+    { batteryKwh: 20.48, annualGridImportReductionKwh: 2190 },
+    { batteryKwh: 64, annualGridImportReductionKwh: 5080 },
+    { batteryKwh: 96, annualGridImportReductionKwh: 6261 },
+    { batteryKwh: 232, annualGridImportReductionKwh: 6700 },
+    { batteryKwh: 5015, annualGridImportReductionKwh: 6850 }
   ];
 
   it('selects 96 kWh in the supplied example, regardless of input ordering or financial values', () => {
@@ -112,21 +116,20 @@ describe('annual energy selection', () => {
 
   it.each([[899.999, 20], [900, 10], [900.001, 10]])('applies the exact 90 percent boundary without rounding (%s kWh)', (energy, capacity) => {
     const result = selectAnnualBillBatteryByEnergy([
-      { batteryKwh: 10, estimatedAnnualStoredSolarKwh: energy },
-      { batteryKwh: 20, estimatedAnnualStoredSolarKwh: 1000 }
+      { batteryKwh: 10, annualGridImportReductionKwh: energy },
+      { batteryKwh: 20, annualGridImportReductionKwh: 1000 }
     ]);
     expect(result.recommended?.batteryKwh).toBe(capacity);
   });
 
   it('selects the smallest capacity on a plateau and returns no recommendation for empty or zero results', () => {
     expect(selectAnnualBillBatteryByEnergy([
-      { batteryKwh: 20, estimatedAnnualStoredSolarKwh: 1000 },
-      { batteryKwh: 10, estimatedAnnualStoredSolarKwh: 1000 }
+      { batteryKwh: 20, annualGridImportReductionKwh: 1000 },
+      { batteryKwh: 10, annualGridImportReductionKwh: 1000 }
     ]).recommended?.batteryKwh).toBe(10);
     expect(selectAnnualBillBatteryByEnergy([]).recommended).toBeNull();
-    const zero = selectAnnualBillBatteryByEnergy(example.map(option => ({ ...option, estimatedAnnualStoredSolarKwh: 0 })));
+    const zero = selectAnnualBillBatteryByEnergy(example.map(option => ({ ...option, annualGridImportReductionKwh: 0 })));
     expect(zero.recommended).toBeNull();
     expect(zero.options.every(option => option.percentOfMaximumSavings === 0)).toBe(true);
   });
 });
-
