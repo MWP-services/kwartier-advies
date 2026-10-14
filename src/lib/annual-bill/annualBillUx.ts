@@ -95,13 +95,24 @@ export function annualBillMissingDetails(input: AnnualBillInput): string[] {
  * using the old PDF pair after a user corrects a value or its period. */
 export function updateAnnualBillEnergyInput(input: AnnualBillInput, patch: Partial<AnnualBillInput>): AnnualBillInput {
   const energyFields = ['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh', 'periodStart', 'periodEnd', 'periodEndInclusive', 'energyVolumesAnnualized'];
-  if (!energyFields.some(field => field in patch)) return { ...input, ...patch };
+  if (!energyFields.some(field => field in patch)) {
+    if (patch.energyTotalsConfirmed === true && input.energyInputEdited && !input.energyConflicts?.length) {
+      const basis = resolveAnnualBillEnergyBasis(input);
+      if (basis.originalImportKwh != null && basis.originalExportKwh != null) return { ...input, ...patch, confirmedEnergy: {
+        gridImportKwh: basis.originalImportKwh, gridExportKwh: basis.originalExportKwh,
+        periodStart: basis.periodStart, periodEnd: basis.periodEnd, periodEndInclusive: basis.periodEndInclusive,
+        annualized: basis.annualized, evidence: 'Handmatig gecorrigeerde en bevestigde fysieke waarden.', extractionConfidence: 0.7
+      } };
+    }
+    return { ...input, ...patch, ...(patch.energyTotalsConfirmed === false ? { confirmedEnergy: undefined } : {}) };
+  }
   const basis = resolveAnnualBillEnergyBasis(input);
   const result = { ...input, totalUsageKwh: basis.originalImportKwh, totalFeedInKwh: basis.originalExportKwh,
     ...(input.physicalEnergy || input.annualizedEnergy || input.confirmedEnergy ? { usageNormalKwh: undefined, usageOffPeakKwh: undefined, feedInNormalKwh: undefined, feedInOffPeakKwh: undefined } : {}),
     periodStart: basis.periodStart, periodEnd: basis.periodEnd, periodEndInclusive: basis.periodEndInclusive, energyVolumesAnnualized: basis.annualized,
     ...patch, physicalEnergy: undefined, annualizedEnergy: undefined, confirmedEnergy: undefined,
-    energyTotalsConfirmed: false, energyConflicts: [], extractionConfidence: undefined };
+    energyTotalsConfirmed: false, energyInputEdited: true, energyConflicts: [], extractionConfidence: undefined,
+    missingFields: input.missingFields?.filter(field => !energyFields.includes(field) && !['energyConflicts', 'energyTotalsConfirmed'].includes(field)) };
   if ('usageNormalKwh' in patch || 'usageOffPeakKwh' in patch) result.totalUsageKwh = undefined;
   if ('feedInNormalKwh' in patch || 'feedInOffPeakKwh' in patch) result.totalFeedInKwh = undefined;
   if ('totalUsageKwh' in patch) { result.usageNormalKwh = undefined; result.usageOffPeakKwh = undefined; }

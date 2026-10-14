@@ -77,6 +77,13 @@ export function extractElectricityTable(text: string, traceId?: string): AnnualB
   const energyRows = recovered.filter((row) => row.kind === 'normal' || row.kind === 'offPeak');
   raw.periodStart = { value: energyRows.map((row) => isoDate(row.start)).sort()[0], confidence: 0.85, source: 'rules', evidenceSnippet: energyRows.map((row) => row.start).join('; ') };
   raw.periodEnd = { value: energyRows.map((row) => isoDate(row.end)).sort().at(-1)!, confidence: 0.85, source: 'rules', evidenceSnippet: energyRows.map((row) => row.end).join('; ') };
+  // Keep legacy scalar aliases for saved/API input compatibility. New consumers
+  // explicitly use this invoice bundle and tariff weights, never as meter evidence.
+  raw.billingEnergy = { value: 'billed_energy', source: 'rules', confidence: 0.92, billingEnergy: {
+    gridImportKwh: Number(raw.totalUsageKwh.value), normalKwh: raw.usageNormalKwh?.value as number | undefined,
+    offPeakKwh: raw.usageOffPeakKwh?.value as number | undefined, compensatedFeedInKwh: raw.compensatedFeedInKwh?.value as number | undefined,
+    periodStart: String(raw.periodStart.value), periodEnd: String(raw.periodEnd.value), evidence: raw.totalUsageKwh.evidenceSnippet
+  } };
   logAnnualBill('rules.table.completed', traceId, {
     billedUsageKwh: raw.totalUsageKwh.value, compensatedFeedInKwh: raw.compensatedFeedInKwh?.value,
     compensationIsNotPhysicalExport: true,

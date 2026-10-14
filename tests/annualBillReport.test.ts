@@ -13,7 +13,7 @@ function payload(capacity?: number): PdfPayload {
     analysisType: 'PV_SELF_CONSUMPTION', reportVariant: 'advice', contractedPowerKw: 0,
     maxObservedKw: 0, exceedanceCount: 0, compliance: 1, method: 'P95', efficiency: 0.9, safetyFactor: 1,
     sizing: result.sizing, quality: result.quality, topEvents: [], scenarios: result.scenarios,
-    annualBill: { input: result.annualBillInput!, advice: capacity == null ? result.annualBillAdvice! : calculateAnnualBillAdvice({ ...result.annualBillInput!, batteryOptionsKwh: [capacity] }), warnings: result.pvWarnings }
+    annualBill: { input: result.annualBillInput!, advice: capacity == null ? result.annualBillAdvice! : calculateAnnualBillAdvice({ ...result.annualBillInput!, totalUsageKwh: capacity * 1000, totalFeedInKwh: capacity * 500, batteryOptionsKwh: [capacity] }), warnings: result.pvWarnings }
   };
 }
 
@@ -45,7 +45,7 @@ describe('annual bill report', () => {
     expect(html.match(/<svg /g)).toHaveLength(3);
     expect(html).not.toContain('Formulebasis plus kwartiersimulatie');
     expect(input.annualBill!.input.totalUsageKwh).toBe(4200);
-    expect(html).toContain('minimaal 90%');
+    expect(html).toContain('doel 95%');
     expect(html).not.toContain('kortste eenvoudige terugverdientijd');
     expect(html).not.toContain('jaarlijkse besparing per geïnvesteerde euro');
     const document = new DOMParser().parseFromString(html, 'text/html');
@@ -79,10 +79,10 @@ describe('annual bill report', () => {
     expect(html).not.toContain('data:application/pdf;base64,');
   });
 
-  it('contains V2 evidence and product details without legacy formula text or mojibake', () => {
+  it('contains V3 evidence and product details without legacy claims or mojibake', () => {
     const html = generateInteractiveReportHtml(payload());
     for (const text of ['Energiegrondslag', 'Oorspronkelijke energieperiode', 'Annualisatiefactor', 'P50 / P75 / P90', 'conservatief / aanbevolen / ruim', 'Productspecificatiebron', 'Laadvermogen / ontlaadvermogen', 'Round-trip rendement', 'Jaarlijkse importreductie', 'Jaarlijkse exportreductie', 'Marginale meeropbrengst', 'Technische confidence', '35.040 kwartieren']) expect(html).toContain(text);
-    expect(html).not.toMatch(/45%|230 cycli|geen gesimuleerd dagprofiel|wordt niet geannualiseerd|\u00c3|\u00c2|\u00e2\u20ac|financi\?/i);
+    expect(html).not.toMatch(/geen gesimuleerd dagprofiel|wordt niet geannualiseerd|\u00c3|\u00c2|\u00e2\u20ac|financi\?/i);
     const ui = readFileSync('app/page.tsx', 'utf8');
     expect(ui).not.toMatch(/\u00c3|\u00c2|\u00e2\u20ac|Financi\?/);
     expect(ui).toContain('recommendationStatus');

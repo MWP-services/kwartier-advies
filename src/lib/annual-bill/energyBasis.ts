@@ -4,6 +4,7 @@ export type EnergyPair = {
   /** Dates are UTC calendar dates. Unmarked end dates are exclusive; t/m is inclusive. */
   periodEndInclusive?: boolean;
   evidence?: string; extractionConfidence?: number;
+  connectionId?: string; meterId?: string; registers?: Record<string, number>;
 };
 export type EnergyBasisInput = {
   physicalEnergy?: EnergyPair; annualizedEnergy?: EnergyPair; confirmedEnergy?: EnergyPair;
@@ -14,6 +15,7 @@ export type EnergyBasisInput = {
   periodEndInclusive?: boolean; energyConflicts?: string[];
   /** Explicit user declaration, retained when correcting extracted annual volumes. */
   energyVolumesAnnualized?: boolean;
+  energyInputEdited?: boolean;
 };
 export type AnnualBillEnergyBasis = {
   gridImportKwh: number; gridExportKwh: number;
@@ -30,8 +32,9 @@ function total(value?: number, a?: number, b?: number) {
   return a != null && b != null ? a + b : undefined;
 }
 export function resolveAnnualBillEnergyBasis(input: EnergyBasisInput): AnnualBillEnergyBasis {
-  const pair = input.physicalEnergy ?? input.annualizedEnergy ?? input.confirmedEnergy;
-  const source = input.physicalEnergy ? 'physical_meter' : input.annualizedEnergy ? 'annualized_summary' : input.confirmedEnergy || input.source !== 'pdf' ? 'manual' : 'billing';
+  const manualOverride = input.energyInputEdited && input.energyTotalsConfirmed && input.confirmedEnergy;
+  const pair = manualOverride || input.physicalEnergy || input.annualizedEnergy || input.confirmedEnergy;
+  const source = manualOverride ? 'manual' : input.physicalEnergy ? 'physical_meter' : input.annualizedEnergy ? 'annualized_summary' : input.confirmedEnergy || input.source !== 'pdf' ? 'manual' : 'billing';
   // An incomplete pair must never borrow the other direction from billing data.
   const imp = pair ? pair.gridImportKwh : total(input.totalUsageKwh, input.usageNormalKwh, input.usageOffPeakKwh);
   const exp = pair ? pair.gridExportKwh : total(input.totalFeedInKwh, input.feedInNormalKwh, input.feedInOffPeakKwh);
@@ -41,7 +44,7 @@ export function resolveAnnualBillEnergyBasis(input: EnergyBasisInput): AnnualBil
   const periodEndInclusive = (pair ? pair.periodEndInclusive : input.periodEndInclusive) ?? false;
   const date = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value ? Date.parse(value) : NaN;
   const days = start && end ? (date(end) - date(start)) / 86400000 + Number(periodEndInclusive) : undefined;
-  const annualized = pair ? (!!input.annualizedEnergy && !input.physicalEnergy || pair.annualized === true) : input.energyVolumesAnnualized === true;
+  const annualized = pair ? (!manualOverride && !!input.annualizedEnergy && !input.physicalEnergy || pair.annualized === true) : input.energyVolumesAnnualized === true;
   const warnings: string[] = [];
   let status: AnnualBillEnergyBasis['status'] = 'usable';
   let confidence: AnnualBillEnergyBasis['confidence'] = 'medium';

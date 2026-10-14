@@ -21,7 +21,12 @@ export type AnnualBillInput = import('../src/lib/annual-bill/energyBasis').Energ
   contractType?: 'fixed' | 'variable' | 'dynamic' | 'unknown';
   dynamicImportMarkupEurPerKwh?: number;
   dynamicExportDeductionEurPerKwh?: number;
-  consumptionProfile?: 'home' | 'business';
+  consumptionProfile?: import('@/src/lib/annual-bill/buildAnnualBillSyntheticProfile').ConsumptionProfile;
+  sizingPolicy?: import('@/src/lib/annual-bill/sizingPolicy').SizingPolicy;
+  customConsumption?: import('@/src/lib/annual-bill/buildAnnualBillSyntheticProfile').CustomConsumption;
+  futureAdditionalImportKwh?: number;
+  /** Validated invoice quantities. Not physical meter energy; legacy scalar aliases remain readable. */
+  billingEnergy?: { gridImportKwh: number; normalKwh?: number; offPeakKwh?: number; compensatedFeedInKwh?: number; periodStart?: string; periodEnd?: string; evidence?: string };
   tariffBasis?: 'supply_only' | 'all_in';
   electricityVatPercent?: number;
   electricityVatEur?: number;

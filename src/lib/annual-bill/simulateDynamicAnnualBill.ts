@@ -27,7 +27,7 @@ export type DynamicAnnualContext = {
   hours: SimulatedHour[];
   metadata: {
     source: string; start: string; end: string; fetchedAt: string; hourCount: number;
-    profile: 'home' | 'business'; averageImportPrice: number; averageExportPrice: number;
+    profile: import('./buildAnnualBillSyntheticProfile').ConsumptionProfile; averageImportPrice: number; averageExportPrice: number;
     importMarkup: number; exportDeduction: number; energyTaxExVat: number; vatPercent: number;
     warnings: string[];
   };

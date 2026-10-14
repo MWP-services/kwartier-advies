@@ -1,6 +1,7 @@
 import { BILL_NUMBER_PATTERN, parseBillNumber } from './numbers';
 import type { EnergyPair } from './energyBasis';
 import type { AnnualBillRawExtract } from './schema';
+import { extractMeterTable } from './extractMeterTable';
 
 const DATE = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})`;
 const iso = (s: string) => s.match(/^\d{4}-/) ? s : s.split(/[-/]/).reverse().map((x, i) => i ? x.padStart(2, '0') : x).join('-');
@@ -14,6 +15,9 @@ export function extractEnergyPeriod(text: string): Pick<EnergyPair, 'periodStart
  * Unrecognized layouts remain scalar billing input requiring human confirmation.
  */
 export function extractEnergyProvenance(text: string): AnnualBillRawExtract {
+  const meter = extractMeterTable(text);
+  // Validated meter rows and genuine meter conflicts both outrank summaries/billing.
+  if (meter.physicalEnergy || meter.energyConflicts) return meter;
   type Kind = 'physicalEnergy' | 'annualizedEnergy';
   type Row = { value: number; evidence: string; register: 'total' | 'normal' | 'offPeak' };
   const aggregate = (rows: Row[]) => {
@@ -31,6 +35,11 @@ export function extractEnergyProvenance(text: string): AnnualBillRawExtract {
     const nextKind = /meteroverzicht|fysieke meterwaarden|fysiek energieoverzicht|bruto meterverbruik/i.test(line) ? 'physicalEnergy'
       : /geannualiseerd jaaroverzicht|jaaroverzicht elektriciteit|jaarvolumes elektriciteit/i.test(line) ? 'annualizedEnergy' : undefined;
     if (nextKind) { kind = nextKind; period = undefined; section++; }
+    if (nextKind === 'annualizedEnergy') {
+      const year = line.match(/\b(20\d{2})\b/);
+      if (year) period = { periodStart: `${year[1]}-01-01`, periodEnd: `${Number(year[1]) + 1}-01-01`, periodEndInclusive: false };
+    }
+    if (/vorige periode|periodes terug|historisch|vergelijkingsjaar/i.test(line)) { kind = undefined; period = undefined; section++; }
     if (/^(?:factuurregels|leveringskosten|kostenoverzicht|gas\b|saldering\b)/i.test(line)) { kind = undefined; period = undefined; section++; }
     const rowPeriod = extractEnergyPeriod(line);
     if (rowPeriod && !/kwh/i.test(line)) period = rowPeriod;
@@ -44,7 +53,7 @@ export function extractEnergyProvenance(text: string): AnnualBillRawExtract {
     if (quantities.length !== 1) continue;
     const value = parseBillNumber(quantities[0][1]);
     const pairedPeriod = rowPeriod ?? period;
-    if (value == null || value < 0 || (!pairedPeriod && rowKind !== 'annualizedEnergy')) continue;
+    if (value == null || value < 0 || !pairedPeriod) continue;
     const key = JSON.stringify([section, rowKind, pairedPeriod]);
     const group = groups.get(key) ?? { kind: rowKind, period: pairedPeriod, imports: [], exports: [] };
     const register = /normaal/i.test(line) ? 'normal' : /daltarief|\bdal\b/i.test(line) ? 'offPeak' : 'total';

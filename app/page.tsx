@@ -28,6 +28,8 @@ import type { ColumnMapping } from '@/lib/parsing';
 import type { PdfPayload } from '@/lib/pdf';
 import type { PriceInterval } from '@/lib/pricing';
 import type { ScenarioResult } from '@/lib/simulation';
+import { AnnualBillSavings } from '@/components/AnnualBillSavings';
+import { annualBillStatusLabel } from '@/src/lib/annual-bill/annualBillPresentation';
 import type { AnnualBillAdviceResult } from '@/src/lib/annual-bill/calculateAnnualBillAdvice';
 import { resolveAnnualBillEnergyBasis } from '@/src/lib/annual-bill/energyBasis';
 import type { AnnualBillExtract } from '@/src/lib/annual-bill/schema';
@@ -1144,10 +1146,22 @@ export default function HomePage() {
                     {annualBillExtract?.raw.contractType?.evidenceSnippet && <span className="mt-1 block text-xs font-normal text-slate-500">Gevonden op nota: {annualBillExtract.raw.contractType.evidenceSnippet}</span>}
                   </label>
                       <label className="text-sm">Verbruiksprofiel
-                        <select className="wx-input" value={annualBillInput.consumptionProfile ?? ''} onChange={(event) => updateAnnualBillInput({ consumptionProfile: event.target.value as 'home' | 'business' })}>
-                          <option value="">Kies profiel (standaard huishouden)</option><option value="home">Huishouden (meer avondverbruik)</option><option value="business">Bedrijf (meer verbruik op werkdagen)</option>
+                        <select className="wx-input" value={annualBillInput.consumptionProfile ?? ''} onChange={(event) => updateAnnualBillInput({ consumptionProfile: event.target.value as NonNullable<AnnualBillInput['consumptionProfile']> })}>
+                          <option value="">Onbekend (scenariovergelijking)</option><option value="home">Woning</option><option value="business">Kantoor (bestaand bedrijfsprofiel)</option><option value="office">Kantoor</option><option value="agricultural">Agrarisch bedrijf</option><option value="continuous">Continu bedrijf</option><option value="custom">Maatwerk</option>
                         </select>
                       </label>
+                  <label className="text-sm">Dimensioneringsvoorkeur
+                    <select className="wx-input" value={annualBillInput.sizingPolicy ?? 'spacious'} onChange={e => updateAnnualBillInput({ sizingPolicy: e.target.value as AnnualBillInput['sizingPolicy'] })}>
+                      <option value="compact">Compact</option><option value="spacious">Ruim (standaard)</option><option value="future">Toekomstgericht</option>
+                    </select>
+                  </label>
+                  {annualBillInput.sizingPolicy === 'future' && <label className="text-sm">Expliciete extra toekomstige netafname (kWh/jaar)
+                    <input className="wx-input" type="number" min="0" value={annualBillInput.futureAdditionalImportKwh ?? ''} onChange={e => updateAnnualBillInput({ futureAdditionalImportKwh: toOptionalNumber(e.target.value) })}/>
+                  </label>}
+                  {annualBillInput.consumptionProfile === 'custom' && <div className="md:col-span-3">
+                    <p>Dag/nacht verdelen werkdagen (samen 100%). Weekend is het aandeel van het totale weekverbruik.</p>
+                    {(['dayPercent', 'nightPercent', 'weekendPercent'] as const).map((key,i) => <label key={key} className="text-sm">{['Dag (%)', 'Nacht (%)', 'Weekend (%)'][i]}<input className="wx-input" type="number" min="0" max="100" value={annualBillInput.customConsumption?.[key] ?? [50,50,28.57][i]} onChange={e => updateAnnualBillInput({ customConsumption: { dayPercent: 50, nightPercent: 50, weekendPercent: 28.57, ...annualBillInput.customConsumption, [key]: Number(e.target.value) } })}/></label>)}
+                  </div>}
                   <label className="text-sm md:col-span-3">
                     <input type="checkbox" checked={annualBillInput.energyTotalsConfirmed ?? false} onChange={(event) => updateAnnualBillInput({ energyTotalsConfirmed: event.target.checked })} /> Ik bevestig dat de totalen fysieke netafname en netteruglevering over dezelfde periode zijn, voor saldering.
                   </label>
@@ -1583,15 +1597,7 @@ export default function HomePage() {
                       : 'Geen batterij aanbevolen'}
                   </p>
                 </div>
-                <div>
-                  <p className="text-xs text-slate-500">Jaarlijkse eurobesparing (informatief)</p>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {formatEuro(annualBillAdvice.annualSavingsRangeEur.expected)}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Verwachte bandbreedte: {formatEuro(annualBillAdvice.annualSavingsRangeEur.min)} - {formatEuro(annualBillAdvice.annualSavingsRangeEur.max)}
-                  </p>
-                </div>
+                <AnnualBillSavings advice={annualBillAdvice} />
               </div>
               <div className="mt-3 rounded-md border border-lime-200 bg-lime-50 p-3 text-sm text-lime-900">
                 <p className="font-semibold">Waarom dit advies?</p>
@@ -1599,18 +1605,22 @@ export default function HomePage() {
               </div>
               <div className="rounded-md border border-slate-200 p-3 text-sm">
                 <h3 className="font-semibold">Passende capaciteit</h3>
-                <p>Status: {annualBillAdvice.recommendationStatus}</p>
+                <p>Status: {annualBillStatusLabel(annualBillAdvice)} ({annualBillAdvice.recommendationStatus})</p>
                 {annualBillAdvice.energyBasis?.evidence && <p>Bronregels: {annualBillAdvice.energyBasis.evidence}</p>}
                 <p>Oorspronkelijke netafname / teruglevering: {formatKwh(annualBillAdvice.energyBasis?.originalImportKwh)} / {formatKwh(annualBillAdvice.energyBasis?.originalExportKwh)}</p>
-                <p>Conservatief: {annualBillAdvice.conservativeBatteryKwh ?? 'Geen'} kWh | Aanbevolen: {annualBillAdvice.recommendedBatteryKwh ?? 'Geen'} kWh | Ruim: {annualBillAdvice.spaciousBatteryKwh ?? 'Geen'} kWh</p>
+                <p>{annualBillAdvice.selectionExplanation}</p>
+                <p>Scenario-volgorde: {annualBillAdvice.scenarioLabels?.join(" / ")}</p>
+                <p>Scenariobandbreedte: {annualBillAdvice.scenarioCapacityRange?.min ?? '?'} tot {annualBillAdvice.scenarioCapacityRange?.max ?? '?'} kWh. Maximum {annualBillAdvice.practicalMaximumReliable ? 'met afvlakking onderbouwd' : 'onzeker'}.</p>
+                <p>Compact: {annualBillAdvice.conservativeBatteryKwh ?? 'Geen'} kWh | Aanbevolen: {annualBillAdvice.recommendedBatteryKwh ?? 'Geen'} kWh | Ruim: {annualBillAdvice.spaciousBatteryKwh ?? 'Geen'} kWh</p>
                 <p>Jaarlijkse netafname: {annualBillAdvice.totalUsageKwh.toFixed(0)} kWh | Netteruglevering: {annualBillAdvice.totalFeedInKwh.toFixed(0)} kWh</p>
-                <p>Profiel: {annualBillAdvice.consumptionProfile === 'business' ? 'bedrijf' : 'huishouden'} | Technische confidence: {annualBillAdvice.confidence} | Bron: {annualBillAdvice.energyBasis?.source}</p>
+                <p>Profiel: {annualBillAdvice.consumptionProfile ?? 'onbekend'} | Technische confidence: {annualBillAdvice.confidence} | Bron: {annualBillAdvice.energyBasis?.source}</p>
                 <p>Periode: {annualBillAdvice.energyBasis?.periodStart ?? 'onbekend'} tot {annualBillAdvice.energyBasis?.periodEnd ?? 'onbekend'} ({annualBillAdvice.energyBasis?.periodEndInclusive ? 'einde inclusief' : 'einde exclusief'}) | Annualisatiefactor: {annualBillAdvice.energyBasis?.annualizationFactor.toFixed(4)}</p>
-                <p>Dagelijkse opslagbehoefte P50/P75/P90: {annualBillAdvice.storageStatistics && [annualBillAdvice.storageStatistics.p50, annualBillAdvice.storageStatistics.p75, annualBillAdvice.storageStatistics.p90].map(x => x.toFixed(1)).join(' / ')} kWh</p>
+                {annualBillAdvice.recommendationStatus !== 'insufficient_data' && <p>Dagelijkse opslagbehoefte P50/P75/P90: {annualBillAdvice.storageStatistics && [annualBillAdvice.storageStatistics.p50, annualBillAdvice.storageStatistics.p75, annualBillAdvice.storageStatistics.p90].map(x => x.toFixed(1)).join(' / ')} kWh</p>}
                 {annualBillAdvice.options.filter(x => x.batteryKwh === annualBillAdvice.recommendedBatteryKwh).map(option => {
                   const next = annualBillAdvice.options.find(x => x.batteryKwh > option.batteryKwh);
-                  return <div key={option.batteryKwh}><p>Minder netafname: {option.annualGridImportReductionKwh?.toFixed(0)} kWh/jaar · Minder teruglevering: {option.annualExportReductionKwh?.toFixed(0)} kWh/jaar · Equivalente cycli: {option.technicalSimulation?.equivalentCyclesPerYear.toFixed(1)} | {(option.percentOfMaximumSavings * 100).toFixed(1)}% van praktisch maximum.</p>
-                    <p>{next ? `Volgende grotere batterij (${next.batteryKwh} kWh): ${next.marginalGainKwh?.toFixed(0)} kWh/jaar extra, ${next.marginalGainPerAddedKwh?.toFixed(1)} kWh/jaar per extra kWh capaciteit.` : 'Geen grotere optie binnen de praktische kandidaatset.'}</p></div>;
+                  const previous = annualBillAdvice.options.filter(x => x.batteryKwh < option.batteryKwh).at(-1);
+                  return <div key={option.batteryKwh}><p>Bruikbaar: {option.usableCapacityKwh.toFixed(1)} kWh. Scenarios: {option.scenarioImportReductionKwh?.map(n => n.toFixed(0)).join(" / ")} kWh/jaar.</p><p>Minder netafname: {option.annualGridImportReductionKwh?.toFixed(0)} kWh/jaar · Minder teruglevering: {option.annualExportReductionKwh?.toFixed(0)} kWh/jaar · Equivalente cycli: {option.technicalSimulation?.equivalentCyclesPerYear.toFixed(1)} | {(option.percentOfMaximumSavings * 100).toFixed(1)}% van maximum onderzochte opties.</p>
+                    <p>{previous ? `Direct kleinere batterij (${previous.batteryKwh} kWh): ${previous.annualGridImportReductionKwh?.toFixed(0)} kWh/jaar reductie.` : "Geen kleinere catalogusoptie."}</p><p>{next ? `Volgende grotere batterij (${next.batteryKwh} kWh): ${next.marginalGainKwh?.toFixed(0)} kWh/jaar extra, ${next.marginalGainPerAddedKwh?.toFixed(1)} kWh/jaar per extra kWh capaciteit.` : 'Geen grotere optie binnen de praktische kandidaatset.'}</p></div>;
                 })}
                 <p>Indicatief advies op basis van jaarnota; kwartierdata geeft een nauwkeuriger dimensionering.</p>
               </div>

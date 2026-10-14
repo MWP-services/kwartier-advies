@@ -74,7 +74,7 @@ describe('PDF provenance through normalization and advice', () => {
   it('recognizes an explicit annualized pair without double scaling', () => {
     const input = parse('Geannualiseerd jaaroverzicht elektriciteit\nPeriode 01-01-2025 tot 28-10-2025\nNetafname 4200 kWh\nNetteruglevering 1800 kWh');
     expect(resolve(input)).toMatchObject({ source: 'annualized_summary', annualizationFactor: 1, gridImportKwh: 4200 });
-    expect(resolve(parse('Geannualiseerd jaaroverzicht elektriciteit\nNetafname 4200 kWh\nNetteruglevering 1800 kWh'))).toMatchObject({ source: 'annualized_summary', annualizationFactor: 1, status: 'usable' });
+    expect(resolve(parse('Geannualiseerd jaaroverzicht elektriciteit 2025\nNetafname 4200 kWh\nNetteruglevering 1800 kWh'))).toMatchObject({ source: 'annualized_summary', annualizationFactor: 1, status: 'usable' });
   });
   it.each([
     'Fysieke import 35444 kWh 01-01-2025 tot 01-01-2026\nFysieke export 16439 kWh 01-02-2025 tot 01-02-2026',

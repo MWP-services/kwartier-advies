@@ -1,0 +1,70 @@
+EAN-code Stroom : 870000000000000001
+Verbruik Meternummer Van Tot Beginstand Eindstand Factor Verbruik
+Stroom daltarief
+(kWh)
+METER_TEST
+01-10-2024 01-12-2024 98413 101909 1 1 3496
+Stroom daltarief
+(kWh)
+METER_TEST
+01-12-2024 01-01-2025 101909 104093 1 1 2184
+Stroom daltarief
+(kWh)
+METER_TEST
+01-01-2025 29-09-2025 104093 117773 1 1 13680
+Stroom
+normaaltarief (kWh)
+METER_TEST
+01-10-2024 01-12-2024 78903 82233 1 1 3330
+Stroom
+normaaltarief (kWh)
+METER_TEST
+01-12-2024 01-01-2025 82233 84116 1 1 1883
+Stroom
+normaaltarief (kWh)
+METER_TEST
+01-01-2025 29-09-2025 84116 94987 1 1 10871
+Stroom
+teruglevering
+daltarief (kWh)
+METER_TEST
+01-10-2024 01-12-2024 36562 37147 1 1 585
+Stroom
+teruglevering
+daltarief (kWh)
+METER_TEST
+01-12-2024 01-01-2025 37147 37195 1 1 48
+Stroom
+teruglevering
+daltarief (kWh)
+METER_TEST
+01-01-2025 29-09-2025 37195 42010 1 1 4815
+Stroom
+teruglevering
+normaaltarief (kWh)
+METER_TEST
+01-10-2024 01-12-2024 81024 82236 1 1 1212
+Stroom
+teruglevering
+normaaltarief (kWh)
+METER_TEST
+01-12-2024 01-01-2025 82236 82278 1 1 42
+Stroom
+teruglevering
+normaaltarief (kWh)
+METER_TEST
+01-01-2025 29-09-2025 82278 92015 1 1 9737
+Gas (m3) GAS_TEST
+01-10-2024 01-12-2024 9902 11141 1 1.01937 1263
+Gas (m3) GAS_TEST
+01-12-2024 01-01-2025 11141 11928 1 1.0216 804
+Gas (m3) GAS_TEST
+01-01-2025 29-09-2025 11928 17050 1 1.02421 5246
+1 Deze stand is op afstand uitgelezen uit uw slimme meter
+
+Product Deze periode Vorige periode 2 periodes terug
+Stroom normaaltarief 16237 kWh 18785 kWh 22125 kWh
+Stroom daltarief 18758 kWh 21022 kWh 19350 kWh
+Stroom teruglevering normaaltarief 8995 kWh 8076 kWh
+Stroom teruglevering daltarief 4393 kWh 3583 kWh
+Totaal stroom 21607 kWh 28148 kWh 41475 kWh

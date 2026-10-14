@@ -17,16 +17,32 @@ function valuesConflict(left: string | number | undefined, right: string | numbe
   return String(left).trim().toLowerCase() !== String(right).trim().toLowerCase();
 }
 
-function mergeRawExtracts(rulesRaw: AnnualBillRawExtract, aiRaw: AnnualBillRawExtract, traceId?: string): { raw: AnnualBillRawExtract; issues: AnnualBillValidationIssue[] } {
+export function mergeRawExtracts(rulesRaw: AnnualBillRawExtract, aiRaw: AnnualBillRawExtract, traceId?: string): { raw: AnnualBillRawExtract; issues: AnnualBillValidationIssue[] } {
   const raw: AnnualBillRawExtract = { ...rulesRaw };
   const issues: AnnualBillValidationIssue[] = [];
+  const energyFields = ['totalUsageKwh', 'totalFeedInKwh', 'usageNormalKwh', 'usageOffPeakKwh', 'feedInNormalKwh', 'feedInOffPeakKwh', 'periodStart', 'periodEnd', 'eanElectricity'];
+  const hasRulesEnergy = energyFields.slice(0, 6).some(field => rulesRaw[field as keyof AnnualBillRawExtract]);
 
   Object.entries(aiRaw).forEach(([field, aiValue]) => {
     if (!aiValue) return;
     const typedField = field as keyof AnnualBillRawExtract;
     // Only paired deterministic evidence can establish energy provenance.
-    if (['physicalEnergy', 'annualizedEnergy', 'confirmedEnergy', 'energyConflicts', 'energyTotalsConfirmed', 'periodEndInclusive', 'energyVolumesAnnualized'].includes(field)) return;
+    if (['physicalEnergy', 'annualizedEnergy', 'confirmedEnergy', 'billingEnergy', 'energyConflicts', 'energyTotalsConfirmed', 'periodEndInclusive', 'energyVolumesAnnualized', 'energyInputEdited'].includes(field)) return;
     const rulesValue = raw[typedField];
+    if (energyFields.includes(field)) {
+      // AI scalars are one unverified candidate bundle, never selected per field by
+      // confidence or used to fill a different source's missing direction/period.
+      if (rulesRaw.physicalEnergy || rulesRaw.annualizedEnergy) return;
+      if (hasRulesEnergy) {
+        if (rulesValue && valuesConflict(rulesValue.value, aiValue.value)) {
+          issues.push({ field: typedField, severity: 'warning', message: 'AI en regelparser noemen verschillende energiebronnen; controleer de complete fysieke grondslag.' });
+          raw[typedField] = { ...rulesValue, requiresReview: true, energyConflict: true };
+        }
+        return;
+      }
+      raw[typedField] = { ...aiValue, requiresReview: true };
+      return;
+    }
     const verifiedComponent = ['normalTariffEurPerKwh', 'offPeakTariffEurPerKwh', 'supplyTariffVat', 'tariffBasis', 'energyTaxElectricityEur', 'energyTaxEurPerKwh', 'energyTaxWeightKwh', 'energyTaxVat', 'electricityVatPercent'].includes(field);
     if (verifiedComponent && rulesValue && (rulesRaw.tariffWeightNormalKwh || rulesRaw.energyTaxWeightKwh)) {
       if (valuesConflict(rulesValue.value, aiValue.value)) {

@@ -7,7 +7,9 @@ export type AnnualBillExtractValue = {
   value: string | number;
   /** Rules-only paired energy evidence; AI scalar fields cannot establish provenance. */
   energyPair?: EnergyPair;
+  billingEnergy?: AnnualBillInput['billingEnergy'];
   energyConflicts?: string[];
+  energyConflict?: boolean;
   confidence: number;
   evidence?: string;
   source?: 'rules' | 'ai' | 'merged';

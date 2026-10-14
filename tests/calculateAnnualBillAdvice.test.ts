@@ -7,14 +7,14 @@ const base = { source: 'manual' as const, totalUsageKwh: 4200, totalFeedInKwh: 1
   periodStart: '2025-01-01', periodEnd: '2026-01-01' };
 
 describe('practical candidate set', () => {
-  it('keeps capacities within the P90 bound and two catalog neighbours above it', () => {
+  it('uses a broad daily-energy bound', () => {
     expect(practicalAnnualBillOptions([96, 40, 64, 30, 232, 261], 28.8, 0.9)).toEqual([30, 40, 64, 96]);
-    expect(practicalAnnualBillOptions([10, 20, 30, 40, 50], 14.4, 0.9)).toEqual([10, 20, 30, 40]);
+    expect(practicalAnnualBillOptions([10, 20, 30, 40, 50], 14.4, 0.9)).toEqual([10, 20, 30, 40, 50]);
   });
   it('handles zero need, full reserve, tiny/huge demand and stack-only catalogs', () => {
     expect(practicalAnnualBillOptions(BATTERY_ADVICE_OPTIONS_KWH, 0, 0.9)).toEqual([]);
     expect(practicalAnnualBillOptions(BATTERY_ADVICE_OPTIONS_KWH, 10, 0)).toEqual([]);
-    expect(practicalAnnualBillOptions(BATTERY_ADVICE_OPTIONS_KWH, 0.01, 0.9)).toEqual([7.68, 10.24]);
+    expect(practicalAnnualBillOptions(BATTERY_ADVICE_OPTIONS_KWH, 0.01, 0.9)).toEqual([]);
     expect(practicalAnnualBillOptions(BATTERY_ADVICE_OPTIONS_KWH, 10000, 0.9)).toEqual(BATTERY_ADVICE_OPTIONS_KWH);
     expect(practicalAnnualBillOptions(STACK_BATTERY_OPTIONS_KWH, 100, 0.9)).toEqual(STACK_BATTERY_OPTIONS_KWH);
     expect(practicalAnnualBillOptions([30, 40, 64, 96, 232], 25.6, 0.8)).toEqual([30, 40, 64, 96]);
@@ -24,14 +24,13 @@ describe('practical candidate set', () => {
   });
 });
 
-describe('V2 selection and finance', () => {
-  it('selects the smallest relevant battery at 80/90/95% of practical import reduction', () => {
+describe('V3 selection and finance', () => {
+  it('uses spacious by default and keeps compact no larger than spacious', () => {
     const result = calculateAnnualBillAdvice(base);
     expect(result.recommendationStatus).toBe('recommended');
     expect(result.options.length).toBeLessThan(BATTERY_ADVICE_OPTIONS_KWH.length);
-    for (const [target, capacity] of [[0.8, result.conservativeBatteryKwh], [0.9, result.recommendedBatteryKwh], [0.95, result.spaciousBatteryKwh]] as const) {
-      expect(capacity).toBe(result.options.find(o => o.percentOfMaximumSavings >= target)?.batteryKwh);
-    }
+    expect(result.sizingPolicy).toBe('spacious');
+    expect(result.conservativeBatteryKwh!).toBeLessThanOrEqual(result.recommendedBatteryKwh!);
     result.options.forEach(o => expect(existsSync(`public/assets/${batteryBrochureKey(o.batteryKwh)}.pdf`)).toBe(true));
   });
   it('prices delivered and charged energy separately, including conversion losses', () => {
@@ -51,9 +50,9 @@ describe('V2 selection and finance', () => {
       expect(result.options.map(o => o.technicalSimulation)).toEqual(normal.options.map(o => o.technicalSimulation));
     }
   });
-  it('allows medium confidence with brochure specs and no financial input', () => {
+  it('lowers confidence when the catalog cannot establish a practical maximum', () => {
     const result = calculateAnnualBillAdvice({ ...base, totalUsageKwh: 350000, totalFeedInKwh: 160000, consumptionProfile: 'business', batteryOptionsKwh: [232] });
-    expect(result.confidence).toBe('medium');
+    expect(result.confidence).toBe('low'); // A single option cannot establish saturation.
     expect(calculateAnnualBillAdvice({ ...base, batteryOptionsKwh: [10.24] }).confidence).toBe('low');
     expect(calculateAnnualBillAdvice({ ...base, consumptionProfile: undefined }).confidence).toBe('low');
   });
@@ -101,7 +100,7 @@ describe('annual energy selection', () => {
   ];
 
   it('selects 96 kWh in the supplied example, regardless of input ordering or financial values', () => {
-    const comparison = selectAnnualBillBatteryByEnergy([...example].reverse());
+    const comparison = selectAnnualBillBatteryByEnergy([...example].reverse(), 0.9);
     expect(comparison.maxAnnualSavingsKwh).toBe(6850);
     expect(comparison.recommended?.batteryKwh).toBe(96);
     expect(comparison.recommended?.percentOfMaximumSavings).toBeCloseTo(6261 / 6850);
@@ -111,14 +110,14 @@ describe('annual energy selection', () => {
       estimatedAnnualSavingsEur: index === 0 ? 1e9 : 0,
       estimatedPaybackYears: index === 0 ? 0.01 : 1e9
     }));
-    expect(selectAnnualBillBatteryByEnergy(extremePrices).recommended?.batteryKwh).toBe(96);
+    expect(selectAnnualBillBatteryByEnergy(extremePrices, 0.9).recommended?.batteryKwh).toBe(96);
   });
 
   it.each([[899.999, 20], [900, 10], [900.001, 10]])('applies the exact 90 percent boundary without rounding (%s kWh)', (energy, capacity) => {
     const result = selectAnnualBillBatteryByEnergy([
       { batteryKwh: 10, annualGridImportReductionKwh: energy },
       { batteryKwh: 20, annualGridImportReductionKwh: 1000 }
-    ]);
+    ], 0.9);
     expect(result.recommended?.batteryKwh).toBe(capacity);
   });
 

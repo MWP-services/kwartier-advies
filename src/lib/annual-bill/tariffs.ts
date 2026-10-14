@@ -11,8 +11,8 @@ export function isUsableAnnualTariff(value: unknown): value is number {
 export function resolveAnnualBillPrices(input: AnnualBillInput) {
   const normal = isUsableAnnualTariff(input.normalTariffEurPerKwh) ? input.normalTariffEurPerKwh : undefined;
   const offPeak = isUsableAnnualTariff(input.offPeakTariffEurPerKwh) ? input.offPeakTariffEurPerKwh : undefined;
-  const normalWeight = input.tariffWeightNormalKwh ?? input.usageNormalKwh;
-  const offPeakWeight = input.tariffWeightOffPeakKwh ?? input.usageOffPeakKwh;
+  const normalWeight = input.billingEnergy?.normalKwh ?? input.tariffWeightNormalKwh ?? input.usageNormalKwh;
+  const offPeakWeight = input.billingEnergy?.offPeakKwh ?? input.tariffWeightOffPeakKwh ?? input.usageOffPeakKwh;
   const normalUsage = Number.isFinite(normalWeight) ? Math.max(0, normalWeight ?? 0) : 0;
   const offPeakUsage = Number.isFinite(offPeakWeight) ? Math.max(0, offPeakWeight ?? 0) : 0;
   const weighted = normal != null && offPeak != null && normalUsage + offPeakUsage > 0;
@@ -41,7 +41,7 @@ export function resolveAnnualBillPrices(input: AnnualBillInput) {
     feedInPrice: isUsableAnnualTariff(input.feedInTariffEurPerKwh) ? input.feedInTariffEurPerKwh : DEFAULT_FEED_IN_PRICE,
     feedInSource: isUsableAnnualTariff(input.feedInTariffEurPerKwh) ? 'feed_in_tariff' : 'fallback',
     weightsKwh: { normal: normalUsage, offPeak: offPeakUsage },
-    weightSource: input.tariffWeightNormalKwh != null || input.tariffWeightOffPeakKwh != null ? 'billed_tariff_rows' : 'annual_usage_split',
+    weightSource: input.billingEnergy || input.tariffWeightNormalKwh != null || input.tariffWeightOffPeakKwh != null ? 'billed_tariff_rows' : 'annual_usage_split',
     rejectedFields: tariffFields.filter((field) => input[field] != null && !isUsableAnnualTariff(input[field]))
   };
 }
