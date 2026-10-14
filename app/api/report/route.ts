@@ -14,7 +14,12 @@ export async function POST(request: Request) {
     });
   }
 
-  const html = generateInteractiveReportHtml(payload);
+  let html: string;
+  try {
+    html = generateInteractiveReportHtml(payload);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Het rapport kon niet worden gemaakt.' }, { status: 400 });
+  }
   const filename =
     payload.analysisType === 'PV_SELF_CONSUMPTION'
       ? 'wattsnext-pv-report.html'

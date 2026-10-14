@@ -29,8 +29,10 @@ import type { PdfPayload } from '@/lib/pdf';
 import type { PriceInterval } from '@/lib/pricing';
 import type { ScenarioResult } from '@/lib/simulation';
 import { AnnualBillSavings } from '@/components/AnnualBillSavings';
+import { AnnualBillReportDialog } from '@/components/AnnualBillReportDialog';
 import { annualBillStatusLabel } from '@/src/lib/annual-bill/annualBillPresentation';
 import type { AnnualBillAdviceResult } from '@/src/lib/annual-bill/calculateAnnualBillAdvice';
+import { getAnnualBillReportOptions } from '@/src/lib/annual-bill/reportOptions';
 import { resolveAnnualBillEnergyBasis } from '@/src/lib/annual-bill/energyBasis';
 import type { AnnualBillExtract } from '@/src/lib/annual-bill/schema';
 import { logAnnualBill, annualBillLogValues, annualBillErrorDetails } from '@/src/lib/annual-bill/logging';
@@ -257,6 +259,9 @@ export default function HomePage() {
   const [annualBillFileName, setAnnualBillFileName] = useState<string | null>(null);
   const [annualBillTextPreview, setAnnualBillTextPreview] = useState<string | null>(null);
   const [annualBillDetailsOpen, setAnnualBillDetailsOpen] = useState(false);
+  const [annualBillReportDialogOpen, setAnnualBillReportDialogOpen] = useState(false);
+  const [selectedReportBatteryKwh, setSelectedReportBatteryKwh] = useState<number | null>(null);
+  const [annualBillReportType, setAnnualBillReportType] = useState<'customer' | 'technical'>('customer');
   const [isExtractingAnnualBill, setIsExtractingAnnualBill] = useState(false);
   const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
   const [priceIntervals, setPriceIntervals] = useState<PriceInterval[]>([]);
@@ -750,8 +755,19 @@ export default function HomePage() {
     return analysisResult.pvAdviceCharts;
   }, [analysisResult, financialResult, financialPvAdviceCharts]);
 
-  const downloadReport = async () => {
+  const downloadReport = async (annualBillSelection?: { capacityKwh: number; reportType: 'customer' | 'technical' }) => {
     if (!analysisResult || !appliedSettings) return;
+    if (analysisResult.annualBillAdvice && !annualBillSelection) {
+      const choices = getAnnualBillReportOptions(analysisResult.annualBillAdvice);
+      if (!choices.length) {
+        setError('Er is geen betrouwbaar adviesrapport mogelijk: controleer de jaarwaarden en energiegegevens.');
+        return;
+      }
+      setSelectedReportBatteryKwh(analysisResult.annualBillAdvice.recommendedBatteryKwh);
+      setAnnualBillReportType('customer');
+      setAnnualBillReportDialogOpen(true);
+      return;
+    }
     const reportTraceId = analysisResult.annualBillInput?.traceId;
     if (analysisResult.annualBillAdvice) logAnnualBill('browser.report.started', reportTraceId, { recommendedBatteryKwh: analysisResult.annualBillAdvice.recommendedBatteryKwh });
     let reportSizing = analysisResult.sizing;
@@ -840,7 +856,9 @@ export default function HomePage() {
       annualBill: analysisResult.annualBillAdvice ? {
         input: analysisResult.annualBillInput ?? {},
         advice: analysisResult.annualBillAdvice,
-        warnings: analysisResult.pvWarnings
+        warnings: analysisResult.pvWarnings,
+        selectedReportBatteryKwh: annualBillSelection?.capacityKwh,
+        reportType: annualBillSelection?.reportType
       } : undefined,
       analysisType: appliedSettings.analysisType,
       contractedPowerKw: appliedSettings.contractedPowerKw,
@@ -1575,6 +1593,21 @@ export default function HomePage() {
 
       {analysisResult ? (
         <>
+          {annualBillReportDialogOpen && annualBillAdvice && <AnnualBillReportDialog
+            advice={annualBillAdvice}
+            options={getAnnualBillReportOptions(annualBillAdvice)}
+            selectedCapacity={selectedReportBatteryKwh}
+            setSelectedCapacity={setSelectedReportBatteryKwh}
+            reportType={annualBillReportType}
+            setReportType={setAnnualBillReportType}
+            onCancel={() => setAnnualBillReportDialogOpen(false)}
+            onGenerate={() => {
+              if (selectedReportBatteryKwh == null) return;
+              const selection = { capacityKwh: selectedReportBatteryKwh, reportType: annualBillReportType };
+              setAnnualBillReportDialogOpen(false);
+              void downloadReport(selection);
+            }}
+          />}
           {analysisResult.analysisType === 'PV_SELF_CONSUMPTION' && !annualBillAdvice &&
             (analysisResult.pvWarnings ?? []).map((warning) => (
               <p key={warning} className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
@@ -1585,7 +1618,7 @@ export default function HomePage() {
             <div className="wx-card">
               <h2 className="wx-title">Jouw batterijadvies</h2>
               <p className="mb-4 text-sm text-slate-600">Dit is een eerste schatting op basis van je jaargegevens. Laat de batterijcapaciteit en het benodigde vermogen controleren met kwartierdata voordat je een batterij kiest.</p>
-              <button className="wx-btn-primary mb-4" onClick={downloadReport}>
+              <button className="wx-btn-primary mb-4" onClick={() => void downloadReport()}>
                 Download je adviesrapport
               </button>
               <div className="grid gap-3 md:grid-cols-2">
@@ -2183,7 +2216,7 @@ export default function HomePage() {
             </p>
             <button
               className="wx-btn-primary mt-3"
-              onClick={downloadReport}
+              onClick={() => void downloadReport()}
               disabled={!analysisResult}
             >
               Download adviesrapport

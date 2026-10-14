@@ -17,6 +17,8 @@ export interface PdfPayload {
     input: import('./analysis').AnnualBillInput;
     advice: import('../src/lib/annual-bill/calculateAnnualBillAdvice').AnnualBillAdviceResult;
     warnings?: string[];
+    selectedReportBatteryKwh?: number;
+    reportType?: 'customer' | 'technical';
   };
   reportVariant?: 'advice' | 'financial';
   analysisType?: AnalysisType;

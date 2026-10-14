@@ -2,6 +2,8 @@ import { pvReportStyles } from './reportStyles';
 import { BATTERY_ADVICE_OPTIONS_KWH, batteryBrochureKey } from './batteryAdviceOptions';
 import type { PdfPayload } from './pdf';
 import { generateAnnualBillReportHtml } from './annualBillReportHtml';
+import { generateAnnualBillCustomerReportHtml } from './annualBillCustomerReportHtml';
+import { getSelectedAnnualBillReportOption } from '../src/lib/annual-bill/reportOptions';
 import { logAnnualBill, annualBillErrorDetails } from '../src/lib/annual-bill/logging';
 import { buildDayProfile } from './calculations';
 import { formatTimestamp, getLocalDayIso, getLocalHourMinute } from './datetime';
@@ -1155,7 +1157,10 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
     const traceId = payload.annualBill.input.traceId;
     logAnnualBill('report.started', traceId, { recommendedBatteryKwh: payload.annualBill.advice.recommendedBatteryKwh });
     try {
-    const capacity = payload.annualBill.advice.recommendedBatteryKwh;
+    const reportType = payload.annualBill.reportType ?? 'technical';
+    const capacity = payload.annualBill.selectedReportBatteryKwh ?? payload.annualBill.advice.recommendedBatteryKwh;
+    if (reportType === 'customer' && capacity == null) throw new Error('Kies een batterijcapaciteit voor het klantadvies.');
+    if (capacity != null) getSelectedAnnualBillReportOption(payload.annualBill.advice, capacity);
     // Match the actual annual-bill recommendation, never the synthetic interval sizing.
     const brochure = capacity == null ? null : getRecommendedBrochureInfo({
       ...payload,
@@ -1166,7 +1171,9 @@ export function generateInteractiveReportHtml(payload: PdfPayload): string {
       } as NonNullable<PdfPayload['sizing']['recommendedProduct']> }
     });
     logAnnualBill('report.brochure.selected', traceId, { capacityKwh: capacity, found: Boolean(brochure), brochureKey: brochure?.key }, brochure ? 'info' : 'warn');
-    const html = generateAnnualBillReportHtml(payload.annualBill, getEmbeddedLogoSrc(), brochure);
+    const html = reportType === 'customer'
+      ? generateAnnualBillCustomerReportHtml(payload.annualBill, getEmbeddedLogoSrc(), brochure)
+      : generateAnnualBillReportHtml(payload.annualBill, getEmbeddedLogoSrc(), brochure);
     logAnnualBill('report.completed', traceId, { htmlCharacters: html.length, durationMs: Math.round(performance.now() - startedAt) });
     return html;
     } catch (error) {
