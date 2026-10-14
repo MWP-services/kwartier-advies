@@ -1,0 +1,32 @@
+name: Required validation
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Tests, TypeScript, and ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Check TypeScript types
+        run: npm run typecheck
+
+      - name: Run ESLint
+        run: npm run lint
