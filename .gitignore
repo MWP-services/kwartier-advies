@@ -6,3 +6,6 @@ node_modules
 .worker-build/
 .analysis-jobs/
 tsconfig.tsbuildinfo
+.tmp-*.cjs
+.tmp-*.txt
+*.log

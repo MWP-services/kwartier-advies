@@ -12,6 +12,7 @@
     "build": "npm run build:next && npm run build:worker",
     "start": "node scripts/start-webapp.js",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit",
     "test:worker-runtime": "node scripts/smoke-test-worker.mjs",
     "test": "vitest run",
     "test:watch": "vitest"

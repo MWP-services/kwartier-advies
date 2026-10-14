@@ -324,7 +324,7 @@ export function calculateAnnualBillAdvice(input: AnnualBillAdviceInput): AnnualB
     emergencyPowerReservePercent: emergencyReserveFraction * 100,
     warnings,
     explanation: recommendationStatus === 'insufficient_data' ? 'Geen betrouwbaar batterijcapaciteitsadvies mogelijk: controleer de energiegrondslag.'
-      : recommended ? `${recommended.batteryKwh} kWh is geselecteerd. ${selectionExplanation} Deze batterij benut ${(recommended.percentOfMaximumSavings * 100).toFixed(1)}% van de verwachte reductie binnen de onderzochte opties. ${practicalMaximumReliable ? 'De marginale winst vlakt over meerdere capaciteiten af.' : 'Het praktische maximum is onzeker; geen gegarandeerde doelrealisatie.'} Financiën bepalen de capaciteit niet.`
+      : recommended ? `${recommended.batteryKwh} kWh is geselecteerd. ${selectionExplanation} Deze batterij benut ${(recommended.percentOfMaximumSavings * 100).toFixed(1)}% van de verwachte reductie binnen de onderzochte opties. ${practicalMaximumReliable ? 'De marginale winst vlakt over meerdere capaciteiten af.' : 'Het praktische maximum is onzeker; geen gegarandeerde doelrealisatie.'} FinanciÃ«n bepalen de capaciteit niet.`
       : dailyNeed > 0 && !batteryOptions.length ? 'Geen passende catalogusbatterij binnen de technische bovengrens. Dit betekent niet dat opslagpotentieel ontbreekt.' : 'Op basis van de beschikbare teruglevering is geen PV-opslagbatterij aanbevolen.'
   };
 }

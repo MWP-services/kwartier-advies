@@ -97,3 +97,28 @@ Bij aanvang waren reeds lokale wijzigingen aanwezig in de meterextractie, energi
 ## Beperkingen
 
 Synthetische import en export worden per kwartier gesaldeerd zoals in het bestaande model; de nota bepaalt hun werkelijke overlap niet. Geen gemeten piekvermogens, degradatie of seizoensopslag. Productspecificaties gebruiken bestaande catalogus/fallback-aannames. De fysieke grens kan bij een dunne catalogus geen bewezen maximum opleveren: dan volgt expliciet lage zekerheid, geen ongefundeerde 95%-claim. De scenarioband is geen statistisch betrouwbaarheidsinterval.
+
+## Volledige jaarnota-regressietest
+
+`tests/annualBillMeterPdf.integration.test.ts` maakt standaard een anonieme, tekstselecteerbare PDF met de Eneco-registerfixture en de gesimuleerde factuurregels. De test doorloopt PDF-tekstextractie, meterregisterherkenning, normalisatie, energiegrondslag, V3-advies en de gegevens in het jaarnota-rapport. De verwachte fysieke afname is 35.444 kWh en teruglevering 16.439 kWh; de netto gefactureerde afname van 19.005 kWh blijft apart en wordt niet als fysieke meterafname gebruikt. De periode is 01-10-2024 tot 29-09-2025 exclusief (363 dagen); alleen de fysieke jaargrondslag wordt met factor 365/363 geannualiseerd.
+
+Er was tijdens deze validatie geen lokaal bestand ingesteld via `ANNUAL_BILL_PDF_FIXTURE`. Daarom is geen echte klantnota gebruikt of aan de repository toegevoegd. De aanvullende fixtures gebruiken testmeter-ID's en testwaarden; de kolomfixture is een geanonimiseerde tekstreproductie, geen originele PDF. `tests/annualBillMeterTable.test.ts` dekt ook ontbrekende/overlappende perioden, dubbele regels, factorproblemen, ontbrekende export, meerdere aansluitingen, salderingsverwarring en handmatige bevestiging na onbetrouwbare extractie.
+
+Voer de relevante regressies lokaal uit met:
+
+```sh
+npm ci
+npx vitest run tests/annualBillMeterPdf.integration.test.ts tests/annualBillMeterTable.test.ts tests/annualBillV3.test.ts
+```
+
+Met toestemming kan een ontwikkelaar tijdelijk een lokaal, beveiligd PDF-pad instellen voordat dezelfde PDF-test wordt gestart. Houd de PDF buiten de repository, zet het pad niet in CI, commit het bestand niet en wis de tijdelijke variabele direct daarna:
+
+```powershell
+$env:ANNUAL_BILL_PDF_FIXTURE = 'C:\secure\pad\naar\jaarnota.pdf'
+npx vitest run tests/annualBillMeterPdf.integration.test.ts
+Remove-Item Env:ANNUAL_BILL_PDF_FIXTURE
+```
+
+De reguliere GitHub Actions-validatie gebruikt Node.js 22 en draait `npm ci`, de volledige suite via `npm test`, `npm run typecheck` en `npm run lint`. Daarna bouwt een aparte job de productie-app en worker met `npm run build` en controleert de deploymentbundel. Deployment naar Azure Web App kan alleen na die jobs slagen en wordt alleen uitgevoerd bij een push naar `main` of handmatige start vanaf `main`; pull requests draaien controles maar deployen niet. De twee handmatige Azure Static Web Apps-workflows gebruiken dezelfde verplichte validatieworkflow als voorwaarde.
+
+De PDF-extractie leest selecteerbare tekst met `pdf-parse`; ze voert geen OCR uit. Afwijkende kolomvolgorde, ontbrekende factoren, tegenstrijdige of overlappende meterregels en meerdere aansluitingen worden niet automatisch als fysieke energie geaccepteerd. Zulke documenten vereisen correctie/bevestiging in de invoer. Een lokale klantnota kan extra leveranciersspecifieke lay-outs blootleggen die de geanonimiseerde regressiefixtures niet afdekken.

@@ -39,6 +39,7 @@ export function generateAnnualBillReportHtml(
   const rows = [
     ['Energiegrondslag', advice.energyBasis?.source ?? 'Onbekend'],
     ['Oorspronkelijke import / export', `${number(advice.energyBasis?.originalImportKwh ?? NaN)} / ${number(advice.energyBasis?.originalExportKwh ?? NaN)} kWh`],
+    ['Netto gefactureerde afname na saldering', input.billingEnergy ? `${number(input.billingEnergy.gridImportKwh)} kWh` : 'Niet afzonderlijk vastgesteld'],
     ['Energie-evidence', advice.energyBasis?.evidence ?? 'Handmatig of generiek bevestigd'],
     ['Oorspronkelijke energieperiode', `${advice.energyBasis?.periodStart ?? 'Onbekend'} tot ${advice.energyBasis?.periodEnd ?? 'Onbekend'} (${advice.energyBasis?.periodEndInclusive ? 'einde inclusief' : 'einde exclusief'})`],
     ['Periodedagen', number(advice.energyBasis?.periodDays ?? NaN)],
