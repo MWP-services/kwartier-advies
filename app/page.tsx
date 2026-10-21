@@ -1856,9 +1856,9 @@ export default function HomePage() {
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <div className="text-xs uppercase tracking-wide text-slate-500">Sterkste basis</div>
                       <div className="mt-1 text-lg font-semibold text-slate-900">
-                        P75 {advice.percentiles.p75StorageNeedKwh.toFixed(1)} kWh
+                        P75 theoretische dagbehoefte: {advice.percentiles.p75StorageNeedKwh.toFixed(1)} kWh/dag
                       </div>
-                      <div className="mt-1 text-xs text-slate-600">Representatieve dagelijkse opslagbehoefte vóór safety factor en DoD-correctie.</div>
+                      <div className="mt-1 text-xs text-slate-600">Theoretische overlap tussen dagexport en avond/nachtimport. Dit is geen fysiek bewezen opslagpotentieel.</div>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <div className="text-xs uppercase tracking-wide text-slate-500">Datadekking</div>

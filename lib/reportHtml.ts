@@ -369,8 +369,8 @@ function generatePvInteractiveReportHtml(payload: PdfPayload): string {
             ${
               formulaAdvice
                 ? `<tr><th>Klanttype</th><td>${formulaAdvice.usedCustomerType}</td></tr>
-                   <tr><th>P50 / P75 / P90</th><td>${formulaAdvice.percentiles.p50StorageNeedKwh.toFixed(2)} / ${formulaAdvice.percentiles.p75StorageNeedKwh.toFixed(2)} / ${formulaAdvice.percentiles.p90StorageNeedKwh.toFixed(2)} kWh</td></tr>
-                   <tr><th>Conservatief / aanbevolen / ruim</th><td>${formulaAdvice.roundedAdvice.conservativeKwh} / ${formulaAdvice.roundedAdvice.recommendedKwh} / ${formulaAdvice.roundedAdvice.spaciousKwh} kWh</td></tr>`
+                   <tr><th>Theoretische dagbehoefte P50 / P75 / P90</th><td>${formulaAdvice.percentiles.p50StorageNeedKwh.toFixed(2)} / ${formulaAdvice.percentiles.p75StorageNeedKwh.toFixed(2)} / ${formulaAdvice.percentiles.p90StorageNeedKwh.toFixed(2)} kWh/dag</td></tr>
+                   <tr><th>Capaciteitsschatting uit theoretisch profiel (niet fysiek bevestigd)</th><td>${formulaAdvice.roundedAdvice.conservativeKwh} / ${formulaAdvice.roundedAdvice.recommendedKwh} / ${formulaAdvice.roundedAdvice.spaciousKwh} kWh</td></tr>`
                 : ''
             }
             <tr><th>Export voor/na batterij</th><td>${pvSummary.exportBefore.toFixed(2)} / ${pvSummary.exportAfter.toFixed(2)} kWh</td></tr>

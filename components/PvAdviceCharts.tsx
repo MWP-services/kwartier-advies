@@ -38,23 +38,22 @@ export function PvAdviceCharts({ charts }: PvAdviceChartsProps) {
     <div className="grid gap-4">
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="wx-card">
-          <h3 className="wx-title">Verdeling van opslagbehoefte</h3>
+          <h3 className="wx-title">Verdeling theoretische dagbehoefte</h3>
           <p className="mb-3 text-sm text-slate-600">
-            Deze grafiek voorkomt dat het advies wordt gebaseerd op een extreme dag. Het advies wordt gebaseerd op representatieve
-            percentielen.
+            P50, P75 en P90 tonen de verdeling van dagelijkse export tegenover avond/nachtimport. Dit is profielinformatie, geen bewezen batterijprestatie.
           </p>
           <div className="h-72">
             <ResponsiveContainer>
               <ComposedChart data={charts.storageDistributionChart}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="bucket" label={{ value: 'Opslagbehoefte-bucket (kWh)', position: 'insideBottom', offset: -5 }} />
+                <XAxis dataKey="bucket" label={{ value: 'Theoretische dagbehoefte (kWh/dag)', position: 'insideBottom', offset: -5 }} />
                 <YAxis allowDecimals={false} label={{ value: 'Aantal dagen', angle: -90, position: 'insideLeft' }} />
                 <Tooltip formatter={(value) => `${Number(value)} dagen`} />
                 <Bar dataKey="count" fill="#3b82f6" name="Aantal dagen" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-          <p className="mt-2 text-xs text-slate-500">X-as: bandbreedte van dagelijkse opslagbehoefte. Y-as: aantal dagen in die bandbreedte.</p>
+          <p className="mt-2 text-xs text-slate-500">X-as: theoretische kWh per dag. Y-as: aantal dagen in die bandbreedte.</p>
         </div>
       </div>
 
@@ -85,8 +84,7 @@ export function PvAdviceCharts({ charts }: PvAdviceChartsProps) {
         <div className="wx-card">
           <h3 className="wx-title">Batterijadvies: conservatief, aanbevolen en ruim</h3>
           <p className="mb-3 text-sm text-slate-600">
-            Het aanbevolen advies is gebaseerd op P75 van de dagelijkse opslagbehoefte, inclusief veiligheidsfactor en correctie
-            voor bruikbare batterijcapaciteit.
+            Deze capaciteit komt uit de kwartiersimulatie van batterijopties; P50/P75/P90 zijn alleen theoretische profielpercentielen.
           </p>
           <div className="h-72">
             <ResponsiveContainer>

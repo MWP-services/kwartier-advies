@@ -22,7 +22,8 @@ jobs:
       - name: Install, test, and build
         run: |
           npm ci
-          npm test -- --run tests/analysisJobClient.test.ts tests/analysisJobs.test.ts tests/extractPdfText.test.ts tests/extractPdfText.integration.test.ts tests/annualBillRoute.test.ts
+          npm test
+          npx tsc --noEmit
           npm run build
           node --check scripts/start-webapp.js
           node --check .worker-build/worker/analysis-worker.js

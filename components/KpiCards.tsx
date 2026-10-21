@@ -31,11 +31,11 @@ export function KpiCards({
             value: `${(sizing.pvFormulaAdvice?.totals.totalExportKwh ?? 0).toFixed(2)} kWh`
           },
           {
-            label: 'P50 opslagbehoefte',
+            label: 'P50 theoretisch/dag',
             value: `${(sizing.pvFormulaAdvice?.percentiles.p50StorageNeedKwh ?? 0).toFixed(2)} kWh`
           },
           {
-            label: 'P75 opslagbehoefte',
+            label: 'P75 theoretisch/dag',
             value: `${(sizing.pvFormulaAdvice?.percentiles.p75StorageNeedKwh ?? 0).toFixed(2)} kWh`
           },
           {
