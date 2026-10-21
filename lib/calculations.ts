@@ -80,8 +80,8 @@ export interface PvFormulaDailyRow {
   date: string;
   dailyExportKwh: number;
   eveningNightImportKwh: number;
+  /** Theoretical daily overlap, not battery throughput or a capacity recommendation. */
   dailyStorageNeedKwh: number;
-  chronologicalShiftableKwh: number;
   isPvActiveDay: boolean;
 }
 
@@ -245,7 +245,6 @@ export interface PvSelfConsumptionAdviceConfig {
   minCyclesPerYearBusiness?: number;
   minMarginalGainPerAddedKwhHome?: number;
   minMarginalGainPerAddedKwhBusiness?: number;
-  minBusinessRecommendedCapacityToP75Ratio?: number;
   economics?: Partial<PvEconomicsConfig>;
 }
 
@@ -782,7 +781,6 @@ const DEFAULT_PV_SELF_CONSUMPTION_CONFIG: Required<
   minCyclesPerYearBusiness: 20,
   minMarginalGainPerAddedKwhHome: 30,
   minMarginalGainPerAddedKwhBusiness: 10,
-  minBusinessRecommendedCapacityToP75Ratio: 0.9
 };
 
 const HOME_PV_POWER_MAP: Record<number, number> = {
@@ -1021,7 +1019,6 @@ export function computePvStorageFormulaAdvice(
       dailyExportKwh: 0,
       eveningNightImportKwh: 0,
       dailyStorageNeedKwh: 0,
-      chronologicalShiftableKwh: 0,
       isPvActiveDay: false
     };
     const flow = derivePvIntervalFlow(interval);
@@ -1042,41 +1039,12 @@ export function computePvStorageFormulaAdvice(
     dayMap.set(date, day);
   });
 
-  // Bound the chronological shiftable energy to the largest available battery option.
-  // This simulation only shifts PV forward in time and carries stored energy across days.
-  const theoreticalBufferKwh = Math.max(...resolvedConfig.availableBusinessOptionsKwh, 0);
-  let theoreticalSocKwh = 0;
-  const chronologicalShiftableByDay = new Map<string, number>();
-  const intervalHours = deriveIntervalMinutes(intervals, 15) / 60;
-  const chargeEfficiency = Math.sqrt(DEFAULT_PV_SELF_CONSUMPTION_CONFIG.roundTripEfficiency);
-  const dischargeEfficiency = chargeEfficiency;
-  const maxChargeKw = getBatterySpecForCapacity(theoreticalBufferKwh).maxChargeKw;
-  const maxDischargeKw = maxChargeKw;
-  for (const interval of [...intervals].sort((a, b) => parseTimestamp(a.timestamp).getTime() - parseTimestamp(b.timestamp).getTime())) {
-    const date = getLocalDayIso(interval.timestamp, 'Europe/Amsterdam');
-    const flow = derivePvIntervalFlow(interval);
-    const chargeInput = Math.min(
-      flow.surplusKwh,
-      maxChargeKw * intervalHours,
-      chargeEfficiency > 0 ? Math.max(0, theoreticalBufferKwh - theoreticalSocKwh) / chargeEfficiency : 0
-    );
-    theoreticalSocKwh += chargeInput * chargeEfficiency;
-    const dischargeOutput = Math.min(
-      flow.loadDeficitKwh,
-      maxDischargeKw * intervalHours,
-      theoreticalSocKwh * dischargeEfficiency
-    );
-    theoreticalSocKwh = Math.max(0, theoreticalSocKwh - (dischargeEfficiency > 0 ? dischargeOutput / dischargeEfficiency : 0));
-    chronologicalShiftableByDay.set(date, (chronologicalShiftableByDay.get(date) ?? 0) + dischargeOutput);
-  }
-
   const dailyRows = Array.from(dayMap.values())
     .map((day) => ({
       ...day,
       dailyExportKwh: round2(day.dailyExportKwh),
       eveningNightImportKwh: round2(day.eveningNightImportKwh),
-      dailyStorageNeedKwh: round2(Math.min(day.dailyExportKwh, day.eveningNightImportKwh)),
-      chronologicalShiftableKwh: round2(chronologicalShiftableByDay.get(day.date) ?? 0)
+      dailyStorageNeedKwh: round2(Math.min(day.dailyExportKwh, day.eveningNightImportKwh))
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -1108,7 +1076,7 @@ export function computePvStorageFormulaAdvice(
           return dailyRowsWithActivity;
         })();
 
-  const selectedStorageNeeds = selectedDays.map((day) => day.chronologicalShiftableKwh);
+  const selectedStorageNeeds = selectedDays.map((day) => day.dailyStorageNeedKwh);
   const p50StorageNeedKwh = round2(percentile(selectedStorageNeeds, 50));
   const p75StorageNeedKwh = round2(percentile(selectedStorageNeeds, 75));
   const p90StorageNeedKwh = round2(percentile(selectedStorageNeeds, 90));
@@ -1145,9 +1113,8 @@ export function computePvStorageFormulaAdvice(
   };
 
   const explanation = [
-    'Theoretische dagelijkse behoefte is min(dagelijkse teruglevering, avond/nacht-netafname); deze waarde is geen bewezen verschuifbare energie.',
-    'P50, P75 en P90 zijn gebaseerd op chronologisch verschuifbare PV-energie met een ruime begrenzing op capaciteit, vermogen en conversieverlies.',
-    'Vervolgens zijn P50, P75 en P90 gebruikt om respectievelijk een conservatief, aanbevolen en ruim advies te bepalen.',
+    'P50, P75 en P90 beschrijven de theoretische dagelijkse overlap: min(dagelijkse teruglevering, avond/nacht-netafname).',
+    'Deze profielpercentielen zijn geen batterijcapaciteit en bewijzen geen fysiek verschuifbare energie; de capaciteit wordt getoetst met de kwartiersimulatie per batterijoptie.',
     'Hierdoor wordt voorkomen dat extreme zomerdagen of seizoensopslag leiden tot een onrealistisch grote batterij.'
   ];
 
@@ -1467,10 +1434,6 @@ export function computePvSelfConsumptionAdvice(
     usedCustomerType === 'business'
       ? resolvedHybridConfig.minMarginalGainPerAddedKwhBusiness
       : resolvedHybridConfig.minMarginalGainPerAddedKwhHome;
-  const minBusinessRecommendedCapacityKwh =
-    usedCustomerType === 'business'
-      ? formulaAdvice.percentiles.p75StorageNeedKwh * resolvedHybridConfig.minBusinessRecommendedCapacityToP75Ratio
-      : 0;
 
   const maxImportReduction = Math.max(0, ...allScenarios.map((scenario) => scenario.importReductionKwhAnnualized));
   const maxCycles = Math.max(0, ...allScenarios.map((scenario) => scenario.cyclesPerYear));
@@ -1504,9 +1467,6 @@ export function computePvSelfConsumptionAdvice(
     }
     if (scenario.cyclesPerYear < minCyclesPerYear) {
       excludedReasons.push('Te weinig cycli per jaar');
-    }
-    if (usedCustomerType === 'business' && scenario.capacityKwh < minBusinessRecommendedCapacityKwh) {
-      excludedReasons.push('Onder minimale capaciteit t.o.v. P75-opslagbehoefte');
     }
     if ((scenario.marginalGainPerAddedKwh ?? 0) < minMarginalGain && index > 0) {
       excludedReasons.push('Marginale meeropbrengst te laag');
@@ -1596,18 +1556,6 @@ export function computePvSelfConsumptionAdvice(
   if (usedCustomerType === 'home' && formulaAdvice.rawAdvice.capReason) {
     warnings.push(formulaAdvice.rawAdvice.capReason);
   }
-  if (
-    usedCustomerType === 'business' &&
-    resolvedHybridConfig.minBusinessRecommendedCapacityToP75Ratio > 0 &&
-    recommendedScenario.capacityKwh < formulaAdvice.percentiles.p75StorageNeedKwh
-  ) {
-    warnings.push(
-      `Zakelijk advies is minimaal ${Math.round(
-        resolvedHybridConfig.minBusinessRecommendedCapacityToP75Ratio * 100
-      )}% van de P75-opslagbehoefte om een te kleine, puur op cycli scorende batterij te voorkomen.`
-    );
-  }
-
   const explanation = [
     ...formulaAdvice.explanation,
     `De formule geeft ${formulaAdvice.rawAdvice.recommendedKwh.toFixed(1)} kWh als basisinschatting.`,
@@ -2089,28 +2037,11 @@ export function computePvSizing(params: {
   const formulaAdvice = computePvStorageFormulaAdvice(intervals, {
     customerType: settings.customerType ?? 'auto'
   });
-  const recommendedProduct = buildAdviceProduct(
-    formulaAdvice.roundedAdvice.recommendedKwh,
-    formulaAdvice.usedCustomerType,
-    'Aanbevolen'
-  );
-  const alternativeProduct = buildAdviceProduct(
-    formulaAdvice.roundedAdvice.spaciousKwh,
-    formulaAdvice.usedCustomerType,
-    'Ruim'
-  );
-  const maxExportKw = Math.max(0, ...intervals.map((interval) => derivePvIntervalFlow(interval).surplusKwh / 0.25));
-
-  return {
-    kWhNeededRaw: formulaAdvice.rawAdvice.rawRecommendedKwh,
-    kWNeededRaw: round2(maxExportKw),
-    kWhNeeded: formulaAdvice.roundedAdvice.recommendedKwh,
-    kWNeeded: recommendedProduct.powerKw,
-    recommendedProduct,
-    alternativeProduct,
-    noFeasibleBatteryByPower: false,
-    pvFormulaAdvice: formulaAdvice
-  };
+  const physicalAdvice = computePvSelfConsumptionAdvice(intervals, {
+    customerType: formulaAdvice.usedCustomerType,
+    economics: undefined
+  });
+  return buildSizingResultFromPvSelfConsumptionAdvice(formulaAdvice, physicalAdvice);
 }
 
 export function buildSizingResultFromPvSelfConsumptionAdvice(

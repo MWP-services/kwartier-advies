@@ -179,7 +179,7 @@ describe('calculations', () => {
     });
 
     expect(result.kWhNeededRaw).toBeLessThan(64);
-    expect(result.recommendedProduct?.capacityKwh).toBe(40);
+    expect(result.recommendedProduct?.capacityKwh).toBe(30);
     expect(result.pvFormulaAdvice?.rawAdvice.capReason).toContain('particuliere');
   });
 
@@ -199,12 +199,12 @@ describe('calculations', () => {
     });
 
     expect(result.dailyRows.map((row) => row.dailyStorageNeedKwh)).toEqual([5, 6]);
-    expect(result.percentiles.p50StorageNeedKwh).toBeCloseTo(4.5, 5);
+    expect(result.percentiles.p50StorageNeedKwh).toBeCloseTo(5.5, 5);
     expect(result.percentiles.p75StorageNeedKwh).toBeGreaterThanOrEqual(result.percentiles.p50StorageNeedKwh);
     expect(result.roundedAdvice.recommendedKwh).toBeGreaterThan(0);
   });
 
-  it('does not count import before same-day PV as chronologically shiftable energy', () => {
+  it('does not reduce morning import with PV produced later when there is no later demand', () => {
     const intervals = processIntervals([
       { timestamp: '2024-01-01T05:00:00.000Z', consumptionKwh: 8, exportKwh: 0 }, // 06:00 Amsterdam
       { timestamp: '2024-01-01T12:00:00.000Z', consumptionKwh: 0, exportKwh: 10 }, // 13:00 Amsterdam
@@ -212,8 +212,10 @@ describe('calculations', () => {
     ], 500);
     const advice = computePvStorageFormulaAdvice(intervals, { customerType: 'home', minActiveDays: 1 });
 
-    expect(advice.dailyRows[0].dailyStorageNeedKwh).toBe(8); // retained as a clearly theoretical statistic
-    expect(advice.dailyRows[0].chronologicalShiftableKwh).toBe(0);
+    expect(advice.dailyRows[0].dailyStorageNeedKwh).toBe(8); // theoretical window overlap, not physical dispatch
+    expect(advice.explanation.join(' ')).toContain('geen batterijcapaciteit');
+    const simulation = computePvSelfConsumptionAdvice(intervals, { customerType: 'home' });
+    expect(simulation.simulationAdvice.recommended.gridImportReductionKwh).toBe(0);
   });
 
   it('keeps simulated home battery SOC across midnight by default', () => {
@@ -258,6 +260,14 @@ describe('calculations', () => {
     const charts = buildPvAdviceChartsData(advice, intervals);
 
     expect(charts.dailyStorageChart).toHaveLength(2);
+    expect(charts.dailyStorageChart.map((row) => row.dailyStorageNeedKwh)).toEqual(
+      advice.dailyRows.map((row) => row.dailyStorageNeedKwh)
+    );
+    expect(charts.dailyStorageChart.every((row) => row.p50 === advice.percentiles.p50StorageNeedKwh)).toBe(true);
+    expect(charts.monthlyStorageChart[0].monthlyUsefulStorageNeedKwh).toBeCloseTo(
+      advice.dailyRows.reduce((sum, row) => sum + row.dailyStorageNeedKwh, 0),
+      2
+    );
     expect(charts.storageDistributionChart.length).toBeGreaterThan(0);
     expect(charts.adviceComparisonChart.find((item) => item.label === 'Aanbevolen')?.emphasis).toBe(true);
     expect(charts.marginalGainChart[0].capacityKwh).toBe(5);
@@ -429,14 +439,9 @@ describe('calculations', () => {
     }).flat();
     const intervals = processIntervals(rows, 5000);
     const hybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'business' });
-    const minCapacityKwh = hybrid.formulaAdvice.p75StorageNeedKwh * 0.9;
-
-    expect(hybrid.formulaAdvice.p75StorageNeedKwh).toBe(1425);
-    expect(hybrid.simulationAdvice.recommended.capacityKwh).toBeGreaterThanOrEqual(minCapacityKwh);
+    expect(hybrid.formulaAdvice.p75StorageNeedKwh).toBe(1500);
     expect(hybrid.simulationAdvice.recommended.capacityKwh).not.toBe(64);
-    expect(
-      hybrid.simulationAdvice.allScenarios.find((scenario) => scenario.capacityKwh === 64)?.excludedReason
-    ).toBe('Onder minimale capaciteit t.o.v. P75-opslagbehoefte');
+    expect(hybrid.simulationAdvice.allScenarios.find((scenario) => scenario.capacityKwh === 64)?.excludedReason).toBeUndefined();
   });
 
   it('selects earliest timestamp when max observed kW ties', () => {
