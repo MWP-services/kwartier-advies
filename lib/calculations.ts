@@ -81,6 +81,7 @@ export interface PvFormulaDailyRow {
   dailyExportKwh: number;
   eveningNightImportKwh: number;
   dailyStorageNeedKwh: number;
+  chronologicalShiftableKwh: number;
   isPvActiveDay: boolean;
 }
 
@@ -775,7 +776,7 @@ const DEFAULT_PV_SELF_CONSUMPTION_CONFIG: Required<
   emergencyPowerEnabled: false,
   emergencyPowerReservePercent: 10,
   roundTripEfficiency: 0.95,
-  resetSocDailyForHome: true,
+  resetSocDailyForHome: false,
   allowCarryOverForBusiness: true,
   minCyclesPerYearHome: 80,
   minCyclesPerYearBusiness: 20,
@@ -1020,6 +1021,7 @@ export function computePvStorageFormulaAdvice(
       dailyExportKwh: 0,
       eveningNightImportKwh: 0,
       dailyStorageNeedKwh: 0,
+      chronologicalShiftableKwh: 0,
       isPvActiveDay: false
     };
     const flow = derivePvIntervalFlow(interval);
@@ -1040,20 +1042,47 @@ export function computePvStorageFormulaAdvice(
     dayMap.set(date, day);
   });
 
+  // Bound the chronological shiftable energy to the largest available battery option.
+  // This simulation only shifts PV forward in time and carries stored energy across days.
+  const theoreticalBufferKwh = Math.max(...resolvedConfig.availableBusinessOptionsKwh, 0);
+  let theoreticalSocKwh = 0;
+  const chronologicalShiftableByDay = new Map<string, number>();
+  const intervalHours = deriveIntervalMinutes(intervals, 15) / 60;
+  const chargeEfficiency = Math.sqrt(DEFAULT_PV_SELF_CONSUMPTION_CONFIG.roundTripEfficiency);
+  const dischargeEfficiency = chargeEfficiency;
+  const maxChargeKw = getBatterySpecForCapacity(theoreticalBufferKwh).maxChargeKw;
+  const maxDischargeKw = maxChargeKw;
+  for (const interval of [...intervals].sort((a, b) => parseTimestamp(a.timestamp).getTime() - parseTimestamp(b.timestamp).getTime())) {
+    const date = getLocalDayIso(interval.timestamp, 'Europe/Amsterdam');
+    const flow = derivePvIntervalFlow(interval);
+    const chargeInput = Math.min(
+      flow.surplusKwh,
+      maxChargeKw * intervalHours,
+      chargeEfficiency > 0 ? Math.max(0, theoreticalBufferKwh - theoreticalSocKwh) / chargeEfficiency : 0
+    );
+    theoreticalSocKwh += chargeInput * chargeEfficiency;
+    const dischargeOutput = Math.min(
+      flow.loadDeficitKwh,
+      maxDischargeKw * intervalHours,
+      theoreticalSocKwh * dischargeEfficiency
+    );
+    theoreticalSocKwh = Math.max(0, theoreticalSocKwh - (dischargeEfficiency > 0 ? dischargeOutput / dischargeEfficiency : 0));
+    chronologicalShiftableByDay.set(date, (chronologicalShiftableByDay.get(date) ?? 0) + dischargeOutput);
+  }
+
   const dailyRows = Array.from(dayMap.values())
     .map((day) => ({
       ...day,
       dailyExportKwh: round2(day.dailyExportKwh),
       eveningNightImportKwh: round2(day.eveningNightImportKwh),
-      dailyStorageNeedKwh: round2(Math.min(day.dailyExportKwh, day.eveningNightImportKwh))
+      dailyStorageNeedKwh: round2(Math.min(day.dailyExportKwh, day.eveningNightImportKwh)),
+      chronologicalShiftableKwh: round2(chronologicalShiftableByDay.get(day.date) ?? 0)
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const maxDailyExportKwh = Math.max(0, ...dailyRows.map((day) => day.dailyExportKwh));
-  const allStorageNeeds = dailyRows.map((day) => day.dailyStorageNeedKwh);
-  const p75AcrossAllDays = percentile(allStorageNeeds, 75);
   const customerTypeDetected: 'home' | 'business' =
-    totalImportKwh > 50000 || totalExportKwh > 30000 || p75AcrossAllDays > 40 || maxDailyExportKwh > 150
+    totalImportKwh > 50000 || totalExportKwh > 30000 || maxDailyExportKwh > 150
       ? 'business'
       : 'home';
   const usedCustomerType =
@@ -1079,7 +1108,7 @@ export function computePvStorageFormulaAdvice(
           return dailyRowsWithActivity;
         })();
 
-  const selectedStorageNeeds = selectedDays.map((day) => day.dailyStorageNeedKwh);
+  const selectedStorageNeeds = selectedDays.map((day) => day.chronologicalShiftableKwh);
   const p50StorageNeedKwh = round2(percentile(selectedStorageNeeds, 50));
   const p75StorageNeedKwh = round2(percentile(selectedStorageNeeds, 75));
   const p90StorageNeedKwh = round2(percentile(selectedStorageNeeds, 90));
@@ -1106,7 +1135,9 @@ export function computePvStorageFormulaAdvice(
     usedCustomerType === 'home' ? Math.min(rawSpaciousKwh, resolvedConfig.maxHomeBatteryKwh) : rawSpaciousKwh;
 
   const roundedOptions =
-    usedCustomerType === 'home' ? resolvedConfig.availableHomeOptionsKwh : resolvedConfig.availableBusinessOptionsKwh;
+    usedCustomerType === 'home'
+      ? resolvedConfig.availableHomeOptionsKwh.filter((capacity) => capacity <= resolvedConfig.maxHomeBatteryKwh)
+      : resolvedConfig.availableBusinessOptionsKwh;
   const roundedAdvice = {
     conservativeKwh: roundUpToAvailableOption(cappedConservativeKwh, roundedOptions),
     recommendedKwh: roundUpToAvailableOption(cappedRecommendedKwh, roundedOptions),
@@ -1114,8 +1145,8 @@ export function computePvStorageFormulaAdvice(
   };
 
   const explanation = [
-    'Het batterijadvies is berekend op basis van de dagelijkse hoeveelheid zonne-overschot die later op de dag of nacht nog nuttig gebruikt kan worden.',
-    'Per dag is gekeken naar de kleinste waarde van de dagelijkse teruglevering en de avond/nacht-netafname.',
+    'Theoretische dagelijkse behoefte is min(dagelijkse teruglevering, avond/nacht-netafname); deze waarde is geen bewezen verschuifbare energie.',
+    'P50, P75 en P90 zijn gebaseerd op chronologisch verschuifbare PV-energie met een ruime begrenzing op capaciteit, vermogen en conversieverlies.',
     'Vervolgens zijn P50, P75 en P90 gebruikt om respectievelijk een conservatief, aanbevolen en ruim advies te bepalen.',
     'Hierdoor wordt voorkomen dat extreme zomerdagen of seizoensopslag leiden tot een onrealistisch grote batterij.'
   ];
@@ -1399,10 +1430,13 @@ export function computePvSelfConsumptionAdvice(
     minSocFraction: 0,
     maxSocFraction: 1,
     resetSocDaily:
-      usedCustomerType === 'home'
-        ? resolvedHybridConfig.resetSocDailyForHome
-        : !resolvedHybridConfig.allowCarryOverForBusiness,
-    allowCarryOver: usedCustomerType === 'business' && resolvedHybridConfig.allowCarryOverForBusiness
+      (usedCustomerType === 'home' && resolvedHybridConfig.resetSocDailyForHome === true) ||
+      (usedCustomerType === 'business' && resolvedHybridConfig.allowCarryOverForBusiness === false),
+    allowCarryOver:
+      !(
+        (usedCustomerType === 'home' && resolvedHybridConfig.resetSocDailyForHome === true) ||
+        (usedCustomerType === 'business' && resolvedHybridConfig.allowCarryOverForBusiness === false)
+      )
   };
 
   const allScenarios = scenarioOptions

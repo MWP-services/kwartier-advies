@@ -199,9 +199,31 @@ describe('calculations', () => {
     });
 
     expect(result.dailyRows.map((row) => row.dailyStorageNeedKwh)).toEqual([5, 6]);
-    expect(result.percentiles.p50StorageNeedKwh).toBeCloseTo(5.5, 5);
+    expect(result.percentiles.p50StorageNeedKwh).toBeCloseTo(4.5, 5);
     expect(result.percentiles.p75StorageNeedKwh).toBeGreaterThanOrEqual(result.percentiles.p50StorageNeedKwh);
     expect(result.roundedAdvice.recommendedKwh).toBeGreaterThan(0);
+  });
+
+  it('does not count import before same-day PV as chronologically shiftable energy', () => {
+    const intervals = processIntervals([
+      { timestamp: '2024-01-01T05:00:00.000Z', consumptionKwh: 8, exportKwh: 0 }, // 06:00 Amsterdam
+      { timestamp: '2024-01-01T12:00:00.000Z', consumptionKwh: 0, exportKwh: 10 }, // 13:00 Amsterdam
+      { timestamp: '2024-01-01T18:00:00.000Z', consumptionKwh: 0, exportKwh: 0 }
+    ], 500);
+    const advice = computePvStorageFormulaAdvice(intervals, { customerType: 'home', minActiveDays: 1 });
+
+    expect(advice.dailyRows[0].dailyStorageNeedKwh).toBe(8); // retained as a clearly theoretical statistic
+    expect(advice.dailyRows[0].chronologicalShiftableKwh).toBe(0);
+  });
+
+  it('keeps simulated home battery SOC across midnight by default', () => {
+    const intervals = processIntervals([
+      { timestamp: '2024-01-01T12:00:00.000Z', consumptionKwh: 0, exportKwh: 8 },
+      { timestamp: '2024-01-02T05:00:00.000Z', consumptionKwh: 4, exportKwh: 0 }
+    ], 500);
+    const advice = computePvSelfConsumptionAdvice(intervals, { customerType: 'home' });
+    expect(advice.configUsed.resetSocDaily).toBe(false);
+    expect(advice.simulationAdvice.recommended.gridImportReductionKwh).toBeGreaterThan(0);
   });
 
   it('detects business PV datasets and rounds up to business options', () => {
@@ -409,7 +431,7 @@ describe('calculations', () => {
     const hybrid = computePvSelfConsumptionAdvice(intervals, { customerType: 'business' });
     const minCapacityKwh = hybrid.formulaAdvice.p75StorageNeedKwh * 0.9;
 
-    expect(hybrid.formulaAdvice.p75StorageNeedKwh).toBe(1500);
+    expect(hybrid.formulaAdvice.p75StorageNeedKwh).toBe(1425);
     expect(hybrid.simulationAdvice.recommended.capacityKwh).toBeGreaterThanOrEqual(minCapacityKwh);
     expect(hybrid.simulationAdvice.recommended.capacityKwh).not.toBe(64);
     expect(

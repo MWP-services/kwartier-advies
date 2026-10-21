@@ -151,6 +151,17 @@ describe('simulation', () => {
     expect(large.exceedanceEnergyKwhAfter).toBeLessThan(small.exceedanceEnergyKwhAfter);
   });
 
+  it('plots only the charging power actually accepted by a nearly full battery', () => {
+    const intervals = processIntervals([
+      { timestamp: '2024-01-01T00:00:00.000Z', consumptionKwh: 60 }
+    ], 500);
+    const { maxSocKwh } = resolveBatteryPhysics(64);
+    const result = simulateSingleScenario(intervals, 64, 300, 0, {
+      initialSocRatio: (maxSocKwh - 0.01) / (maxSocKwh - resolveBatteryPhysics(64).minSocKwh)
+    });
+    expect(result.shavedSeries[0].shavedKw - result.shavedSeries[0].originalKw).toBeLessThanOrEqual(0.04 + 1e-8);
+  });
+
   it('uses sizing discharge efficiency consistently so safetyFactor=1 can fully eliminate a matching exceedance', () => {
     const beforeExcessKwh = 5.72;
     const efficiency = 0.84;

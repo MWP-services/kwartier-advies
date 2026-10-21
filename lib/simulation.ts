@@ -191,7 +191,7 @@ export function simulateSingleScenario(
     );
     soc = Math.min(batteryCapacityLimitKwh, soc + chargeInputKwh * chargeEff);
     // Show the actual post-battery grid load in overlays: charging increases grid load, discharge reduces it.
-    let postBatteryGridKw = interval.consumptionKw + actualChargeKw;
+    let postBatteryGridKw = interval.consumptionKw + chargeInputKwh / 0.25;
 
     if (interval.excessKw > 0) {
       exceedanceIntervalsBefore += 1;
